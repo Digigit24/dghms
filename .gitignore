@@ -5,12 +5,14 @@ __pycache__/
 # Virtual environment
 venv/
 env/
-
-# Environment variables
 .env
 
 # VS Code
 .vscode/
 
-# Misc
+# Logs
 *.log
+
+# OS files
+.DS_Store
+Thumbs.db
