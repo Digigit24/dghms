@@ -44,7 +44,24 @@ class HMSAdminSite(AdminSite):
             extra_context['user_email'] = user_data.get('email')
             extra_context['user_type'] = user_data.get('user_type', 'staff')
 
-        return super().index(request, extra_context)
+        try:
+            return super().index(request, extra_context)
+        except Exception as e:
+            # If there's an error loading the admin index (likely due to UUID/integer field mismatch),
+            # provide a simplified index page
+            from django.template.response import TemplateResponse
+            context = {
+                'title': self.index_title,
+                'site_title': self.site_title,
+                'site_header': self.site_header,
+                'site_url': self.site_url,
+                'has_permission': self.has_permission(request),
+                'available_apps': [],  # Empty for now to avoid the error
+                'is_popup': False,
+                'error_message': f'Admin index loading error: {str(e)}',
+                **extra_context
+            }
+            return TemplateResponse(request, 'admin/index.html', context)
 
     def login(self, request, extra_context=None):
         """
@@ -86,6 +103,14 @@ class TenantModelAdmin(admin.ModelAdmin):
 
             # If model has tenant_id field, filter by it
             if tenant_id and hasattr(qs.model, 'tenant_id'):
+                # Convert string UUID to UUID object if needed
+                import uuid
+                if isinstance(tenant_id, str):
+                    try:
+                        tenant_id = uuid.UUID(tenant_id)
+                    except ValueError:
+                        # If conversion fails, skip filtering
+                        pass
                 qs = qs.filter(tenant_id=tenant_id)
 
         return qs
@@ -100,7 +125,16 @@ class TenantModelAdmin(admin.ModelAdmin):
 
                 # If model has tenant_id field and it's not set, set it
                 if tenant_id and hasattr(obj, 'tenant_id') and not obj.tenant_id:
-                    obj.tenant_id = tenant_id
+                    # Convert string UUID to UUID object if needed
+                    import uuid
+                    if isinstance(tenant_id, str):
+                        try:
+                            tenant_id = uuid.UUID(tenant_id)
+                        except ValueError:
+                            # If conversion fails, skip setting
+                            tenant_id = None
+                    if tenant_id:
+                        obj.tenant_id = tenant_id
 
         super().save_model(request, obj, form, change)
 

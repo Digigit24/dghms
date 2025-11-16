@@ -167,3 +167,39 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
         set_current_tenant_id(request.tenant_id)
 
         return None
+
+
+class CustomAuthenticationMiddleware(MiddlewareMixin):
+    """
+    Custom authentication middleware that replaces Django's AuthenticationMiddleware
+    Uses session-based TenantUser instead of Django's User model
+    """
+    
+    def process_request(self, request):
+        """Set request.user based on session data instead of Django's auth system"""
+        from .auth_backends import TenantUser
+        from django.contrib.auth.models import AnonymousUser
+        from django.contrib.auth import SESSION_KEY
+        
+        # Clear any Django auth session keys that might cause conflicts
+        if hasattr(request, 'session'):
+            # Remove Django's auth session keys to prevent conflicts
+            if SESSION_KEY in request.session:
+                del request.session[SESSION_KEY]
+            if '_auth_user_backend' in request.session:
+                del request.session['_auth_user_backend']
+            if '_auth_user_hash' in request.session:
+                del request.session['_auth_user_hash']
+        
+        # Check if we have user data in session
+        if hasattr(request, 'session') and request.session.get('user_data'):
+            user_data = request.session.get('user_data')
+            request.user = TenantUser(user_data)
+            # Set _cached_user to prevent Django from trying to load user from database
+            request._cached_user = request.user
+        else:
+            # Create anonymous user
+            request.user = AnonymousUser()
+            request._cached_user = request.user
+        
+        return None

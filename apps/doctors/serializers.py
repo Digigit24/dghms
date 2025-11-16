@@ -1,11 +1,6 @@
 from rest_framework import serializers
-from django.contrib.auth import get_user_model
-from django.contrib.auth.models import Group
 from django.db import transaction
 from .models import DoctorProfile, Specialty, DoctorAvailability
-from apps.accounts.serializers import UserSerializer
-
-User = get_user_model()
 
 
 class SpecialtySerializer(serializers.ModelSerializer):
@@ -64,15 +59,13 @@ class DoctorAvailabilityCreateUpdateSerializer(serializers.ModelSerializer):
 
 class DoctorProfileListSerializer(serializers.ModelSerializer):
     """List view serializer for doctors - minimal fields"""
-    user = UserSerializer(read_only=True)
     specialties = SpecialtySerializer(many=True, read_only=True)
     is_license_valid = serializers.ReadOnlyField()
-    full_name = serializers.ReadOnlyField()
     
     class Meta:
         model = DoctorProfile
         fields = [
-            'id', 'user', 'full_name', 'medical_license_number',
+            'id', 'user_id', 'medical_license_number',
             'qualifications', 'specialties', 'years_of_experience',
             'consultation_fee', 'consultation_duration',
             'is_available_online', 'is_available_offline',
@@ -83,11 +76,9 @@ class DoctorProfileListSerializer(serializers.ModelSerializer):
 
 class DoctorProfileDetailSerializer(serializers.ModelSerializer):
     """Detail view serializer for doctors - all fields"""
-    user = UserSerializer(read_only=True)
     specialties = SpecialtySerializer(many=True, read_only=True)
     availability = DoctorAvailabilitySerializer(many=True, read_only=True)
     is_license_valid = serializers.ReadOnlyField()
-    full_name = serializers.ReadOnlyField()
     
     class Meta:
         model = DoctorProfile
@@ -96,7 +87,6 @@ class DoctorProfileDetailSerializer(serializers.ModelSerializer):
 
 class DoctorProfileCreateUpdateSerializer(serializers.ModelSerializer):
     """Create/Update serializer for doctors"""
-    user_id = serializers.IntegerField(write_only=True, required=True)
     specialty_ids = serializers.ListField(
         child=serializers.IntegerField(),
         write_only=True,
@@ -107,31 +97,27 @@ class DoctorProfileCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = DoctorProfile
         exclude = [
-            'user', 'average_rating', 'total_reviews',
+            'average_rating', 'total_reviews',
             'total_consultations', 'specialties', 'created_at', 'updated_at'
         ]
     
     def validate_user_id(self, value):
-        """Validate user exists and doesn't have doctor profile"""
+        """Validate user_id is a valid UUID"""
+        import uuid
         try:
-            user = User.objects.get(id=value)
+            # Check if it's a valid UUID
+            uuid.UUID(str(value))
             
-            # Check if creating new profile
+            # Check if creating new profile and user_id already has a doctor profile
             if self.instance is None:
-                if hasattr(user, 'doctor_profile'):
+                if DoctorProfile.objects.filter(user_id=value).exists():
                     raise serializers.ValidationError(
                         'User already has a doctor profile'
                     )
-                
-                # Check if user is in Doctor group
-                if not user.groups.filter(name='Doctor').exists():
-                    raise serializers.ValidationError(
-                        'User must be in Doctor group to create doctor profile'
-                    )
             
             return value
-        except User.DoesNotExist:
-            raise serializers.ValidationError('User not found')
+        except (ValueError, TypeError):
+            raise serializers.ValidationError('Invalid user ID format')
     
     def validate_license_expiry_date(self, value):
         """Ensure license expiry date is in the future or today"""
@@ -175,14 +161,9 @@ class DoctorProfileCreateUpdateSerializer(serializers.ModelSerializer):
     
     def create(self, validated_data):
         """Create doctor profile"""
-        user_id = validated_data.pop('user_id')
         specialty_ids = validated_data.pop('specialty_ids', [])
         
-        user = User.objects.get(id=user_id)
-        doctor = DoctorProfile.objects.create(
-            user=user,
-            **validated_data
-        )
+        doctor = DoctorProfile.objects.create(**validated_data)
         
         # Add specialties
         if specialty_ids:
@@ -194,7 +175,7 @@ class DoctorProfileCreateUpdateSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         """Update doctor profile"""
         specialty_ids = validated_data.pop('specialty_ids', None)
-        validated_data.pop('user_id', None)  # Don't allow user change
+        validated_data.pop('user_id', None)  # Don't allow user_id change
         
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
@@ -209,36 +190,16 @@ class DoctorProfileCreateUpdateSerializer(serializers.ModelSerializer):
 
 
 # =============================================================================
-# NEW: DOCTOR REGISTRATION SERIALIZER
+# DOCTOR REGISTRATION SERIALIZER (SuperAdmin Integration)
 # =============================================================================
 
 class DoctorRegistrationSerializer(serializers.Serializer):
     """
-    Serializer for doctor registration with user creation.
-    Creates User + DoctorProfile in one transaction.
+    Serializer for doctor registration using SuperAdmin user_id.
+    Creates DoctorProfile linked to SuperAdmin user.
     """
-    # User fields
-    email = serializers.EmailField(required=True)
-    username = serializers.CharField(max_length=150, required=True)
-    password = serializers.CharField(write_only=True, min_length=8, required=True)
-    password_confirm = serializers.CharField(write_only=True, required=True)
-    first_name = serializers.CharField(max_length=150, required=True)
-    last_name = serializers.CharField(max_length=150, required=True)
-    phone = serializers.CharField(max_length=15, required=True)
-    
-    # Optional user fields
-    date_of_birth = serializers.DateField(required=False, allow_null=True)
-    gender = serializers.ChoiceField(
-        choices=[('male', 'Male'), ('female', 'Female'), ('other', 'Other')],
-        required=False,
-        allow_null=True
-    )
-    address_line1 = serializers.CharField(max_length=200, required=False, allow_blank=True)
-    address_line2 = serializers.CharField(max_length=200, required=False, allow_blank=True)
-    city = serializers.CharField(max_length=100, required=False, allow_blank=True)
-    state = serializers.CharField(max_length=100, required=False, allow_blank=True)
-    country = serializers.CharField(max_length=100, default='India')
-    pincode = serializers.CharField(max_length=10, required=False, allow_blank=True)
+    # SuperAdmin user ID (required)
+    user_id = serializers.UUIDField(required=True)
     
     # Doctor Profile fields (REQUIRED)
     medical_license_number = serializers.CharField(max_length=64, required=True)
@@ -263,16 +224,10 @@ class DoctorRegistrationSerializer(serializers.Serializer):
     signature = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     languages_spoken = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     
-    def validate_email(self, value):
-        """Check if email already exists"""
-        if User.objects.filter(email=value).exists():
-            raise serializers.ValidationError('User with this email already exists')
-        return value
-    
-    def validate_username(self, value):
-        """Check if username already exists"""
-        if User.objects.filter(username=value).exists():
-            raise serializers.ValidationError('Username already exists')
+    def validate_user_id(self, value):
+        """Check if user_id already has a doctor profile"""
+        if DoctorProfile.objects.filter(user_id=value).exists():
+            raise serializers.ValidationError('User already has a doctor profile')
         return value
     
     def validate_medical_license_number(self, value):
@@ -283,12 +238,6 @@ class DoctorRegistrationSerializer(serializers.Serializer):
     
     def validate(self, attrs):
         """Cross-field validation"""
-        # Password confirmation
-        if attrs['password'] != attrs['password_confirm']:
-            raise serializers.ValidationError({
-                'password': 'Passwords do not match'
-            })
-        
         # License dates validation
         if attrs['license_expiry_date'] < attrs['license_issue_date']:
             raise serializers.ValidationError({
@@ -331,70 +280,12 @@ class DoctorRegistrationSerializer(serializers.Serializer):
         
         return attrs
     
-    @transaction.atomic
     def create(self, validated_data):
-        """Create user and doctor profile"""
-        # Extract user fields
-        user_data = {
-            'email': validated_data['email'],
-            'username': validated_data['username'],
-            'first_name': validated_data['first_name'],
-            'last_name': validated_data['last_name'],
-            'phone': validated_data['phone'],
-            'date_of_birth': validated_data.get('date_of_birth'),
-            'gender': validated_data.get('gender'),
-            'address_line1': validated_data.get('address_line1', ''),
-            'address_line2': validated_data.get('address_line2', ''),
-            'city': validated_data.get('city', ''),
-            'state': validated_data.get('state', ''),
-            'country': validated_data.get('country', 'India'),
-            'pincode': validated_data.get('pincode', ''),
-        }
-        
-        password = validated_data['password']
-        
-        # Create user
-        user = User.objects.create_user(
-            password=password,
-            **user_data
-        )
-        
-        # Add user to Doctor group
-        try:
-            doctor_group = Group.objects.get(name='Doctor')
-            user.groups.add(doctor_group)
-        except Group.DoesNotExist:
-            # Rollback transaction
-            raise serializers.ValidationError(
-                'Doctor group does not exist. Please create it in Django Admin first.'
-            )
-        
-        # Extract doctor profile fields
+        """Create doctor profile"""
         specialty_ids = validated_data.pop('specialty_ids', [])
-        validated_data.pop('password')
-        validated_data.pop('password_confirm')
-        
-        # Remove user fields from validated_data
-        for field in user_data.keys():
-            validated_data.pop(field, None)
         
         # Create doctor profile
-        doctor = DoctorProfile.objects.create(
-            user=user,
-            medical_license_number=validated_data['medical_license_number'],
-            license_issuing_authority=validated_data['license_issuing_authority'],
-            license_issue_date=validated_data['license_issue_date'],
-            license_expiry_date=validated_data['license_expiry_date'],
-            qualifications=validated_data['qualifications'],
-            years_of_experience=validated_data.get('years_of_experience', 0),
-            consultation_fee=validated_data.get('consultation_fee', 0),
-            consultation_duration=validated_data.get('consultation_duration', 30),
-            is_available_online=validated_data.get('is_available_online', True),
-            is_available_offline=validated_data.get('is_available_offline', True),
-            status=validated_data.get('status', 'active'),
-            signature=validated_data.get('signature'),
-            languages_spoken=validated_data.get('languages_spoken')
-        )
+        doctor = DoctorProfile.objects.create(**validated_data)
         
         # Add specialties
         if specialty_ids:

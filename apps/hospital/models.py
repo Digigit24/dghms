@@ -42,11 +42,12 @@ class Hospital(models.Model):
     country = models.CharField(max_length=100, default='India')
     pincode = models.CharField(max_length=10)
     
-    # Media
-    logo = models.ImageField(
-        upload_to='hospital/',
+    # Media - temporarily disabled ImageField
+    logo = models.CharField(
+        max_length=500,
         blank=True,
-        null=True
+        null=True,
+        help_text="Logo URL (ImageField disabled temporarily)"
     )
     
     # Settings

@@ -14,8 +14,21 @@ class TenantUser:
     without requiring a database User model
     """
     def __init__(self, user_data):
-        self.id = user_data.get('user_id')
-        self.pk = user_data.get('user_id')
+        # Store original UUID for internal use
+        self._original_id = user_data.get('user_id')
+        
+        # Convert UUID to a hash-based integer for Django compatibility
+        # This ensures Django's admin system can work with the ID
+        import hashlib
+        if self._original_id:
+            # Create a consistent integer from UUID string
+            hash_obj = hashlib.md5(str(self._original_id).encode())
+            self.id = int(hash_obj.hexdigest()[:8], 16)  # Use first 8 hex chars as int
+            self.pk = self.id
+        else:
+            self.id = None
+            self.pk = None
+            
         self.username = user_data.get('email', '')
         self.email = user_data.get('email', '')
         self.first_name = user_data.get('first_name', '')
@@ -46,6 +59,25 @@ class TenantUser:
                 
                 def value_to_string(self, obj):
                     return str(getattr(obj, self.name, ''))
+                
+                def to_python(self, value):
+                    """Convert value to appropriate type for this field"""
+                    # Return integer for Django compatibility
+                    if value is None:
+                        return None
+                    try:
+                        return int(value)
+                    except (ValueError, TypeError):
+                        return None
+                
+                def get_prep_value(self, value):
+                    """Prepare value for database operations"""
+                    if value is None:
+                        return None
+                    try:
+                        return int(value)
+                    except (ValueError, TypeError):
+                        return None
                 
                 def __str__(self):
                     return self.name
@@ -183,13 +215,19 @@ class SuperAdminAuthBackend(BaseBackend):
                         'email': user_data.get('email'),
                         'first_name': user_data.get('first_name', ''),
                         'last_name': user_data.get('last_name', ''),
-                        'tenant_id': user_data.get('tenant'),
-                        'tenant_slug': user_data.get('tenant_name'),
+                        'tenant_id': user_data.get('tenant'),  # This is the UUID
+                        'tenant_slug': user_data.get('tenant_name'),  # This is the name
                         'is_super_admin': user_data.get('is_super_admin', False),
                         'permissions': payload.get('permissions', {}),
                         'enabled_modules': payload.get('enabled_modules', []),
                         'user_type': payload.get('user_type', 'staff'),
-                        'is_patient': payload.get('is_patient', False)
+                        'is_patient': payload.get('is_patient', False),
+                        'phone': user_data.get('phone'),
+                        'timezone': user_data.get('timezone'),
+                        'is_active': user_data.get('is_active', True),
+                        'date_joined': user_data.get('date_joined'),
+                        'profile_picture': user_data.get('profile_picture'),
+                        'roles': user_data.get('roles', [])
                     }
 
                     # Create TenantUser instance
@@ -201,6 +239,11 @@ class SuperAdminAuthBackend(BaseBackend):
                         request.session['tenant_id'] = user_data.get('tenant')
                         request.session['tenant_slug'] = user_data.get('tenant_name')
                         request.session['user_data'] = user_payload
+                        
+                        # Clear any existing Django auth session keys
+                        from django.contrib.auth import SESSION_KEY
+                        if SESSION_KEY in request.session:
+                            del request.session[SESSION_KEY]
 
                     logger.info(f"Successfully authenticated user {username} for tenant {user_data.get('tenant_name')}")
                     return user
@@ -230,8 +273,11 @@ class SuperAdminAuthBackend(BaseBackend):
 
             if request and hasattr(request, 'session'):
                 user_data = request.session.get('user_data')
-                if user_data and str(user_data.get('user_id')) == str(user_id):
-                    return TenantUser(user_data)
+                if user_data:
+                    # Create TenantUser to get the converted ID
+                    temp_user = TenantUser(user_data)
+                    if temp_user.id == int(user_id):
+                        return temp_user
         except Exception as e:
             logger.debug(f"Could not reconstruct user from session: {e}")
 
@@ -293,8 +339,11 @@ class JWTAuthBackend(BaseBackend):
 
             if request and hasattr(request, 'session'):
                 user_data = request.session.get('user_data')
-                if user_data and str(user_data.get('user_id')) == str(user_id):
-                    return TenantUser(user_data)
+                if user_data:
+                    # Create TenantUser to get the converted ID
+                    temp_user = TenantUser(user_data)
+                    if temp_user.id == int(user_id):
+                        return temp_user
         except Exception as e:
             logger.debug(f"Could not reconstruct user from session: {e}")
 

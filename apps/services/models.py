@@ -18,10 +18,11 @@ class ServiceCategory(models.Model):
     description = models.TextField(blank=True, null=True)
     type = models.CharField(max_length=20, choices=TYPE_CHOICES)
     is_active = models.BooleanField(default=True)
-    icon = models.ImageField(
-        upload_to='service_categories/', 
-        blank=True, 
-        null=True
+    icon = models.CharField(
+        max_length=500,
+        blank=True,
+        null=True,
+        help_text="Icon URL (ImageField disabled temporarily)"
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -65,10 +66,11 @@ class BaseService(models.Model):
     code = models.CharField(max_length=50, unique=True)
     is_active = models.BooleanField(default=True)
     is_featured = models.BooleanField(default=False)
-    image = models.ImageField(
-        upload_to='services/', 
-        blank=True, 
-        null=True
+    image = models.CharField(
+        max_length=500,
+        blank=True,
+        null=True,
+        help_text="Image URL (ImageField disabled temporarily)"
     )
     duration_minutes = models.PositiveIntegerField(default=30)
 

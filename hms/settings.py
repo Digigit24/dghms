@@ -75,7 +75,7 @@ INSTALLED_APPS = [
     'common',
 
     # Local apps
-    # Note: accounts app removed - using SuperAdmin for authentication
+    # Note: accounts app removed - using SuperAdmin for authentication only
     # 'apps.accounts',
     'apps.doctors',
     'apps.patients',
@@ -91,13 +91,14 @@ INSTALLED_APPS = [
 # --- Middleware ---
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',
+    # 'whitenoise.middleware.WhiteNoiseMiddleware',  # Temporarily disabled
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'common.middleware.JWTAuthenticationMiddleware',  # JWT authentication for API requests
     'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.auth.middleware.AuthenticationMiddleware',  # Required by Django admin
+    'common.middleware.CustomAuthenticationMiddleware',  # Override with our custom auth
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -271,7 +272,7 @@ USE_TZ = True
 # --- Static / Media ---
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+# STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'  # Temporarily disabled
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
