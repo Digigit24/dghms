@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
+from django.views.generic import RedirectView
 
 # ✅ Import drf-spectacular views
 from drf_spectacular.views import (
@@ -11,10 +12,17 @@ from drf_spectacular.views import (
 )
 
 urlpatterns = [
+    # Root redirect to admin
+    path('', RedirectView.as_view(url='/admin/', permanent=False), name='index'),
+
+    # Admin panel
     path('admin/', admin.site.urls),
-    
+
+    # Authentication endpoints (SuperAdmin integration)
+    path('auth/', include('common.urls')),
+
     # API endpoints
-    path('api/auth/', include('apps.accounts.urls')),
+    path('api/auth/', include('apps.accounts.urls')),  # Keep for backward compatibility
     path('api/doctors/', include('apps.doctors.urls')),
     path('api/patients/', include('apps.patients.urls')),
     path('api/hospital/', include('apps.hospital.urls')),

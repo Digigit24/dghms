@@ -1,8 +1,7 @@
 import os
 from pathlib import Path
 from decouple import config, Csv
-import os
-from pathlib import Path
+import dj_database_url
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -72,6 +71,9 @@ INSTALLED_APPS = [
     'drf_spectacular',
     'import_export',
 
+    # Common - MUST be before local apps for proper auth setup
+    'common',
+
     # Local
     'apps.accounts',
     'apps.doctors',
@@ -92,6 +94,7 @@ MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
+    'common.middleware.JWTAuthenticationMiddleware',  # JWT authentication for API requests
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
@@ -118,22 +121,46 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'hms.wsgi.application'
 
-# --- Database (use discrete env vars) ---
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME':     config('DB_NAME'),
-        'USER':     config('DB_USER'),
-        'PASSWORD': config('DB_PASSWORD'),
-        'HOST':     config('DB_HOST', default='localhost'),
-        'PORT':     config('DB_PORT', default='5432'),
-        'CONN_MAX_AGE': 600,
-        'OPTIONS': {},
+# --- Database ---
+# Support both DATABASE_URL and discrete env vars for backward compatibility
+DATABASE_URL = config('DATABASE_URL', default=None)
+
+if DATABASE_URL:
+    # Use DATABASE_URL if provided
+    DATABASES = {
+        'default': dj_database_url.config(
+            default=DATABASE_URL,
+            conn_max_age=600,
+            conn_health_checks=True,
+        )
     }
-}
+else:
+    # Fall back to discrete env vars
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME':     config('DB_NAME'),
+            'USER':     config('DB_USER'),
+            'PASSWORD': config('DB_PASSWORD'),
+            'HOST':     config('DB_HOST', default='localhost'),
+            'PORT':     config('DB_PORT', default='5432'),
+            'CONN_MAX_AGE': 600,
+            'OPTIONS': {},
+        }
+    }
 
 # --- Auth / Passwords ---
+# NOTE: AUTH_USER_MODEL will be deprecated once migration to SuperAdmin is complete
+# For now, keeping it for backward compatibility with existing data
 AUTH_USER_MODEL = 'accounts.User'
+
+# Authentication backends for SuperAdmin integration
+AUTHENTICATION_BACKENDS = [
+    'common.auth_backends.SuperAdminAuthBackend',
+    'common.auth_backends.JWTAuthBackend',
+    'django.contrib.auth.backends.ModelBackend',  # Keep for existing local users during migration
+]
+
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
     {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator', 'OPTIONS': {'min_length': 8}},
@@ -141,12 +168,22 @@ AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 
-CORS_ALLOW_CREDENTIALS = True
+# --- JWT Settings (must match SuperAdmin) ---
+JWT_SECRET_KEY = config('JWT_SECRET_KEY', default='your-jwt-secret-key-change-in-production')
+JWT_ALGORITHM = config('JWT_ALGORITHM', default='HS256')
+
+# --- SuperAdmin Integration ---
+SUPERADMIN_URL = config('SUPERADMIN_URL', default='https://admin.celiyo.com')
+
+# --- Session Settings (for admin authentication) ---
+SESSION_COOKIE_AGE = 3600 * 8  # 8 hours
+SESSION_SAVE_EVERY_REQUEST = True
+SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 
 # --- DRF ---
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.TokenAuthentication',
+        'rest_framework.authentication.TokenAuthentication',  # Keep for backward compatibility
         'rest_framework.authentication.SessionAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
@@ -166,13 +203,63 @@ REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 }
 
-# --- CORS ---
+# --- drf-spectacular Settings ---
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'DigiHMS API',
+    'DESCRIPTION': 'Hospital Management System API Documentation',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'SCHEMA_PATH_PREFIX': '/api/',
+    'COMPONENT_SPLIT_REQUEST': True,
+}
+
+# --- CORS Settings ---
+CORS_ALLOW_ALL_ORIGINS = config('CORS_ALLOW_ALL_ORIGINS', default=False, cast=bool)
 CORS_ALLOWED_ORIGINS = config(
     'CORS_ALLOWED_ORIGINS',
-    default='http://localhost:3000,http://127.0.0.1:3000',
+    default='http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000',
     cast=Csv()
 )
+
+# Allow credentials (cookies, authorization headers, etc.)
 CORS_ALLOW_CREDENTIALS = True
+
+# Allow all headers (including custom tenant headers)
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+    # Custom tenant headers
+    'x-tenant-id',
+    'x-tenant-slug',
+    'tenanttoken',
+]
+
+# Allow common HTTP methods
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+
+# Expose headers to the browser
+CORS_EXPOSE_HEADERS = [
+    'content-type',
+    'x-tenant-id',
+    'x-tenant-slug',
+]
+
+# Cache preflight requests for 1 hour
+CORS_PREFLIGHT_MAX_AGE = 3600
 
 # --- I18N / TZ ---
 LANGUAGE_CODE = 'en-us'
