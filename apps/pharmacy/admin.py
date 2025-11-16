@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.utils.html import format_html
+from common.admin_site import TenantModelAdmin
 from .models import (
     ProductCategory,
     PharmacyProduct,
@@ -11,14 +12,14 @@ from .models import (
 
 
 @admin.register(ProductCategory)
-class ProductCategoryAdmin(admin.ModelAdmin):
+class ProductCategoryAdmin(TenantModelAdmin):
     """Admin for Product Categories"""
     list_display = ['name', 'type', 'is_active', 'created_at']
     list_filter = ['type', 'is_active', 'created_at']
     search_fields = ['name', 'description']
-    readonly_fields = ['created_at', 'updated_at']
+    readonly_fields = ['created_at', 'updated_at', 'tenant_id']
     ordering = ['name']
-    
+
     fieldsets = (
         ('Basic Information', {
             'fields': ('name', 'type', 'description')
@@ -27,14 +28,14 @@ class ProductCategoryAdmin(admin.ModelAdmin):
             'fields': ('is_active',)
         }),
         ('Timestamps', {
-            'fields': ('created_at', 'updated_at'),
+            'fields': ('tenant_id', 'created_at', 'updated_at'),
             'classes': ('collapse',)
         }),
     )
 
 
 @admin.register(PharmacyProduct)
-class PharmacyProductAdmin(admin.ModelAdmin):
+class PharmacyProductAdmin(TenantModelAdmin):
     """Admin for Pharmacy Products"""
     list_display = [
         'product_name',
@@ -49,9 +50,9 @@ class PharmacyProductAdmin(admin.ModelAdmin):
     ]
     list_filter = ['category', 'is_active', 'created_at']
     search_fields = ['product_name', 'company', 'batch_no']
-    readonly_fields = ['created_at', 'updated_at', 'is_in_stock', 'low_stock_warning']
+    readonly_fields = ['created_at', 'updated_at', 'is_in_stock', 'low_stock_warning', 'tenant_id']
     ordering = ['-created_at']
-    
+
     fieldsets = (
         ('Product Information', {
             'fields': ('product_name', 'category', 'company', 'batch_no')
@@ -66,7 +67,7 @@ class PharmacyProductAdmin(admin.ModelAdmin):
             'fields': ('is_active', 'is_in_stock', 'low_stock_warning')
         }),
         ('Timestamps', {
-            'fields': ('created_at', 'updated_at'),
+            'fields': ('tenant_id', 'created_at', 'updated_at'),
             'classes': ('collapse',)
         }),
     )
@@ -98,19 +99,19 @@ class CartItemInline(admin.TabularInline):
 
 
 @admin.register(Cart)
-class CartAdmin(admin.ModelAdmin):
+class CartAdmin(TenantModelAdmin):
     """Admin for Shopping Carts"""
-    list_display = ['user', 'total_items', 'total_amount', 'created_at', 'updated_at']
-    search_fields = ['user__username', 'user__email']
-    readonly_fields = ['created_at', 'updated_at', 'total_items', 'total_amount']
+    list_display = ['user_id', 'total_items', 'total_amount', 'created_at', 'updated_at']
+    search_fields = []
+    readonly_fields = ['created_at', 'updated_at', 'total_items', 'total_amount', 'tenant_id']
     inlines = [CartItemInline]
-    
+
     fieldsets = (
         ('Cart Information', {
-            'fields': ('user', 'total_items', 'total_amount')
+            'fields': ('user_id', 'total_items', 'total_amount')
         }),
         ('Timestamps', {
-            'fields': ('created_at', 'updated_at'),
+            'fields': ('tenant_id', 'created_at', 'updated_at'),
             'classes': ('collapse',)
         }),
     )
@@ -132,25 +133,25 @@ class PharmacyOrderItemInline(admin.TabularInline):
 
 
 @admin.register(PharmacyOrder)
-class PharmacyOrderAdmin(admin.ModelAdmin):
+class PharmacyOrderAdmin(TenantModelAdmin):
     """Admin for Pharmacy Orders"""
     list_display = [
         'id',
-        'user',
+        'user_id',
         'total_amount',
         'status',
         'payment_status',
         'created_at'
     ]
     list_filter = ['status', 'payment_status', 'created_at']
-    search_fields = ['user__username', 'user__email', 'id']
-    readonly_fields = ['created_at', 'updated_at', 'total_amount']
+    search_fields = ['id']
+    readonly_fields = ['created_at', 'updated_at', 'total_amount', 'tenant_id']
     inlines = [PharmacyOrderItemInline]
     ordering = ['-created_at']
-    
+
     fieldsets = (
         ('Order Information', {
-            'fields': ('user', 'total_amount')
+            'fields': ('user_id', 'total_amount')
         }),
         ('Status', {
             'fields': ('status', 'payment_status')
@@ -159,7 +160,7 @@ class PharmacyOrderAdmin(admin.ModelAdmin):
             'fields': ('shipping_address', 'billing_address')
         }),
         ('Timestamps', {
-            'fields': ('created_at', 'updated_at'),
+            'fields': ('tenant_id', 'created_at', 'updated_at'),
             'classes': ('collapse',)
         }),
     )

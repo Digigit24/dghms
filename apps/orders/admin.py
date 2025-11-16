@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.utils.html import format_html
+from common.admin_site import TenantModelAdmin
 from .models import Order, OrderItem, OrderFee, FeeType
 
 
@@ -32,92 +33,110 @@ class OrderItemInline(admin.TabularInline):
 
 
 @admin.register(FeeType)
-class FeeTypeAdmin(admin.ModelAdmin):
+class FeeTypeAdmin(TenantModelAdmin):
     """Admin configuration for Fee Types"""
     list_display = [
-        'name', 
-        'code', 
-        'category', 
-        'is_percentage', 
+        'name',
+        'code',
+        'category',
+        'is_percentage',
         'value'
     ]
-    
+
     list_filter = [
-        'category', 
+        'category',
         'is_percentage'
     ]
-    
+
     search_fields = [
-        'name', 
-        'code', 
+        'name',
+        'code',
         'description'
     ]
 
+    readonly_fields = ['tenant_id']
+
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('name', 'code', 'category', 'description')
+        }),
+        ('Fee Details', {
+            'fields': ('is_percentage', 'value')
+        }),
+        ('Tenant Information', {
+            'fields': ('tenant_id',),
+            'classes': ('collapse',)
+        }),
+    )
+
 
 @admin.register(Order)
-class OrderAdmin(admin.ModelAdmin):
+class OrderAdmin(TenantModelAdmin):
     """Comprehensive Order Management in Admin"""
     list_display = [
-        'order_number', 
-        'patient_display', 
-        'services_type', 
-        'status_badge', 
-        'subtotal', 
-        'total_fees', 
-        'total_amount', 
-        'is_paid', 
-        'payment_method', 
+        'order_number',
+        'patient_display',
+        'services_type',
+        'status_badge',
+        'subtotal',
+        'total_fees',
+        'total_amount',
+        'is_paid',
+        'payment_method',
         'created_at'
     ]
-    
+
     list_filter = [
-        'status', 
-        'services_type', 
-        'is_paid', 
-        'payment_method', 
+        'status',
+        'services_type',
+        'is_paid',
+        'payment_method',
         'created_at'
     ]
-    
+
     search_fields = [
-        'order_number', 
-        'patient__first_name', 
-        'patient__last_name', 
+        'order_number',
+        'patient__first_name',
+        'patient__last_name',
         'patient__mobile_primary'
     ]
-    
+
     inlines = [OrderItemInline, OrderFeeInline]
-    
+
     readonly_fields = [
-        'order_number', 
-        'subtotal', 
-        'total_fees', 
-        'total_amount', 
-        'created_at', 
-        'updated_at'
+        'order_number',
+        'subtotal',
+        'total_fees',
+        'total_amount',
+        'created_at',
+        'updated_at',
+        'tenant_id',
     ]
-    
+
     fieldsets = (
         ('Order Details', {
             'fields': (
-                'order_number', 
-                'patient', 
-                'services_type', 
-                'status', 
+                'order_number',
+                'patient',
+                'services_type',
+                'status',
                 'notes'
             )
         }),
         ('Financial Information', {
             'fields': (
-                'subtotal', 
-                'total_fees', 
-                'total_amount', 
-                'payment_method', 
+                'subtotal',
+                'total_fees',
+                'total_amount',
+                'payment_method',
                 'is_paid'
             )
         }),
         ('Timestamps', {
             'fields': (
-                'created_at', 
+                'user_id',
+                'tenant_id',
+                'created_at',
                 'updated_at'
             )
         }),
@@ -150,9 +169,9 @@ class OrderAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         """Optimize queryset with select_related"""
         return super().get_queryset(request).select_related(
-            'patient', 'user'
+            'patient'
         ).prefetch_related(
-            'order_items', 
+            'order_items',
             'order_fee_details'
         )
     
@@ -165,32 +184,43 @@ class OrderAdmin(admin.ModelAdmin):
 
 
 @admin.register(OrderItem)
-class OrderItemAdmin(admin.ModelAdmin):
+class OrderItemAdmin(TenantModelAdmin):
     """Admin configuration for Order Items"""
     list_display = [
-        'order', 
-        'content_type', 
-        'service_display', 
-        'quantity', 
+        'order',
+        'content_type',
+        'service_display',
+        'quantity',
         'total_price_display'
     ]
-    
+
     list_filter = [
-        'order__status', 
-        'content_type', 
+        'order__status',
+        'content_type',
         'created_at'
     ]
-    
+
     search_fields = [
-        'order__order_number', 
-        'order__patient__first_name', 
+        'order__order_number',
+        'order__patient__first_name',
         'order__patient__last_name'
     ]
-    
+
     readonly_fields = [
-        'created_at', 
-        'updated_at'
+        'created_at',
+        'updated_at',
+        'tenant_id',
     ]
+
+    fieldsets = (
+        ('Order Item Details', {
+            'fields': ('order', 'content_type', 'object_id', 'quantity')
+        }),
+        ('Timestamps', {
+            'fields': ('tenant_id', 'created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
     
     def service_display(self, obj):
         """Display service name dynamically"""

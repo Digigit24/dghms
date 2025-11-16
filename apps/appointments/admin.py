@@ -1,19 +1,31 @@
 from django.contrib import admin
 from django.utils.html import format_html
+from common.admin_site import TenantModelAdmin
 from .models import Appointment, AppointmentType
 
 @admin.register(AppointmentType)
-class AppointmentTypeAdmin(admin.ModelAdmin):
+class AppointmentTypeAdmin(TenantModelAdmin):
     """Admin configuration for Appointment Types"""
     list_display = [
-        'name', 
-        'description', 
-        'duration_default', 
+        'name',
+        'description',
+        'duration_default',
         'base_consultation_fee'
     ]
-    
+
     search_fields = ['name', 'description']
     list_filter = ['duration_default']
+    readonly_fields = ['tenant_id']
+
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('name', 'description', 'duration_default', 'base_consultation_fee')
+        }),
+        ('Tenant Information', {
+            'fields': ('tenant_id',),
+            'classes': ('collapse',)
+        }),
+    )
 
 class FollowUpAppointmentInline(admin.TabularInline):
     """Inline admin for Follow-up Appointments"""
@@ -32,78 +44,79 @@ class FollowUpAppointmentInline(admin.TabularInline):
         return qs.select_related('patient', 'doctor', 'appointment_type')
 
 @admin.register(Appointment)
-class AppointmentAdmin(admin.ModelAdmin):
+class AppointmentAdmin(TenantModelAdmin):
     """Comprehensive Appointment Management in Admin"""
     list_display = [
-        'appointment_id', 
-        'patient_display', 
-        'doctor_display', 
-        'appointment_date', 
-        'appointment_time', 
-        'status_badge', 
+        'appointment_id',
+        'patient_display',
+        'doctor_display',
+        'appointment_date',
+        'appointment_time',
+        'status_badge',
         'priority',
         'consultation_fee'
     ]
-    
+
     list_filter = [
-        'status', 
-        'priority', 
-        'appointment_date', 
+        'status',
+        'priority',
+        'appointment_date',
         'is_follow_up',
         'doctor',  # Changed from doctor__user__username
     ]
-    
+
     search_fields = [
-        'appointment_id', 
-        'patient__first_name', 
-        'patient__last_name', 
-        'doctor__user__first_name', 
+        'appointment_id',
+        'patient__first_name',
+        'patient__last_name',
+        'doctor__user__first_name',
         'doctor__user__last_name',
         'chief_complaint'
     ]
-    
+
     inlines = [FollowUpAppointmentInline]
-    
+
     readonly_fields = [
-        'appointment_id', 
-        'checked_in_at', 
-        'actual_start_time', 
-        'actual_end_time', 
+        'appointment_id',
+        'checked_in_at',
+        'actual_start_time',
+        'actual_end_time',
         'waiting_time_minutes',
-        'created_at', 
+        'created_at',
         'updated_at',
         'cancelled_at',
-        'approved_at'
+        'approved_at',
+        'tenant_id',
     ]
-    
+
     # Add autocomplete for foreign keys to prevent loading all records
     autocomplete_fields = ['patient', 'doctor', 'original_appointment']
-    
+
     fieldsets = (
         ('Appointment Details', {
             'fields': (
-                'appointment_id', 
-                'patient', 
-                'doctor', 
+                'appointment_id',
+                'patient',
+                'doctor',
                 'appointment_type',
-                'appointment_date', 
-                'appointment_time', 
+                'appointment_date',
+                'appointment_time',
                 'end_time',
                 'duration_minutes'
             )
         }),
         ('Medical Information', {
             'fields': (
-                'chief_complaint', 
-                'symptoms', 
+                'chief_complaint',
+                'symptoms',
                 'notes'
             )
         }),
         ('Status & Priority', {
             'fields': (
-                'status', 
+                'status',
                 'priority',
-                'is_follow_up', 
+                'is_follow_up',
                 'original_appointment'
             )
         }),
@@ -121,7 +134,11 @@ class AppointmentAdmin(admin.ModelAdmin):
                 'cancelled_at',
                 'approved_at',
                 'created_at',
-                'updated_at'
+                'updated_at',
+                'created_by_user_id',
+                'cancelled_by_id',
+                'approved_by_id',
+                'tenant_id',
             ),
             'classes': ('collapse',)
         }),
@@ -166,12 +183,9 @@ class AppointmentAdmin(admin.ModelAdmin):
         qs = super().get_queryset(request)
         # Use select_related for foreign keys to reduce queries
         return qs.select_related(
-            'patient', 
+            'patient',
             'doctor__user',  # Include user relation
-            'appointment_type',
-            'created_by', 
-            'cancelled_by', 
-            'approved_by'
+            'appointment_type'
         )
     
     # IMPORTANT: Override formfield_for_foreignkey to prevent cursor issues

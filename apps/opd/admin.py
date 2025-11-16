@@ -1,6 +1,7 @@
 # opd/admin.py
 from django.contrib import admin
 from django.utils.html import format_html
+from common.admin_site import TenantModelAdmin
 from .models import (
     Visit, OPDBill, ProcedureMaster, ProcedurePackage,
     ProcedureBill, ProcedureBillItem, ClinicalNote,
@@ -9,9 +10,9 @@ from .models import (
 
 
 @admin.register(Visit)
-class VisitAdmin(admin.ModelAdmin):
+class VisitAdmin(TenantModelAdmin):
     """Admin interface for Visit model."""
-    
+
     list_display = [
         'visit_number',
         'patient',
@@ -42,9 +43,10 @@ class VisitAdmin(admin.ModelAdmin):
         'visit_date',
         'created_at',
         'updated_at',
+        'tenant_id',
     ]
     autocomplete_fields = ['patient', 'doctor', 'appointment', 'referred_by']
-    
+
     fieldsets = (
         ('Visit Information', {
             'fields': (
@@ -81,7 +83,8 @@ class VisitAdmin(admin.ModelAdmin):
         }),
         ('Audit', {
             'fields': (
-                'created_by',
+                'created_by_user_id',
+                'tenant_id',
                 'created_at',
                 'updated_at',
             )
@@ -104,9 +107,9 @@ class VisitAdmin(admin.ModelAdmin):
 
 
 @admin.register(OPDBill)
-class OPDBillAdmin(admin.ModelAdmin):
+class OPDBillAdmin(TenantModelAdmin):
     """Admin interface for OPDBill model."""
-    
+
     list_display = [
         'bill_number',
         'visit',
@@ -137,9 +140,10 @@ class OPDBillAdmin(admin.ModelAdmin):
         'payment_status',
         'created_at',
         'updated_at',
+        'tenant_id',
     ]
     autocomplete_fields = ['visit', 'doctor']
-    
+
     fieldsets = (
         ('Bill Information', {
             'fields': (
@@ -181,7 +185,8 @@ class OPDBillAdmin(admin.ModelAdmin):
         }),
         ('Audit', {
             'fields': (
-                'billed_by',
+                'billed_by_id',
+                'tenant_id',
                 'created_at',
                 'updated_at',
             )
@@ -204,9 +209,9 @@ class OPDBillAdmin(admin.ModelAdmin):
 
 
 @admin.register(ProcedureMaster)
-class ProcedureMasterAdmin(admin.ModelAdmin):
+class ProcedureMasterAdmin(TenantModelAdmin):
     """Admin interface for ProcedureMaster model."""
-    
+
     list_display = [
         'code',
         'name',
@@ -227,8 +232,9 @@ class ProcedureMasterAdmin(admin.ModelAdmin):
     readonly_fields = [
         'created_at',
         'updated_at',
+        'tenant_id',
     ]
-    
+
     fieldsets = (
         ('Basic Information', {
             'fields': (
@@ -250,6 +256,7 @@ class ProcedureMasterAdmin(admin.ModelAdmin):
         }),
         ('Timestamps', {
             'fields': (
+                'tenant_id',
                 'created_at',
                 'updated_at',
             )
@@ -267,9 +274,9 @@ class ProcedureMasterAdmin(admin.ModelAdmin):
 
 
 @admin.register(ProcedurePackage)
-class ProcedurePackageAdmin(admin.ModelAdmin):
+class ProcedurePackageAdmin(TenantModelAdmin):
     """Admin interface for ProcedurePackage model."""
-    
+
     list_display = [
         'code',
         'name',
@@ -289,9 +296,10 @@ class ProcedurePackageAdmin(admin.ModelAdmin):
     readonly_fields = [
         'created_at',
         'updated_at',
+        'tenant_id',
     ]
     filter_horizontal = ['procedures']
-    
+
     fieldsets = (
         ('Basic Information', {
             'fields': (
@@ -317,6 +325,7 @@ class ProcedurePackageAdmin(admin.ModelAdmin):
         }),
         ('Timestamps', {
             'fields': (
+                'tenant_id',
                 'created_at',
                 'updated_at',
             )
@@ -361,9 +370,9 @@ class ProcedureBillItemInline(admin.TabularInline):
 
 
 @admin.register(ProcedureBill)
-class ProcedureBillAdmin(admin.ModelAdmin):
+class ProcedureBillAdmin(TenantModelAdmin):
     """Admin interface for ProcedureBill model."""
-    
+
     list_display = [
         'bill_number',
         'visit',
@@ -394,10 +403,11 @@ class ProcedureBillAdmin(admin.ModelAdmin):
         'payment_status',
         'created_at',
         'updated_at',
+        'tenant_id',
     ]
     autocomplete_fields = ['visit', 'doctor']
     inlines = [ProcedureBillItemInline]
-    
+
     fieldsets = (
         ('Bill Information', {
             'fields': (
@@ -432,7 +442,8 @@ class ProcedureBillAdmin(admin.ModelAdmin):
         }),
         ('Audit', {
             'fields': (
-                'billed_by',
+                'billed_by_id',
+                'tenant_id',
                 'created_at',
                 'updated_at',
             )
@@ -455,9 +466,9 @@ class ProcedureBillAdmin(admin.ModelAdmin):
 
 
 @admin.register(ClinicalNote)
-class ClinicalNoteAdmin(admin.ModelAdmin):
+class ClinicalNoteAdmin(TenantModelAdmin):
     """Admin interface for ClinicalNote model."""
-    
+
     list_display = [
         'visit',
         'note_date',
@@ -477,9 +488,10 @@ class ClinicalNoteAdmin(admin.ModelAdmin):
         'note_date',
         'created_at',
         'updated_at',
+        'tenant_id',
     ]
     autocomplete_fields = ['visit', 'referred_doctor']
-    
+
     fieldsets = (
         ('Visit Information', {
             'fields': (
@@ -517,7 +529,8 @@ class ClinicalNoteAdmin(admin.ModelAdmin):
         }),
         ('Audit', {
             'fields': (
-                'created_by',
+                'created_by_user_id',
+                'tenant_id',
                 'created_at',
                 'updated_at',
             )
@@ -533,9 +546,9 @@ class ClinicalNoteAdmin(admin.ModelAdmin):
 
 
 @admin.register(VisitFinding)
-class VisitFindingAdmin(admin.ModelAdmin):
+class VisitFindingAdmin(TenantModelAdmin):
     """Admin interface for VisitFinding model."""
-    
+
     list_display = [
         'visit',
         'finding_date',
@@ -558,9 +571,10 @@ class VisitFindingAdmin(admin.ModelAdmin):
         'finding_date',
         'created_at',
         'updated_at',
+        'tenant_id',
     ]
     autocomplete_fields = ['visit']
-    
+
     fieldsets = (
         ('Visit Information', {
             'fields': (
@@ -598,7 +612,8 @@ class VisitFindingAdmin(admin.ModelAdmin):
         }),
         ('Audit', {
             'fields': (
-                'recorded_by',
+                'recorded_by_user_id',
+                'tenant_id',
                 'created_at',
                 'updated_at',
             )
@@ -631,16 +646,15 @@ class VisitFindingAdmin(admin.ModelAdmin):
 
 
 @admin.register(VisitAttachment)
-class VisitAttachmentAdmin(admin.ModelAdmin):
+class VisitAttachmentAdmin(TenantModelAdmin):
     """Admin interface for VisitAttachment model."""
-    
+
     list_display = [
         'visit',
         'file_name',
         'file_type',
         'file_size_display',
         'uploaded_at',
-        'uploaded_by',
     ]
     list_filter = [
         'file_type',
@@ -653,9 +667,10 @@ class VisitAttachmentAdmin(admin.ModelAdmin):
     ]
     readonly_fields = [
         'uploaded_at',
+        'tenant_id',
     ]
     autocomplete_fields = ['visit']
-    
+
     fieldsets = (
         ('Attachment Information', {
             'fields': (
@@ -668,7 +683,8 @@ class VisitAttachmentAdmin(admin.ModelAdmin):
         }),
         ('Audit', {
             'fields': (
-                'uploaded_by',
+                'uploaded_by_user_id',
+                'tenant_id',
                 'uploaded_at',
             )
         }),

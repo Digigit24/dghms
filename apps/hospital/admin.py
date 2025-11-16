@@ -1,17 +1,18 @@
 from django.contrib import admin
 from django.utils.html import format_html
+from common.admin_site import TenantModelAdmin
 from .models import Hospital
 
 
 @admin.register(Hospital)
-class HospitalAdmin(admin.ModelAdmin):
+class HospitalAdmin(TenantModelAdmin):
     """Hospital configuration admin"""
-    
+
     list_display = [
         'name', 'type', 'city', 'phone', 'email',
         'has_emergency', 'has_pharmacy', 'has_laboratory'
     ]
-    
+
     fieldsets = (
         ('Basic Information', {
             'fields': ('name', 'type', 'tagline', 'logo')
@@ -24,7 +25,7 @@ class HospitalAdmin(admin.ModelAdmin):
         }),
         ('Services & Settings', {
             'fields': (
-                'working_hours', 'has_emergency', 
+                'working_hours', 'has_emergency',
                 'has_pharmacy', 'has_laboratory'
             )
         }),
@@ -32,12 +33,12 @@ class HospitalAdmin(admin.ModelAdmin):
             'fields': ('registration_number', 'established_date')
         }),
         ('Timestamps', {
-            'fields': ('created_at', 'updated_at'),
+            'fields': ('tenant_id', 'created_at', 'updated_at'),
             'classes': ('collapse',)
         }),
     )
-    
-    readonly_fields = ['created_at', 'updated_at']
+
+    readonly_fields = ['tenant_id', 'created_at', 'updated_at']
     
     def has_add_permission(self, request):
         """Prevent adding more than one hospital"""
