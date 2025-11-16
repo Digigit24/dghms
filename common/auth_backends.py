@@ -30,13 +30,34 @@ class TenantUser:
         self.user_type = user_data.get('user_type', 'staff')
         self.is_patient = user_data.get('is_patient', False)
         self._state = type('obj', (object,), {'adding': False, 'db': None})()
-
-        # Add fake _meta attribute for Django's session backend compatibility
-        self._meta = type('obj', (object,), {
-            'app_label': 'common',
-            'model_name': 'tenantuser',
-            'pk': type('obj', (object,), {'name': 'id'})(),
-        })()
+        
+        # Add _meta attribute for Django compatibility
+        class MockMeta:
+            app_label = 'common'
+            model_name = 'tenantuser'
+            verbose_name = 'Tenant User'
+            verbose_name_plural = 'Tenant Users'
+            concrete = False
+            proxy = False
+            swapped = False
+            
+            class MockPK:
+                name = 'id'
+                
+                def value_to_string(self, obj):
+                    return str(getattr(obj, self.name, ''))
+                
+                def __str__(self):
+                    return self.name
+            
+            pk = MockPK()
+            
+            def get_field(self, field_name):
+                if field_name == 'id':
+                    return self.pk
+                return None
+                
+        self._meta = MockMeta()
 
     def __str__(self):
         return self.email
@@ -51,6 +72,19 @@ class TenantUser:
     @property
     def is_authenticated(self):
         return True
+    
+    def save(self, *args, **kwargs):
+        """
+        Mock save method required by Django's login function.
+        Since this is a virtual user, we don't actually save anything.
+        """
+        pass
+    
+    def delete(self, *args, **kwargs):
+        """
+        Mock delete method for Django compatibility.
+        """
+        pass
 
     def has_perm(self, perm, obj=None):
         """Check if user has specific permission"""
@@ -161,11 +195,12 @@ class SuperAdminAuthBackend(BaseBackend):
                     # Create TenantUser instance
                     user = TenantUser(user_payload)
 
-                    # Store JWT token in session for future requests
+                    # Store JWT token and user data in session for future requests
                     if hasattr(request, 'session'):
                         request.session['jwt_token'] = access_token
                         request.session['tenant_id'] = user_data.get('tenant')
                         request.session['tenant_slug'] = user_data.get('tenant_name')
+                        request.session['user_data'] = user_payload
 
                     logger.info(f"Successfully authenticated user {username} for tenant {user_data.get('tenant_name')}")
                     return user
@@ -232,7 +267,17 @@ class JWTAuthBackend(BaseBackend):
             if 'hms' not in enabled_modules:
                 return None
 
-            return TenantUser(payload)
+            # Create TenantUser instance
+            user = TenantUser(payload)
+            
+            # Store user data in session for future requests
+            if hasattr(request, 'session'):
+                request.session['user_data'] = payload
+                request.session['jwt_token'] = jwt_token
+                request.session['tenant_id'] = payload.get('tenant_id')
+                request.session['tenant_slug'] = payload.get('tenant_slug')
+            
+            return user
 
         except jwt.InvalidTokenError:
             return None
