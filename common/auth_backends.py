@@ -31,6 +31,13 @@ class TenantUser:
         self.is_patient = user_data.get('is_patient', False)
         self._state = type('obj', (object,), {'adding': False, 'db': None})()
 
+        # Add fake _meta attribute for Django's session backend compatibility
+        self._meta = type('obj', (object,), {
+            'app_label': 'common',
+            'model_name': 'tenantuser',
+            'pk': type('obj', (object,), {'name': 'id'})(),
+        })()
+
     def __str__(self):
         return self.email
 
