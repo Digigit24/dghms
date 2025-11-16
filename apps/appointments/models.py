@@ -7,19 +7,24 @@ from decimal import Decimal
 
 class AppointmentType(models.Model):
     """Types of medical appointments"""
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
     name = models.CharField(max_length=100, unique=True)
     description = models.TextField(blank=True, null=True)
     duration_default = models.PositiveIntegerField(default=15)  # Default duration in minutes
     base_consultation_fee = models.DecimalField(
-        max_digits=10, 
-        decimal_places=2, 
+        max_digits=10,
+        decimal_places=2,
         default=Decimal('0.00')
     )
-    
+
     class Meta:
         db_table = 'appointment_types'
         verbose_name = 'Appointment Type'
         verbose_name_plural = 'Appointment Types'
+        indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'name']),
+        ]
     
     def __str__(self):
         return self.name
@@ -45,15 +50,16 @@ class Appointment(models.Model):
 
     # Unique Identifiers
     id = models.BigAutoField(primary_key=True)
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
     appointment_id = models.CharField(
-        max_length=36, 
-        unique=True, 
+        max_length=36,
+        unique=True,
         editable=False
     )
 
     # Foreign Key Relationships
     patient = models.ForeignKey(
-        'patients.PatientProfile', 
+        'patients.PatientProfile',
         on_delete=models.PROTECT,
         related_name='appointments'
     )
@@ -133,33 +139,15 @@ class Appointment(models.Model):
 
     # Cancellation Details
     cancelled_at = models.DateTimeField(null=True, blank=True)
-    cancelled_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, 
-        on_delete=models.SET_NULL, 
-        null=True, 
-        blank=True,
-        related_name='cancelled_appointments'
-    )
+    cancelled_by_id = models.UUIDField(null=True, blank=True, help_text="User who cancelled this appointment")
     cancellation_reason = models.TextField(null=True, blank=True)
 
     # Approval Details
-    approved_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, 
-        on_delete=models.SET_NULL, 
-        null=True, 
-        blank=True,
-        related_name='approved_appointments'
-    )
+    approved_by_id = models.UUIDField(null=True, blank=True, help_text="User who approved this appointment")
     approved_at = models.DateTimeField(null=True, blank=True)
 
     # Creation and Tracking
-    created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, 
-        on_delete=models.SET_NULL, 
-        null=True, 
-        blank=True,
-        related_name='created_appointments'
-    )
+    created_by_id = models.UUIDField(null=True, blank=True, help_text="User who created this appointment")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -168,6 +156,9 @@ class Appointment(models.Model):
         verbose_name = 'Appointment'
         verbose_name_plural = 'Appointments'
         indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'appointment_date']),
+            models.Index(fields=['tenant_id', 'status']),
             models.Index(fields=['doctor', 'appointment_date', 'appointment_time']),
             models.Index(fields=['patient', 'appointment_date']),
             models.Index(fields=['status', 'priority']),

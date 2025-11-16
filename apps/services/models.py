@@ -13,6 +13,7 @@ class ServiceCategory(models.Model):
         ('other', 'Other')
     ]
 
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
     name = models.CharField(max_length=100, unique=True)
     description = models.TextField(blank=True, null=True)
     type = models.CharField(max_length=20, choices=TYPE_CHOICES)
@@ -30,6 +31,10 @@ class ServiceCategory(models.Model):
         db_table = 'service_categories'
         verbose_name_plural = 'Service Categories'
         ordering = ['name']
+        indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'type']),
+        ]
 
     def __str__(self):
         return self.name
@@ -37,6 +42,7 @@ class ServiceCategory(models.Model):
 
 class BaseService(models.Model):
     """Abstract base service model"""
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True, null=True)
     base_price = models.DecimalField(
@@ -72,6 +78,11 @@ class BaseService(models.Model):
     class Meta:
         abstract = True
         ordering = ['name']
+        indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'is_active']),
+            models.Index(fields=['tenant_id', 'category']),
+        ]
 
     def __str__(self):
         return f"{self.name} ({self.code})"

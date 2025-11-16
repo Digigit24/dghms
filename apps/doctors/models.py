@@ -1,13 +1,19 @@
-from django.conf import settings
 from django.db import models
 from django.core.exceptions import ValidationError
 from django.utils import timezone
+import uuid
 
 
 class Specialty(models.Model):
     """Medical specialties"""
-    name = models.CharField(max_length=100, unique=True)
-    code = models.CharField(max_length=20, unique=True)
+    # Tenant isolation
+    tenant_id = models.UUIDField(
+        db_index=True,
+        help_text="Tenant this specialty belongs to"
+    )
+
+    name = models.CharField(max_length=100)
+    code = models.CharField(max_length=20)
     description = models.TextField(blank=True, null=True)
     department = models.CharField(max_length=100, blank=True, null=True)
     is_active = models.BooleanField(default=True)
@@ -20,10 +26,13 @@ class Specialty(models.Model):
         verbose_name = 'Specialty'
         verbose_name_plural = 'Specialties'
         ordering = ['name']
+        unique_together = [['tenant_id', 'code']]
         indexes = [
+            models.Index(fields=['tenant_id']),
             models.Index(fields=['name']),
             models.Index(fields=['code']),
             models.Index(fields=['is_active']),
+            models.Index(fields=['tenant_id', 'is_active']),
         ]
 
     def __str__(self):
@@ -32,7 +41,7 @@ class Specialty(models.Model):
 
 class DoctorProfile(models.Model):
     """
-    Doctor profile linked to User.
+    Doctor profile linked to SuperAdmin User via user_id UUID.
     All doctors MUST have a user account (required for login).
     """
     STATUS_CHOICES = [
@@ -41,12 +50,17 @@ class DoctorProfile(models.Model):
         ('inactive', 'Inactive'),
     ]
 
-    # Link to User (REQUIRED - doctors must be able to login)
-    user = models.OneToOneField(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name='doctor_profile',
-        db_index=True
+    # Tenant isolation
+    tenant_id = models.UUIDField(
+        db_index=True,
+        help_text="Tenant this doctor belongs to"
+    )
+
+    # Link to SuperAdmin User (REQUIRED - doctors must be able to login)
+    user_id = models.UUIDField(
+        unique=True,
+        db_index=True,
+        help_text="SuperAdmin User ID (required for doctors)"
     )
 
     # License Information
@@ -119,10 +133,14 @@ class DoctorProfile(models.Model):
         verbose_name = 'Doctor Profile'
         verbose_name_plural = 'Doctor Profiles'
         ordering = ['-created_at']
+        unique_together = [['tenant_id', 'user_id']]
         indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['user_id']),
             models.Index(fields=['status']),
             models.Index(fields=['medical_license_number']),
             models.Index(fields=['-created_at']),
+            models.Index(fields=['tenant_id', 'status']),
         ]
         permissions = [
             ("view_all_doctors", "Can view all doctor profiles"),
@@ -130,12 +148,7 @@ class DoctorProfile(models.Model):
         ]
 
     def __str__(self):
-        if hasattr(self, 'user') and self.user:
-            full_name = self.user.get_full_name()
-            if full_name:
-                return f"Dr. {full_name}"
-            return f"Dr. {self.user.email}"
-        return f'DoctorProfile #{self.pk}'
+        return f"DoctorProfile ({self.user_id})"
 
     @property
     def is_license_valid(self):
@@ -150,33 +163,26 @@ class DoctorProfile(models.Model):
             return None
         return self.license_expiry_date >= timezone.localdate()
 
-    @property
-    def full_name(self):
-        """Get doctor's full name from user"""
-        if hasattr(self, 'user') and self.user:
-            return self.user.get_full_name()
-        return None
-
     def clean(self):
         """Validate model fields"""
         errors = {}
 
         if self.follow_up_fee is not None and self.follow_up_fee < 0:
             errors['follow_up_fee'] = 'Follow-up fee cannot be negative.'
-        
+
         # Validate license dates
         if self.license_issue_date and self.license_expiry_date:
             if self.license_expiry_date < self.license_issue_date:
                 errors['license_expiry_date'] = 'Expiry date cannot be before issue date.'
-        
+
         # Validate consultation fee
         if self.consultation_fee is not None and self.consultation_fee < 0:
             errors['consultation_fee'] = 'Consultation fee cannot be negative.'
-        
+
         # Validate consultation duration
         if self.consultation_duration and self.consultation_duration < 5:
             errors['consultation_duration'] = 'Consultation duration must be at least 5 minutes.'
-        
+
         if errors:
             raise ValidationError(errors)
 
@@ -197,6 +203,12 @@ class DoctorAvailability(models.Model):
         ('saturday', 'Saturday'),
         ('sunday', 'Sunday'),
     ]
+
+    # Tenant isolation
+    tenant_id = models.UUIDField(
+        db_index=True,
+        help_text="Tenant this availability belongs to"
+    )
 
     doctor = models.ForeignKey(
         DoctorProfile,
@@ -222,8 +234,10 @@ class DoctorAvailability(models.Model):
         ordering = ['doctor', 'day_of_week', 'start_time']
         unique_together = ['doctor', 'day_of_week', 'start_time']
         indexes = [
+            models.Index(fields=['tenant_id']),
             models.Index(fields=['doctor', 'day_of_week']),
             models.Index(fields=['is_available']),
+            models.Index(fields=['tenant_id', 'doctor']),
         ]
 
     def __str__(self):

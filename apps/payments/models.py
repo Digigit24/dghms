@@ -19,6 +19,7 @@ class PaymentCategory(models.Model):
         ('adjustment', 'Accounting Adjustment')
     ]
 
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
     name = models.CharField(max_length=100, unique=True)
     category_type = models.CharField(
         max_length=20, 
@@ -30,6 +31,10 @@ class PaymentCategory(models.Model):
         db_table = 'payment_categories'
         verbose_name = 'Payment Category'
         verbose_name_plural = 'Payment Categories'
+        indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'category_type']),
+        ]
     
     def __str__(self):
         return self.name
@@ -59,13 +64,14 @@ class Transaction(models.Model):
 
     # Unique Identifiers
     id = models.UUIDField(
-        primary_key=True, 
-        default=uuid.uuid4, 
+        primary_key=True,
+        default=uuid.uuid4,
         editable=False
     )
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
     transaction_number = models.CharField(
-        max_length=50, 
-        unique=True, 
+        max_length=50,
+        unique=True,
         editable=False
     )
     
@@ -106,31 +112,19 @@ class Transaction(models.Model):
     related_object = GenericForeignKey('content_type', 'object_id')
     
     # User Information
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='transactions'
-    )
-    
+    user_id = models.UUIDField(null=True, blank=True, help_text="User associated with this transaction")
+
     # Tracking and Metadata
     description = models.TextField(
-        blank=True, 
-        null=True, 
+        blank=True,
+        null=True,
         help_text="Transaction description or notes"
     )
-    
+
     # Reconciliation Fields
     is_reconciled = models.BooleanField(default=False)
     reconciled_at = models.DateTimeField(null=True, blank=True)
-    reconciled_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='reconciled_transactions'
-    )
+    reconciled_by_id = models.UUIDField(null=True, blank=True, help_text="User who reconciled this transaction")
     
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
@@ -142,7 +136,9 @@ class Transaction(models.Model):
         verbose_name_plural = 'Transactions'
         ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['user', 'transaction_type']),
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'transaction_type']),
+            models.Index(fields=['tenant_id', 'created_at']),
             models.Index(fields=['created_at']),
             models.Index(fields=['category']),
         ]
@@ -182,6 +178,7 @@ class AccountingPeriod(models.Model):
         ('annual', 'Annual')
     ]
 
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
     name = models.CharField(max_length=100)
     start_date = models.DateField()
     end_date = models.DateField()
@@ -210,12 +207,7 @@ class AccountingPeriod(models.Model):
     # Reconciliation Status
     is_closed = models.BooleanField(default=False)
     closed_at = models.DateTimeField(null=True, blank=True)
-    closed_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True
-    )
+    closed_by_id = models.UUIDField(null=True, blank=True, help_text="User who closed this period")
     
     class Meta:
         db_table = 'accounting_periods'
@@ -223,6 +215,11 @@ class AccountingPeriod(models.Model):
         verbose_name_plural = 'Accounting Periods'
         ordering = ['-start_date']
         unique_together = ['name', 'start_date', 'end_date']
+        indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'start_date', 'end_date']),
+            models.Index(fields=['tenant_id', 'is_closed']),
+        ]
     
     def __str__(self):
         return f"{self.name} ({self.start_date} - {self.end_date})"

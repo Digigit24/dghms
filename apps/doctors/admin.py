@@ -1,17 +1,21 @@
 from django.contrib import admin
+from common.admin_site import TenantModelAdmin
 from .models import Specialty, DoctorProfile, DoctorAvailability
 
 
 @admin.register(Specialty)
-class SpecialtyAdmin(admin.ModelAdmin):
+class SpecialtyAdmin(TenantModelAdmin):
     """Admin for Medical Specialties"""
     list_display = ['name', 'code', 'department', 'is_active', 'doctors_count', 'created_at']
     list_filter = ['is_active', 'department', 'created_at']
     search_fields = ['name', 'code', 'description']
-    readonly_fields = ['created_at', 'updated_at']
+    readonly_fields = ['created_at', 'updated_at', 'tenant_id']
     ordering = ['name']
-    
+
     fieldsets = (
+        ('Tenant', {
+            'fields': ('tenant_id',)
+        }),
         ('Basic Information', {
             'fields': ('name', 'code', 'department')
         }),
@@ -23,7 +27,7 @@ class SpecialtyAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
-    
+
     def doctors_count(self, obj):
         """Count of active doctors in this specialty"""
         return obj.doctors.filter(status='active').count()
@@ -35,42 +39,42 @@ class DoctorAvailabilityInline(admin.TabularInline):
     model = DoctorAvailability
     extra = 1
     fields = ['day_of_week', 'start_time', 'end_time', 'is_available', 'max_appointments']
+    readonly_fields = ['tenant_id']
 
 
 @admin.register(DoctorProfile)
-class DoctorProfileAdmin(admin.ModelAdmin):
+class DoctorProfileAdmin(TenantModelAdmin):
     """Admin for Doctor Profiles"""
     list_display = [
-        'get_doctor_name', 'medical_license_number', 'status',
+        'user_id', 'medical_license_number', 'status',
         'consultation_fee', 'years_of_experience', 'average_rating',
-        'is_license_valid', 'created_at'
+        'get_license_valid', 'created_at'
     ]
     list_filter = [
         'status', 'is_available_online', 'is_available_offline',
         'specialties', 'created_at'
     ]
     search_fields = [
-        'user__first_name', 'user__last_name', 'user__email',
-        'medical_license_number', 'qualifications'
+        'user_id', 'medical_license_number', 'qualifications'
     ]
     readonly_fields = [
         'average_rating', 'total_reviews', 'total_consultations',
-        'is_license_valid', 'created_at', 'updated_at'
+        'created_at', 'updated_at', 'tenant_id'
     ]
     filter_horizontal = ['specialties']
     inlines = [DoctorAvailabilityInline]
     ordering = ['-created_at']
     date_hierarchy = 'created_at'
-    
+
     fieldsets = (
-        ('User Information', {
-            'fields': ('user',),
-            'description': 'Link to user account (required for login)'
+        ('Tenant & User Information', {
+            'fields': ('tenant_id', 'user_id'),
+            'description': 'User ID from SuperAdmin (required for login)'
         }),
         ('License Information', {
             'fields': (
                 'medical_license_number', 'license_issuing_authority',
-                'license_issue_date', 'license_expiry_date', 'is_license_valid'
+                'license_issue_date', 'license_expiry_date'
             )
         }),
         ('Professional Information', {
@@ -80,7 +84,7 @@ class DoctorProfileAdmin(admin.ModelAdmin):
         }),
         ('Consultation Settings', {
             'fields': (
-                'consultation_fee', 'consultation_duration',
+                'consultation_fee', 'follow_up_fee', 'consultation_duration',
                 'is_available_online', 'is_available_offline'
             )
         }),
@@ -99,24 +103,16 @@ class DoctorProfileAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
-    
-    def get_doctor_name(self, obj):
-        """Display doctor's full name"""
-        if obj.full_name:
-            return f"Dr. {obj.full_name}"
-        return f"Dr. {obj.user.email}"
-    get_doctor_name.short_description = 'Doctor Name'
-    get_doctor_name.admin_order_field = 'user__first_name'
-    
-    def is_license_valid(self, obj):
+
+    def get_license_valid(self, obj):
         """Display license validity status"""
         return obj.is_license_valid
-    is_license_valid.boolean = True
-    is_license_valid.short_description = 'License Valid'
+    get_license_valid.boolean = True
+    get_license_valid.short_description = 'License Valid'
 
 
 @admin.register(DoctorAvailability)
-class DoctorAvailabilityAdmin(admin.ModelAdmin):
+class DoctorAvailabilityAdmin(TenantModelAdmin):
     """Admin for Doctor Availability"""
     list_display = [
         'doctor', 'day_of_week', 'start_time', 'end_time',
@@ -124,16 +120,15 @@ class DoctorAvailabilityAdmin(admin.ModelAdmin):
     ]
     list_filter = ['day_of_week', 'is_available', 'doctor__status', 'created_at']
     search_fields = [
-        'doctor__user__first_name', 'doctor__user__last_name',
-        'doctor__medical_license_number'
+        'doctor__user_id', 'doctor__medical_license_number'
     ]
-    readonly_fields = ['created_at', 'updated_at']
+    readonly_fields = ['created_at', 'updated_at', 'tenant_id']
     ordering = ['doctor', 'day_of_week', 'start_time']
     date_hierarchy = 'created_at'
-    
+
     fieldsets = (
-        ('Doctor', {
-            'fields': ('doctor',)
+        ('Tenant & Doctor', {
+            'fields': ('tenant_id', 'doctor')
         }),
         ('Schedule', {
             'fields': (

@@ -41,6 +41,7 @@ class Visit(models.Model):
     
     # Primary Fields
     id = models.AutoField(primary_key=True)
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
     visit_number = models.CharField(
         max_length=50,
         unique=True,
@@ -77,13 +78,7 @@ class Visit(models.Model):
         related_name='referred_visits',
         help_text="Referring doctor if applicable"
     )
-    created_by = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        null=True,
-        related_name='created_visits',
-        help_text="Receptionist who created the visit"
-    )
+    created_by_id = models.UUIDField(null=True, blank=True, help_text="User who created the visit")
     
     # Visit Information
     visit_date = models.DateField(auto_now_add=True)
@@ -152,6 +147,9 @@ class Visit(models.Model):
         verbose_name = 'OPD Visit'
         verbose_name_plural = 'OPD Visits'
         indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'visit_date']),
+            models.Index(fields=['tenant_id', 'status']),
             models.Index(fields=['visit_number'], name='visit_number_idx'),
             models.Index(fields=['patient', 'visit_date'], name='visit_patient_date_idx'),
             models.Index(fields=['doctor', 'visit_date'], name='visit_doctor_date_idx'),
@@ -250,6 +248,7 @@ class OPDBill(models.Model):
     
     # Primary Fields
     id = models.AutoField(primary_key=True)
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
     visit = models.OneToOneField(
         Visit,
         on_delete=models.CASCADE,
@@ -347,12 +346,7 @@ class OPDBill(models.Model):
     )
     
     # Audit Fields
-    billed_by = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        null=True,
-        related_name='created_opd_bills'
-    )
+    billed_by_id = models.UUIDField(null=True, blank=True, help_text="User who created this bill")
     
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
@@ -364,6 +358,9 @@ class OPDBill(models.Model):
         verbose_name = 'OPD Bill'
         verbose_name_plural = 'OPD Bills'
         indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'bill_date']),
+            models.Index(fields=['tenant_id', 'payment_status']),
             models.Index(fields=['bill_number'], name='opd_bill_number_idx'),
             models.Index(fields=['visit'], name='opd_bill_visit_idx'),
             models.Index(fields=['doctor', 'bill_date'], name='opd_bill_doctor_date_idx'),
@@ -456,6 +453,7 @@ class ProcedureMaster(models.Model):
     
     # Primary Fields
     id = models.AutoField(primary_key=True)
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
     name = models.CharField(max_length=200)
     code = models.CharField(
         max_length=50,
@@ -488,6 +486,9 @@ class ProcedureMaster(models.Model):
         verbose_name = 'Procedure Master'
         verbose_name_plural = 'Procedure Masters'
         indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'category']),
+            models.Index(fields=['tenant_id', 'is_active']),
             models.Index(fields=['code'], name='proc_master_code_idx'),
             models.Index(fields=['category'], name='proc_master_category_idx'),
             models.Index(fields=['is_active'], name='proc_master_active_idx'),
@@ -507,6 +508,7 @@ class ProcedurePackage(models.Model):
     
     # Primary Fields
     id = models.AutoField(primary_key=True)
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
     name = models.CharField(max_length=200)
     code = models.CharField(
         max_length=50,
@@ -547,6 +549,8 @@ class ProcedurePackage(models.Model):
         verbose_name = 'Procedure Package'
         verbose_name_plural = 'Procedure Packages'
         indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'is_active']),
             models.Index(fields=['code'], name='proc_package_code_idx'),
             models.Index(fields=['is_active'], name='proc_package_active_idx'),
         ]
@@ -598,6 +602,7 @@ class ProcedureBill(models.Model):
     
     # Primary Fields
     id = models.AutoField(primary_key=True)
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
     visit = models.ForeignKey(
         Visit,
         on_delete=models.CASCADE,
@@ -686,12 +691,7 @@ class ProcedureBill(models.Model):
     )
     
     # Audit Fields
-    billed_by = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        null=True,
-        related_name='created_procedure_bills'
-    )
+    billed_by_id = models.UUIDField(null=True, blank=True, help_text="User who created this bill")
     
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
@@ -703,6 +703,9 @@ class ProcedureBill(models.Model):
         verbose_name = 'Procedure Bill'
         verbose_name_plural = 'Procedure Bills'
         indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'bill_date']),
+            models.Index(fields=['tenant_id', 'payment_status']),
             models.Index(fields=['bill_number'], name='proc_bill_number_idx'),
             models.Index(fields=['visit'], name='proc_bill_visit_idx'),
             models.Index(fields=['doctor', 'bill_date'], name='proc_bill_doctor_date_idx'),
@@ -786,6 +789,7 @@ class ProcedureBillItem(models.Model):
     
     # Primary Fields
     id = models.AutoField(primary_key=True)
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
     procedure_bill = models.ForeignKey(
         ProcedureBill,
         on_delete=models.CASCADE,
@@ -830,6 +834,10 @@ class ProcedureBillItem(models.Model):
         ordering = ['item_order', 'id']
         verbose_name = 'Procedure Bill Item'
         verbose_name_plural = 'Procedure Bill Items'
+        indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'procedure_bill']),
+        ]
     
     def __str__(self):
         return f"{self.particular_name} - {self.quantity} × {self.unit_charge}"
@@ -859,6 +867,7 @@ class ClinicalNote(models.Model):
     
     # Primary Fields
     id = models.AutoField(primary_key=True)
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
     visit = models.OneToOneField(
         Visit,
         on_delete=models.CASCADE,
@@ -929,13 +938,7 @@ class ClinicalNote(models.Model):
     )
     
     # Audit Fields
-    created_by = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        null=True,
-        related_name='created_clinical_notes',
-        help_text="Doctor who created the note"
-    )
+    created_by_id = models.UUIDField(null=True, blank=True, help_text="User who created the note")
     
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
@@ -947,6 +950,8 @@ class ClinicalNote(models.Model):
         verbose_name = 'Clinical Note'
         verbose_name_plural = 'Clinical Notes'
         indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'visit']),
             models.Index(fields=['visit'], name='clinical_note_visit_idx'),
             models.Index(fields=['ehr_number'], name='clinical_note_ehr_idx'),
         ]
@@ -970,6 +975,7 @@ class VisitFinding(models.Model):
     
     # Primary Fields
     id = models.AutoField(primary_key=True)
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
     visit = models.ForeignKey(
         Visit,
         on_delete=models.CASCADE,
@@ -1103,12 +1109,7 @@ class VisitFinding(models.Model):
     )
     
     # Audit Fields
-    recorded_by = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        null=True,
-        related_name='recorded_findings'
-    )
+    recorded_by_id = models.UUIDField(null=True, blank=True, help_text="User who recorded these findings")
     
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
@@ -1120,6 +1121,8 @@ class VisitFinding(models.Model):
         verbose_name = 'Visit Finding'
         verbose_name_plural = 'Visit Findings'
         indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'visit']),
             models.Index(fields=['visit', '-finding_date'], name='finding_visit_date_idx'),
         ]
     
@@ -1183,6 +1186,7 @@ class VisitAttachment(models.Model):
     
     # Primary Fields
     id = models.AutoField(primary_key=True)
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
     visit = models.ForeignKey(
         Visit,
         on_delete=models.CASCADE,
@@ -1204,12 +1208,7 @@ class VisitAttachment(models.Model):
     )
     
     # Audit Fields
-    uploaded_by = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        null=True,
-        related_name='uploaded_attachments'
-    )
+    uploaded_by_id = models.UUIDField(null=True, blank=True, help_text="User who uploaded this attachment")
     uploaded_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:
@@ -1218,6 +1217,8 @@ class VisitAttachment(models.Model):
         verbose_name = 'Visit Attachment'
         verbose_name_plural = 'Visit Attachments'
         indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'visit']),
             models.Index(fields=['visit'], name='attachment_visit_idx'),
             models.Index(fields=['file_type'], name='attachment_type_idx'),
         ]

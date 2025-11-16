@@ -11,7 +11,10 @@ class Hospital(models.Model):
         ('clinic', 'Clinic'),
         ('hospital', 'Hospital'),
     ]
-    
+
+    # Tenant
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
+
     # Basic Information
     name = models.CharField(max_length=200)
     type = models.CharField(
@@ -82,6 +85,9 @@ class Hospital(models.Model):
         db_table = 'hospital_config'
         verbose_name = 'Hospital Configuration'
         verbose_name_plural = 'Hospital Configuration'
+        indexes = [
+            models.Index(fields=['tenant_id']),
+        ]
     
     def __str__(self):
         return f"{self.name} ({self.get_type_display()})"

@@ -20,6 +20,7 @@ class FeeType(models.Model):
         ('misc', 'Miscellaneous Fee')
     ]
 
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
     name = models.CharField(max_length=100, unique=True)
     code = models.CharField(max_length=20, unique=True)
     category = models.CharField(max_length=20, choices=CATEGORY_CHOICES)
@@ -35,6 +36,10 @@ class FeeType(models.Model):
         db_table = 'fee_types'
         verbose_name = 'Fee Type'
         verbose_name_plural = 'Fee Types'
+        indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'category']),
+        ]
     
     def __str__(self):
         return f"{self.name} ({self.get_category_display()})"
@@ -74,20 +79,15 @@ class Order(models.Model):
 
     # Unique Identifiers
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
     order_number = models.CharField(
-        max_length=50, 
-        unique=True, 
+        max_length=50,
+        unique=True,
         editable=False
     )
-    
+
     # User & Ownership
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='orders'
-    )
+    user_id = models.UUIDField(null=True, blank=True, help_text="User who created this order")
     patient = models.ForeignKey(
         'patients.PatientProfile', 
         on_delete=models.CASCADE,
@@ -158,7 +158,9 @@ class Order(models.Model):
         verbose_name_plural = 'Orders'
         ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['user', 'status']),
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'status']),
+            models.Index(fields=['tenant_id', 'created_at']),
             models.Index(fields=['patient', 'status']),
             models.Index(fields=['created_at']),
         ]
@@ -215,9 +217,10 @@ class OrderItem(models.Model):
     Polymorphic Order Item Model
     Can reference different types of services
     """
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
     order = models.ForeignKey(
-        Order, 
-        on_delete=models.CASCADE, 
+        Order,
+        on_delete=models.CASCADE,
         related_name='order_items'
     )
     
@@ -240,6 +243,10 @@ class OrderItem(models.Model):
         verbose_name = 'Order Item'
         verbose_name_plural = 'Order Items'
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'order']),
+        ]
     
     def get_total_price(self):
         """
@@ -261,8 +268,9 @@ class OrderFee(models.Model):
     """
     Intermediate model to track fees applied to an order
     """
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
     order = models.ForeignKey(
-        Order, 
+        Order,
         on_delete=models.CASCADE,
         related_name='order_fee_details'
     )
@@ -282,6 +290,10 @@ class OrderFee(models.Model):
         verbose_name = 'Order Fee'
         verbose_name_plural = 'Order Fees'
         unique_together = ['order', 'fee_type']
+        indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'order']),
+        ]
     
     def __str__(self):
         return f"{self.fee_type.name} for {self.order}"

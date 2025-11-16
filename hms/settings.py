@@ -74,8 +74,9 @@ INSTALLED_APPS = [
     # Common - MUST be before local apps for proper auth setup
     'common',
 
-    # Local
-    'apps.accounts',
+    # Local apps
+    # Note: accounts app removed - using SuperAdmin for authentication
+    # 'apps.accounts',
     'apps.doctors',
     'apps.patients',
     'apps.hospital',
@@ -150,15 +151,14 @@ else:
     }
 
 # --- Auth / Passwords ---
-# NOTE: AUTH_USER_MODEL will be deprecated once migration to SuperAdmin is complete
-# For now, keeping it for backward compatibility with existing data
-AUTH_USER_MODEL = 'accounts.User'
+# NO LOCAL USER MODEL - Using SuperAdmin exclusively
+# User authentication is handled via JWT tokens from SuperAdmin
+# Admin authentication uses TenantUser (non-database user)
 
 # Authentication backends for SuperAdmin integration
 AUTHENTICATION_BACKENDS = [
     'common.auth_backends.SuperAdminAuthBackend',
     'common.auth_backends.JWTAuthBackend',
-    'django.contrib.auth.backends.ModelBackend',  # Keep for existing local users during migration
 ]
 
 AUTH_PASSWORD_VALIDATORS = [

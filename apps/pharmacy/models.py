@@ -12,6 +12,7 @@ class ProductCategory(models.Model):
         ('medical_equipment', 'Medical Equipment')
     ]
 
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
     name = models.CharField(max_length=200, unique=True)
     description = models.TextField(blank=True, null=True)
     type = models.CharField(max_length=50, choices=CATEGORY_TYPES)
@@ -24,6 +25,10 @@ class ProductCategory(models.Model):
         db_table = 'pharmacy_product_categories'
         verbose_name_plural = 'Product Categories'
         ordering = ['name']
+        indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'name']),
+        ]
 
     def __str__(self):
         return self.name
@@ -31,6 +36,7 @@ class ProductCategory(models.Model):
 
 class PharmacyProduct(models.Model):
     """Pharmacy product model"""
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
     product_name = models.CharField(max_length=255)
     category = models.ForeignKey(
         ProductCategory,
@@ -73,6 +79,8 @@ class PharmacyProduct(models.Model):
         db_table = 'pharmacy_products'
         ordering = ['-created_at']
         indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'product_name']),
             models.Index(fields=['product_name']),
             models.Index(fields=['company']),
             models.Index(fields=['batch_no']),
@@ -100,19 +108,20 @@ class PharmacyProduct(models.Model):
 
 class Cart(models.Model):
     """Shopping cart for pharmacy products"""
-    user = models.OneToOneField(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name='pharmacy_cart'
-    )
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
+    user_id = models.UUIDField(unique=True, help_text="User who owns this cart")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = 'pharmacy_carts'
+        indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'user_id']),
+        ]
 
     def __str__(self):
-        return f"Cart of {self.user.username}"
+        return f"Cart of user {self.user_id}"
 
     @property
     def total_items(self):
@@ -132,6 +141,7 @@ class Cart(models.Model):
 
 class CartItem(models.Model):
     """Individual items in the shopping cart"""
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
     cart = models.ForeignKey(
         Cart,
         on_delete=models.CASCADE,
@@ -151,6 +161,10 @@ class CartItem(models.Model):
     class Meta:
         db_table = 'pharmacy_cart_items'
         unique_together = ['cart', 'product']
+        indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'cart']),
+        ]
 
     def save(self, *args, **kwargs):
         """Set price at time of adding to cart"""
@@ -184,12 +198,8 @@ class PharmacyOrder(models.Model):
         ('refunded', 'Refunded')
     ]
 
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        related_name='pharmacy_orders'
-    )
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
+    user_id = models.UUIDField(null=True, blank=True, help_text="User who placed this order")
     
     total_amount = models.DecimalField(
         max_digits=10,
@@ -218,6 +228,11 @@ class PharmacyOrder(models.Model):
     class Meta:
         db_table = 'pharmacy_orders'
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'status']),
+            models.Index(fields=['tenant_id', 'user_id']),
+        ]
 
     def __str__(self):
         return f"Order {self.id} - {self.get_status_display()}"
@@ -225,6 +240,7 @@ class PharmacyOrder(models.Model):
 
 class PharmacyOrderItem(models.Model):
     """Items in a pharmacy order"""
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
     order = models.ForeignKey(
         PharmacyOrder,
         on_delete=models.CASCADE,
@@ -243,6 +259,10 @@ class PharmacyOrderItem(models.Model):
 
     class Meta:
         db_table = 'pharmacy_order_items'
+        indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'order']),
+        ]
 
     def __str__(self):
         return f"{self.product.product_name} - {self.quantity}"

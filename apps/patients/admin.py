@@ -1,4 +1,5 @@
 from django.contrib import admin
+from common.admin_site import TenantModelAdmin
 from .models import PatientProfile, PatientVitals, PatientAllergy
 
 
@@ -7,9 +8,9 @@ class PatientVitalsInline(admin.TabularInline):
     extra = 0
     fields = [
         'temperature', 'blood_pressure_systolic', 'blood_pressure_diastolic',
-        'heart_rate', 'oxygen_saturation', 'recorded_by', 'recorded_at'
+        'heart_rate', 'oxygen_saturation', 'recorded_by_user_id', 'recorded_at'
     ]
-    readonly_fields = ['recorded_at']
+    readonly_fields = ['recorded_at', 'tenant_id']
     can_delete = False
 
 
@@ -17,10 +18,11 @@ class PatientAllergyInline(admin.TabularInline):
     model = PatientAllergy
     extra = 0
     fields = ['allergy_type', 'allergen', 'severity', 'is_active']
+    readonly_fields = ['tenant_id']
 
 
 @admin.register(PatientProfile)
-class PatientProfileAdmin(admin.ModelAdmin):
+class PatientProfileAdmin(TenantModelAdmin):
     list_display = [
         'patient_id', 'full_name', 'age', 'gender', 'mobile_primary',
         'blood_group', 'city', 'status', 'total_visits',
@@ -36,15 +38,15 @@ class PatientProfileAdmin(admin.ModelAdmin):
     ]
     readonly_fields = [
         'patient_id', 'age', 'bmi', 'registration_date',
-        'created_at', 'updated_at'
+        'created_at', 'updated_at', 'tenant_id'
     ]
     inlines = [PatientVitalsInline, PatientAllergyInline]
     ordering = ['-registration_date']
     date_hierarchy = 'registration_date'
-    
+
     fieldsets = (
-        ('Patient Identification', {
-            'fields': ('patient_id', 'user', 'status')
+        ('Tenant & Identification', {
+            'fields': ('tenant_id', 'patient_id', 'user_id', 'status')
         }),
         ('Personal Information', {
             'fields': (
@@ -90,11 +92,11 @@ class PatientProfileAdmin(admin.ModelAdmin):
             )
         }),
         ('Metadata', {
-            'fields': ('created_by', 'created_at', 'updated_at'),
+            'fields': ('created_by_user_id', 'created_at', 'updated_at'),
             'classes': ('collapse',)
         }),
     )
-    
+
     def full_name(self, obj):
         return obj.full_name
     full_name.short_description = 'Full Name'
@@ -102,24 +104,24 @@ class PatientProfileAdmin(admin.ModelAdmin):
 
 
 @admin.register(PatientVitals)
-class PatientVitalsAdmin(admin.ModelAdmin):
+class PatientVitalsAdmin(TenantModelAdmin):
     list_display = [
         'patient', 'temperature', 'get_blood_pressure',
-        'heart_rate', 'oxygen_saturation', 'recorded_by',
+        'heart_rate', 'oxygen_saturation', 'recorded_by_user_id',
         'recorded_at'
     ]
-    list_filter = ['recorded_at', 'recorded_by']
+    list_filter = ['recorded_at']
     search_fields = [
         'patient__patient_id', 'patient__first_name',
         'patient__last_name'
     ]
-    readonly_fields = ['recorded_at']
+    readonly_fields = ['recorded_at', 'tenant_id']
     ordering = ['-recorded_at']
     date_hierarchy = 'recorded_at'
-    
+
     fieldsets = (
-        ('Patient Information', {
-            'fields': ('patient', 'recorded_by')
+        ('Tenant & Patient Information', {
+            'fields': ('tenant_id', 'patient', 'recorded_by_user_id')
         }),
         ('Vital Signs', {
             'fields': (
@@ -133,14 +135,14 @@ class PatientVitalsAdmin(admin.ModelAdmin):
             'fields': ('notes', 'recorded_at')
         }),
     )
-    
+
     def get_blood_pressure(self, obj):
         return obj.blood_pressure or '-'
     get_blood_pressure.short_description = 'Blood Pressure'
 
 
 @admin.register(PatientAllergy)
-class PatientAllergyAdmin(admin.ModelAdmin):
+class PatientAllergyAdmin(TenantModelAdmin):
     list_display = [
         'patient', 'allergy_type', 'allergen', 'severity',
         'is_active', 'created_at'
@@ -152,12 +154,12 @@ class PatientAllergyAdmin(admin.ModelAdmin):
         'patient__patient_id', 'patient__first_name',
         'patient__last_name', 'allergen'
     ]
-    readonly_fields = ['created_at', 'updated_at']
+    readonly_fields = ['created_at', 'updated_at', 'tenant_id']
     ordering = ['-severity', 'allergen']
-    
+
     fieldsets = (
-        ('Patient Information', {
-            'fields': ('patient', 'recorded_by')
+        ('Tenant & Patient Information', {
+            'fields': ('tenant_id', 'patient', 'recorded_by_user_id')
         }),
         ('Allergy Details', {
             'fields': (
