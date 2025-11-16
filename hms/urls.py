@@ -4,6 +4,9 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.views.generic import RedirectView
 
+# Import custom HMS admin site
+from common.admin_site import hms_admin_site
+
 # ✅ Import drf-spectacular views
 from drf_spectacular.views import (
     SpectacularAPIView,
@@ -15,8 +18,8 @@ urlpatterns = [
     # Root redirect to admin
     path('', RedirectView.as_view(url='/admin/', permanent=False), name='index'),
 
-    # Admin panel
-    path('admin/', admin.site.urls),
+    # Admin panel - Using custom HMS admin site
+    path('admin/', hms_admin_site.urls),
 
     # Authentication endpoints (SuperAdmin integration)
     path('auth/', include('common.urls')),

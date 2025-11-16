@@ -13,6 +13,7 @@ class HMSAdminSite(AdminSite):
     site_title = _('DigiHMS Administration')
     site_header = _('DigiHMS Admin')
     index_title = _('Welcome to Hospital Management System')
+    login_template = 'admin/login.html'
 
     def has_permission(self, request):
         """
@@ -49,17 +50,24 @@ class HMSAdminSite(AdminSite):
         """
         Custom login - redirect to our custom login page
         """
+        from django.conf import settings
+
         if request.method == 'GET':
             # If already authenticated, redirect to admin index
             if self.has_permission(request):
                 return redirect(reverse('admin:index'))
 
         # Use custom login template
-        return render(request, 'admin/login.html', {
+        context = {
             'title': _('DigiHMS Admin Login'),
             'site_title': self.site_title,
             'site_header': self.site_header,
-        })
+            'superadmin_url': getattr(settings, 'SUPERADMIN_URL', 'https://admin.celiyo.com'),
+        }
+        if extra_context:
+            context.update(extra_context)
+
+        return render(request, 'admin/login.html', context)
 
 
 class TenantModelAdmin(admin.ModelAdmin):
