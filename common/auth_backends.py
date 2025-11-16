@@ -121,8 +121,14 @@ class SuperAdminAuthBackend(BaseBackend):
                     # Decode JWT to get user data
                     secret_key = getattr(settings, 'JWT_SECRET_KEY')
                     algorithm = getattr(settings, 'JWT_ALGORITHM', 'HS256')
+                    leeway = getattr(settings, 'JWT_LEEWAY', 30)
 
-                    payload = jwt.decode(access_token, secret_key, algorithms=[algorithm])
+                    payload = jwt.decode(
+                        access_token,
+                        secret_key,
+                        algorithms=[algorithm],
+                        leeway=leeway  # Tolerate clock skew between servers
+                    )
 
                     # Check if HMS module is enabled
                     enabled_modules = payload.get('enabled_modules', [])
@@ -205,8 +211,14 @@ class JWTAuthBackend(BaseBackend):
         try:
             secret_key = getattr(settings, 'JWT_SECRET_KEY')
             algorithm = getattr(settings, 'JWT_ALGORITHM', 'HS256')
+            leeway = getattr(settings, 'JWT_LEEWAY', 30)
 
-            payload = jwt.decode(jwt_token, secret_key, algorithms=[algorithm])
+            payload = jwt.decode(
+                jwt_token,
+                secret_key,
+                algorithms=[algorithm],
+                leeway=leeway  # Tolerate clock skew between servers
+            )
 
             # Check if HMS module is enabled
             enabled_modules = payload.get('enabled_modules', [])

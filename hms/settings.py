@@ -171,6 +171,7 @@ AUTH_PASSWORD_VALIDATORS = [
 # --- JWT Settings (must match SuperAdmin) ---
 JWT_SECRET_KEY = config('JWT_SECRET_KEY', default='your-jwt-secret-key-change-in-production')
 JWT_ALGORITHM = config('JWT_ALGORITHM', default='HS256')
+JWT_LEEWAY = config('JWT_LEEWAY', default=30, cast=int)  # Clock skew tolerance in seconds
 
 # --- SuperAdmin Integration ---
 SUPERADMIN_URL = config('SUPERADMIN_URL', default='https://admin.celiyo.com')

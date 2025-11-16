@@ -85,6 +85,7 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
             # Get JWT settings from Django settings
             secret_key = getattr(settings, 'JWT_SECRET_KEY', None)
             algorithm = getattr(settings, 'JWT_ALGORITHM', 'HS256')
+            leeway = getattr(settings, 'JWT_LEEWAY', 30)
 
             if not secret_key:
                 return JsonResponse(
@@ -93,7 +94,12 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
                 )
 
             # Decode JWT token
-            payload = jwt.decode(token, secret_key, algorithms=[algorithm])
+            payload = jwt.decode(
+                token,
+                secret_key,
+                algorithms=[algorithm],
+                leeway=leeway  # Tolerate clock skew between servers
+            )
 
         except jwt.ExpiredSignatureError:
             return JsonResponse(

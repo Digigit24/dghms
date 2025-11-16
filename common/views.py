@@ -85,8 +85,14 @@ class TokenLoginView(View):
             try:
                 secret_key = getattr(settings, 'JWT_SECRET_KEY')
                 algorithm = getattr(settings, 'JWT_ALGORITHM', 'HS256')
+                leeway = getattr(settings, 'JWT_LEEWAY', 30)
 
-                payload = jwt.decode(access_token, secret_key, algorithms=[algorithm])
+                payload = jwt.decode(
+                    access_token,
+                    secret_key,
+                    algorithms=[algorithm],
+                    leeway=leeway  # Tolerate clock skew between servers
+                )
 
                 # Check if HMS module is enabled
                 enabled_modules = payload.get('enabled_modules', [])
@@ -193,10 +199,16 @@ def superadmin_proxy_login_view(request):
                 try:
                     secret_key = getattr(settings, 'JWT_SECRET_KEY')
                     algorithm = getattr(settings, 'JWT_ALGORITHM', 'HS256')
+                    leeway = getattr(settings, 'JWT_LEEWAY', 30)
 
                     logger.info(f"Decoding JWT with secret key: {secret_key[:10]}...")
 
-                    payload = jwt.decode(access_token, secret_key, algorithms=[algorithm])
+                    payload = jwt.decode(
+                        access_token,
+                        secret_key,
+                        algorithms=[algorithm],
+                        leeway=leeway  # Tolerate clock skew between servers
+                    )
 
                     logger.info(f"JWT payload: {payload}")
 
