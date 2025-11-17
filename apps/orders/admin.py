@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.utils.html import format_html
-from common.admin_site import TenantModelAdmin
+from common.admin_site import TenantModelAdmin, hms_admin_site
 from .models import Order, OrderItem, OrderFee, FeeType
 
 
@@ -32,7 +32,6 @@ class OrderItemInline(admin.TabularInline):
         return request.user.is_superuser
 
 
-@admin.register(FeeType)
 class FeeTypeAdmin(TenantModelAdmin):
     """Admin configuration for Fee Types"""
     list_display = [
@@ -70,7 +69,6 @@ class FeeTypeAdmin(TenantModelAdmin):
     )
 
 
-@admin.register(Order)
 class OrderAdmin(TenantModelAdmin):
     """Comprehensive Order Management in Admin"""
     list_display = [
@@ -183,7 +181,6 @@ class OrderAdmin(TenantModelAdmin):
         obj.calculate_totals()
 
 
-@admin.register(OrderItem)
 class OrderItemAdmin(TenantModelAdmin):
     """Admin configuration for Order Items"""
     list_display = [
@@ -240,6 +237,12 @@ class OrderItemAdmin(TenantModelAdmin):
     def get_queryset(self, request):
         """Optimize queryset with select_related"""
         return super().get_queryset(request).select_related(
-            'order', 
+            'order',
             'content_type'
         )
+
+
+# Register models with custom admin site
+hms_admin_site.register(FeeType, FeeTypeAdmin)
+hms_admin_site.register(Order, OrderAdmin)
+hms_admin_site.register(OrderItem, OrderItemAdmin)

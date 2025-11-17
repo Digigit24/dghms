@@ -1,10 +1,9 @@
 from django.contrib import admin
 from django.utils.html import format_html
-from common.admin_site import TenantModelAdmin
+from common.admin_site import TenantModelAdmin, hms_admin_site
 from .models import PaymentCategory, Transaction, AccountingPeriod
 
 
-@admin.register(PaymentCategory)
 class PaymentCategoryAdmin(TenantModelAdmin):
     """Admin configuration for Payment Categories"""
     list_display = [
@@ -28,7 +27,6 @@ class PaymentCategoryAdmin(TenantModelAdmin):
     )
 
 
-@admin.register(Transaction)
 class TransactionAdmin(TenantModelAdmin):
     """Comprehensive Transaction Management in Admin"""
     list_display = [
@@ -121,7 +119,6 @@ class TransactionAdmin(TenantModelAdmin):
         )
 
 
-@admin.register(AccountingPeriod)
 class AccountingPeriodAdmin(TenantModelAdmin):
     """Admin configuration for Accounting Periods"""
     list_display = [
@@ -179,3 +176,8 @@ class AccountingPeriodAdmin(TenantModelAdmin):
         
         self.message_user(request, f"{queryset.count()} accounting periods updated.")
     calculate_financial_summary.short_description = "Recalculate Financial Summary"
+
+# Register models with custom admin site
+hms_admin_site.register(PaymentCategory, PaymentCategoryAdmin)
+hms_admin_site.register(Transaction, TransactionAdmin)
+hms_admin_site.register(AccountingPeriod, AccountingPeriodAdmin)

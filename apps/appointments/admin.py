@@ -1,9 +1,8 @@
 from django.contrib import admin
 from django.utils.html import format_html
-from common.admin_site import TenantModelAdmin
+from common.admin_site import TenantModelAdmin, hms_admin_site
 from .models import Appointment, AppointmentType
 
-@admin.register(AppointmentType)
 class AppointmentTypeAdmin(TenantModelAdmin):
     """Admin configuration for Appointment Types"""
     list_display = [
@@ -43,7 +42,6 @@ class FollowUpAppointmentInline(admin.TabularInline):
         qs = super().get_queryset(request)
         return qs.select_related('patient', 'doctor', 'appointment_type')
 
-@admin.register(Appointment)
 class AppointmentAdmin(TenantModelAdmin):
     """Comprehensive Appointment Management in Admin"""
     list_display = [
@@ -198,3 +196,8 @@ class AppointmentAdmin(TenantModelAdmin):
         elif db_field.name == "original_appointment":
             kwargs["queryset"] = Appointment.objects.select_related('patient', 'doctor').all()
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+
+# Register models with custom admin site
+hms_admin_site.register(AppointmentType, AppointmentTypeAdmin)
+hms_admin_site.register(Appointment, AppointmentAdmin)

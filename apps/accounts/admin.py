@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth import get_user_model
 from django.utils.html import format_html
+from common.admin_site import hms_admin_site
 
 User = get_user_model()
 
@@ -122,7 +123,6 @@ class PatientProfileInline(admin.StackedInline):
         return False
 
 
-@admin.register(User)
 class UserAdmin(BaseUserAdmin):
     """Custom User Admin with Profile Inlines"""
     
@@ -278,3 +278,6 @@ class UserAdmin(BaseUserAdmin):
                 emergency_contact_relation='Unknown',
                 created_by=request.user
             )
+
+# Register User model with custom admin site
+hms_admin_site.register(User, UserAdmin)

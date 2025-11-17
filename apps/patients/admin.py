@@ -1,5 +1,5 @@
 from django.contrib import admin
-from common.admin_site import TenantModelAdmin
+from common.admin_site import TenantModelAdmin, hms_admin_site
 from .models import PatientProfile, PatientVitals, PatientAllergy
 
 
@@ -21,7 +21,6 @@ class PatientAllergyInline(admin.TabularInline):
     readonly_fields = ['tenant_id']
 
 
-@admin.register(PatientProfile)
 class PatientProfileAdmin(TenantModelAdmin):
     list_display = [
         'patient_id', 'full_name', 'age', 'gender', 'mobile_primary',
@@ -103,7 +102,6 @@ class PatientProfileAdmin(TenantModelAdmin):
     full_name.admin_order_field = 'first_name'
 
 
-@admin.register(PatientVitals)
 class PatientVitalsAdmin(TenantModelAdmin):
     list_display = [
         'patient', 'temperature', 'get_blood_pressure',
@@ -141,7 +139,6 @@ class PatientVitalsAdmin(TenantModelAdmin):
     get_blood_pressure.short_description = 'Blood Pressure'
 
 
-@admin.register(PatientAllergy)
 class PatientAllergyAdmin(TenantModelAdmin):
     list_display = [
         'patient', 'allergy_type', 'allergen', 'severity',
@@ -172,3 +169,9 @@ class PatientAllergyAdmin(TenantModelAdmin):
             'classes': ('collapse',)
         }),
     )
+
+
+# Register models with custom admin site
+hms_admin_site.register(PatientProfile, PatientProfileAdmin)
+hms_admin_site.register(PatientVitals, PatientVitalsAdmin)
+hms_admin_site.register(PatientAllergy, PatientAllergyAdmin)

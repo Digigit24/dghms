@@ -1,9 +1,8 @@
 from django.contrib import admin
-from common.admin_site import TenantModelAdmin
+from common.admin_site import TenantModelAdmin, hms_admin_site
 from .models import Specialty, DoctorProfile, DoctorAvailability
 
 
-@admin.register(Specialty)
 class SpecialtyAdmin(TenantModelAdmin):
     """Admin for Medical Specialties"""
     list_display = ['name', 'code', 'department', 'is_active', 'doctors_count', 'created_at']
@@ -42,7 +41,6 @@ class DoctorAvailabilityInline(admin.TabularInline):
     readonly_fields = ['tenant_id']
 
 
-@admin.register(DoctorProfile)
 class DoctorProfileAdmin(TenantModelAdmin):
     """Admin for Doctor Profiles"""
     list_display = [
@@ -111,7 +109,6 @@ class DoctorProfileAdmin(TenantModelAdmin):
     get_license_valid.short_description = 'License Valid'
 
 
-@admin.register(DoctorAvailability)
 class DoctorAvailabilityAdmin(TenantModelAdmin):
     """Admin for Doctor Availability"""
     list_display = [
@@ -141,3 +138,9 @@ class DoctorAvailabilityAdmin(TenantModelAdmin):
             'classes': ('collapse',)
         }),
     )
+
+
+# Register models with custom admin site
+hms_admin_site.register(Specialty, SpecialtyAdmin)
+hms_admin_site.register(DoctorProfile, DoctorProfileAdmin)
+hms_admin_site.register(DoctorAvailability, DoctorAvailabilityAdmin)

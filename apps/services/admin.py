@@ -1,5 +1,5 @@
 from django.contrib import admin
-from common.admin_site import TenantModelAdmin
+from common.admin_site import TenantModelAdmin, hms_admin_site
 from .models import (
     ServiceCategory,
     DiagnosticTest,
@@ -7,7 +7,6 @@ from .models import (
     HomeHealthcareService
 )
 
-@admin.register(ServiceCategory)
 class ServiceCategoryAdmin(TenantModelAdmin):
     list_display = ['name', 'type', 'is_active']
     list_filter = ['type', 'is_active']
@@ -25,7 +24,6 @@ class ServiceCategoryAdmin(TenantModelAdmin):
     )
 
 
-@admin.register(DiagnosticTest)
 class DiagnosticTestAdmin(TenantModelAdmin):
     list_display = [
         'name', 'code', 'category',
@@ -52,7 +50,6 @@ class DiagnosticTestAdmin(TenantModelAdmin):
     )
 
 
-@admin.register(NursingCarePackage)
 class NursingCarePackageAdmin(TenantModelAdmin):
     list_display = [
         'name', 'code', 'category',
@@ -76,7 +73,6 @@ class NursingCarePackageAdmin(TenantModelAdmin):
     )
 
 
-@admin.register(HomeHealthcareService)
 class HomeHealthcareServiceAdmin(TenantModelAdmin):
     list_display = [
         'name', 'code', 'category',
@@ -101,3 +97,9 @@ class HomeHealthcareServiceAdmin(TenantModelAdmin):
             'classes': ('collapse',)
         }),
     )
+
+# Register models with custom admin site
+hms_admin_site.register(ServiceCategory, ServiceCategoryAdmin)
+hms_admin_site.register(DiagnosticTest, DiagnosticTestAdmin)
+hms_admin_site.register(NursingCarePackage, NursingCarePackageAdmin)
+hms_admin_site.register(HomeHealthcareService, HomeHealthcareServiceAdmin)

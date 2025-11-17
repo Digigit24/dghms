@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.utils.html import format_html
-from common.admin_site import TenantModelAdmin
+from common.admin_site import TenantModelAdmin, hms_admin_site
 from .models import (
     ProductCategory,
     PharmacyProduct,
@@ -11,7 +11,6 @@ from .models import (
 )
 
 
-@admin.register(ProductCategory)
 class ProductCategoryAdmin(TenantModelAdmin):
     """Admin for Product Categories"""
     list_display = ['name', 'type', 'is_active', 'created_at']
@@ -34,7 +33,6 @@ class ProductCategoryAdmin(TenantModelAdmin):
     )
 
 
-@admin.register(PharmacyProduct)
 class PharmacyProductAdmin(TenantModelAdmin):
     """Admin for Pharmacy Products"""
     list_display = [
@@ -98,7 +96,6 @@ class CartItemInline(admin.TabularInline):
     total_price.short_description = 'Total Price'
 
 
-@admin.register(Cart)
 class CartAdmin(TenantModelAdmin):
     """Admin for Shopping Carts"""
     list_display = ['user_id', 'total_items', 'total_amount', 'created_at', 'updated_at']
@@ -132,7 +129,6 @@ class PharmacyOrderItemInline(admin.TabularInline):
     total_price.short_description = 'Total Price'
 
 
-@admin.register(PharmacyOrder)
 class PharmacyOrderAdmin(TenantModelAdmin):
     """Admin for Pharmacy Orders"""
     list_display = [
@@ -168,3 +164,10 @@ class PharmacyOrderAdmin(TenantModelAdmin):
     def has_add_permission(self, request):
         """Disable manual order creation in admin"""
         return False
+
+
+# Register models with custom admin site
+hms_admin_site.register(ProductCategory, ProductCategoryAdmin)
+hms_admin_site.register(PharmacyProduct, PharmacyProductAdmin)
+hms_admin_site.register(Cart, CartAdmin)
+hms_admin_site.register(PharmacyOrder, PharmacyOrderAdmin)
