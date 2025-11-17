@@ -1,12 +1,9 @@
 from datetime import timezone
 from rest_framework import serializers
 from django.contrib.contenttypes.models import ContentType
-from django.contrib.auth import get_user_model
-from django.db.models import Q  # added import to fix undefined Q error
+from django.db.models import Q
 
 from .models import PaymentCategory, Transaction, AccountingPeriod
-
-User = get_user_model()
 
 
 class PaymentCategorySerializer(serializers.ModelSerializer):

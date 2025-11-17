@@ -30,6 +30,24 @@ class HMSAdminSite(AdminSite):
 
         return True
 
+    def each_context(self, request):
+        """
+        Add custom context to all admin pages
+        Includes tenant_id and user_id from session
+        """
+        context = super().each_context(request)
+
+        # Add tenant and user information from session
+        if hasattr(request, 'session'):
+            user_data = request.session.get('user_data', {})
+            context['admin_tenant_id'] = user_data.get('tenant_id', 'Not Available')
+            context['admin_tenant_slug'] = user_data.get('tenant_slug', 'Not Available')
+            context['admin_user_id'] = user_data.get('user_id', 'Not Available')
+            context['admin_user_email'] = user_data.get('email', 'Not Available')
+            context['admin_user_type'] = user_data.get('user_type', 'staff')
+
+        return context
+
     def index(self, request, extra_context=None):
         """
         Custom admin index page with tenant information

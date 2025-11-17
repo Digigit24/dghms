@@ -223,7 +223,7 @@ class DoctorProfileViewSet(viewsets.ModelViewSet):
     - Doctors can view/edit their own profile without global permissions
     - Others need appropriate model permissions
     """
-    queryset = DoctorProfile.objects.select_related('user').prefetch_related(
+    queryset = DoctorProfile.objects.prefetch_related(
         'specialties', 'availability'
     ).all()
     permission_classes = [IsAuthenticated, DjangoModelPermissions]
@@ -231,7 +231,7 @@ class DoctorProfileViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['status', 'is_available_online', 'is_available_offline']
     search_fields = [
-        'user__first_name', 'user__last_name', 'user__email',
+        'user_id',
         'medical_license_number', 'qualifications',
     ]
     ordering_fields = ['created_at', 'consultation_fee', 'average_rating', 'years_of_experience']

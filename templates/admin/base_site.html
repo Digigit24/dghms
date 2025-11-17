@@ -1,0 +1,53 @@
+{% extends "admin/base.html" %}
+
+{% block title %}{% if subtitle %}{{ subtitle }} | {% endif %}{{ title }} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block branding %}
+<div id="site-name">
+    <a href="{% url 'admin:index' %}">{{ site_header|default:_('Django administration') }}</a>
+</div>
+
+{# Display Tenant and User Information #}
+{% if admin_tenant_id %}
+<div style="background: #417690; color: white; padding: 8px 15px; margin-top: 5px; border-radius: 3px; font-size: 12px; font-family: 'Roboto', 'Lucida Grande', Verdana, Arial, sans-serif;">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+        <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+            <div>
+                <strong>🏥 Tenant:</strong>
+                <span style="background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 2px;">
+                    {{ admin_tenant_slug|default:"N/A" }}
+                </span>
+            </div>
+            <div>
+                <strong>🔑 Tenant ID:</strong>
+                <span style="background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 2px; font-family: monospace; font-size: 11px;">
+                    {{ admin_tenant_id|truncatechars:20 }}
+                </span>
+            </div>
+        </div>
+        <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+            <div>
+                <strong>👤 User ID:</strong>
+                <span style="background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 2px; font-family: monospace; font-size: 11px;">
+                    {{ admin_user_id|truncatechars:20 }}
+                </span>
+            </div>
+            <div>
+                <strong>📧 Email:</strong>
+                <span style="background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 2px;">
+                    {{ admin_user_email }}
+                </span>
+            </div>
+            <div>
+                <strong>Type:</strong>
+                <span style="background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 2px; text-transform: uppercase;">
+                    {{ admin_user_type }}
+                </span>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block nav-global %}{% endblock %}
