@@ -1,10 +1,6 @@
 from rest_framework import serializers
-from django.contrib.auth import get_user_model
-from django.contrib.auth.models import Group
 from django.db import transaction
 from .models import PatientProfile, PatientVitals, PatientAllergy
-
-User = get_user_model()
 
 
 class PatientVitalsSerializer(serializers.ModelSerializer):
@@ -149,23 +145,19 @@ class PatientProfileCreateUpdateSerializer(serializers.ModelSerializer):
         exclude = ['user', 'patient_id', 'age', 'bmi', 'created_by']
     
     def validate_user_id(self, value):
-        """Validate user exists and doesn't have patient profile"""
+        """Validate user_id format (UUID from SuperAdmin)"""
         if value is None:
             return value
-        
-        try:
-            user = User.objects.get(id=value)
-            
-            # Check if creating new profile
-            if self.instance is None:
-                if hasattr(user, 'patient_profile'):
-                    raise serializers.ValidationError(
-                        'User already has a patient profile'
-                    )
-            
-            return value
-        except User.DoesNotExist:
-            raise serializers.ValidationError('User not found')
+
+        # Check if creating new profile and user_id already has a patient profile
+        if self.instance is None:
+            existing = PatientProfile.objects.filter(user_id=value).exists()
+            if existing:
+                raise serializers.ValidationError(
+                    'User already has a patient profile'
+                )
+
+        return value
     
     def validate_date_of_birth(self, value):
         """Ensure date of birth is in the past"""
@@ -219,23 +211,19 @@ class PatientProfileCreateUpdateSerializer(serializers.ModelSerializer):
     
     def create(self, validated_data):
         """Create patient profile"""
-        user_id = validated_data.pop('user_id', None)
-        
-        # Get user if provided
-        user = None
-        if user_id:
-            user = User.objects.get(id=user_id)
-        
-        # Get current user from context
+        # user_id is already in validated_data, no need to pop it
+
+        # Get current user ID from context
         request = self.context.get('request')
-        created_by = request.user if request else None
-        
+        created_by_user_id = None
+        if request and hasattr(request, 'user_id'):
+            created_by_user_id = request.user_id
+
         patient = PatientProfile.objects.create(
-            user=user,
-            created_by=created_by,
+            created_by_user_id=created_by_user_id,
             **validated_data
         )
-        
+
         return patient
     
     def update(self, instance, validated_data):
@@ -268,18 +256,13 @@ class PatientStatisticsSerializer(serializers.Serializer):
 
 class PatientRegistrationSerializer(serializers.Serializer):
     """
-    Serializer for patient registration with optional user creation.
-    - If can_login=True: Creates User + PatientProfile
-    - If can_login=False: Creates PatientProfile only (walk-in)
+    Serializer for patient registration.
+    NOTE: User creation is handled by SuperAdmin, not here.
+    - If user_id provided: Links patient to existing SuperAdmin user
+    - If user_id is None: Creates walk-in patient profile only
     """
-    # Control field
-    can_login = serializers.BooleanField(required=True)
-    
-    # User fields (required only if can_login=True)
-    email = serializers.EmailField(required=False, allow_blank=True)
-    username = serializers.CharField(max_length=150, required=False, allow_blank=True)
-    password = serializers.CharField(write_only=True, min_length=8, required=False, allow_blank=True)
-    password_confirm = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    # User ID from SuperAdmin (optional for walk-ins)
+    user_id = serializers.UUIDField(required=False, allow_null=True)
     
     # Patient Profile fields (REQUIRED)
     first_name = serializers.CharField(max_length=100, required=True)
@@ -331,16 +314,12 @@ class PatientRegistrationSerializer(serializers.Serializer):
     insurance_policy_number = serializers.CharField(max_length=100, required=False, allow_blank=True)
     insurance_expiry_date = serializers.DateField(required=False, allow_null=True)
     
-    def validate_email(self, value):
-        """Check if email already exists (only if provided)"""
-        if value and User.objects.filter(email=value).exists():
-            raise serializers.ValidationError('User with this email already exists')
-        return value
-    
-    def validate_username(self, value):
-        """Check if username already exists (only if provided)"""
-        if value and User.objects.filter(username=value).exists():
-            raise serializers.ValidationError('Username already exists')
+    def validate_user_id(self, value):
+        """Validate user_id (UUID from SuperAdmin)"""
+        if value:
+            # Check if user_id already has a patient profile
+            if PatientProfile.objects.filter(user_id=value).exists():
+                raise serializers.ValidationError('User already has a patient profile')
         return value
     
     def validate_mobile_primary(self, value):
@@ -368,29 +347,6 @@ class PatientRegistrationSerializer(serializers.Serializer):
     
     def validate(self, attrs):
         """Cross-field validation"""
-        can_login = attrs.get('can_login')
-        
-        # If can_login=True, user fields are required
-        if can_login:
-            required_user_fields = ['email', 'username', 'password', 'password_confirm']
-            missing_fields = []
-            
-            for field in required_user_fields:
-                if not attrs.get(field):
-                    missing_fields.append(field)
-            
-            if missing_fields:
-                raise serializers.ValidationError({
-                    field: f'{field} is required when can_login is true'
-                    for field in missing_fields
-                })
-            
-            # Password confirmation
-            if attrs['password'] != attrs['password_confirm']:
-                raise serializers.ValidationError({
-                    'password': 'Passwords do not match'
-                })
-        
         # Height and weight validation
         height = attrs.get('height')
         weight = attrs.get('weight')
@@ -424,55 +380,17 @@ class PatientRegistrationSerializer(serializers.Serializer):
     
     @transaction.atomic
     def create(self, validated_data):
-        """Create patient profile with optional user"""
-        can_login = validated_data.pop('can_login')
-        
-        user = None
-        
-        # Create user if can_login=True
-        if can_login:
-            user_data = {
-                'email': validated_data.pop('email'),
-                'username': validated_data.pop('username'),
-                'first_name': validated_data['first_name'],
-                'last_name': validated_data['last_name'],
-                'phone': validated_data['mobile_primary'],
-            }
-            
-            password = validated_data.pop('password')
-            validated_data.pop('password_confirm')
-            
-            # Create user
-            user = User.objects.create_user(
-                password=password,
-                **user_data
-            )
-            
-            # Add user to Patient group
-            try:
-                patient_group = Group.objects.get(name='Patient')
-                user.groups.add(patient_group)
-            except Group.DoesNotExist:
-                # Rollback transaction
-                raise serializers.ValidationError(
-                    'Patient group does not exist. Please create it in Django Admin first.'
-                )
-        else:
-            # For walk-ins, remove user-related fields if provided
-            validated_data.pop('email', None)
-            validated_data.pop('username', None)
-            validated_data.pop('password', None)
-            validated_data.pop('password_confirm', None)
-        
+        """Create patient profile (user management is handled by SuperAdmin)"""
         # Get created_by from context
         request = self.context.get('request')
-        created_by = request.user if request and request.user.is_authenticated else None
-        
+        created_by_user_id = None
+        if request and hasattr(request, 'user_id'):
+            created_by_user_id = request.user_id
+
         # Create patient profile
         patient = PatientProfile.objects.create(
-            user=user,
-            created_by=created_by,
+            created_by_user_id=created_by_user_id,
             **validated_data
         )
-        
+
         return patient

@@ -1,10 +1,7 @@
 from rest_framework import serializers
 from .models import Appointment, AppointmentType
-from django.contrib.auth import get_user_model
 from apps.patients.serializers import PatientProfileListSerializer
 from apps.doctors.serializers import DoctorProfileListSerializer
-
-User = get_user_model()
 
 class AppointmentTypeSerializer(serializers.ModelSerializer):
     """Serializer for AppointmentType"""

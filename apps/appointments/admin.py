@@ -67,8 +67,7 @@ class AppointmentAdmin(TenantModelAdmin):
         'appointment_id',
         'patient__first_name',
         'patient__last_name',
-        'doctor__user__first_name',
-        'doctor__user__last_name',
+        'doctor__medical_license_number',
         'chief_complaint'
     ]
 
@@ -151,9 +150,9 @@ class AppointmentAdmin(TenantModelAdmin):
     
     def doctor_display(self, obj):
         """Display doctor information"""
-        if not obj.doctor or not obj.doctor.user:
+        if not obj.doctor:
             return "No Doctor"
-        return f"Dr. {obj.doctor.user.get_full_name()}"
+        return f"Dr. (ID: {obj.doctor.user_id})"
     doctor_display.short_description = "Doctor"
     
     def status_badge(self, obj):
@@ -182,7 +181,7 @@ class AppointmentAdmin(TenantModelAdmin):
         # Use select_related for foreign keys to reduce queries
         return qs.select_related(
             'patient',
-            'doctor__user',  # Include user relation
+            'doctor',
             'appointment_type'
         )
     
@@ -190,9 +189,9 @@ class AppointmentAdmin(TenantModelAdmin):
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "patient":
             # Limit queryset to prevent loading too many records
-            kwargs["queryset"] = db_field.related_model.objects.select_related('user').all()
+            kwargs["queryset"] = db_field.related_model.objects.all()
         elif db_field.name == "doctor":
-            kwargs["queryset"] = db_field.related_model.objects.select_related('user').all()
+            kwargs["queryset"] = db_field.related_model.objects.all()
         elif db_field.name == "original_appointment":
             kwargs["queryset"] = Appointment.objects.select_related('patient', 'doctor').all()
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
