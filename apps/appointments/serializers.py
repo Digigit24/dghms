@@ -61,22 +61,22 @@ class AppointmentDetailSerializer(serializers.ModelSerializer):
         read_only=True
     )
     
-    created_by_name = serializers.CharField(
-        source='created_by.get_full_name', 
-        read_only=True,
-        allow_null=True
-    )
-    cancelled_by_name = serializers.CharField(
-        source='cancelled_by.get_full_name', 
-        read_only=True,
-        allow_null=True
-    )
-    approved_by_name = serializers.CharField(
-        source='approved_by.get_full_name', 
-        read_only=True,
-        allow_null=True
-    )
+    created_by_name = serializers.SerializerMethodField()
+    cancelled_by_name = serializers.SerializerMethodField()
+    approved_by_name = serializers.SerializerMethodField()
     visit_number = serializers.CharField(source='visit.visit_number', read_only=True)
+    
+    def get_created_by_name(self, obj):
+        """Get created by name - placeholder since we don't have user model"""
+        return f"User {obj.created_by_id}" if obj.created_by_id else None
+    
+    def get_cancelled_by_name(self, obj):
+        """Get cancelled by name - placeholder since we don't have user model"""
+        return f"User {obj.cancelled_by_id}" if obj.cancelled_by_id else None
+    
+    def get_approved_by_name(self, obj):
+        """Get approved by name - placeholder since we don't have user model"""
+        return f"User {obj.approved_by_id}" if obj.approved_by_id else None
     
     class Meta:
         model = Appointment
@@ -107,9 +107,9 @@ class AppointmentCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Appointment
         exclude = [
-            'patient', 'doctor', 'appointment_type', 
-            'original_appointment', 
-            'created_by', 'cancelled_by', 'approved_by'
+            'patient', 'doctor', 'appointment_type',
+            'original_appointment',
+            'created_by_id', 'cancelled_by_id', 'approved_by_id'
         ]
     
     def validate(self, attrs):
@@ -164,8 +164,8 @@ class AppointmentCreateUpdateSerializer(serializers.ModelSerializer):
         validated_data.pop('original_appointment_id', None)
         
         # Set creator
-        if request and request.user:
-            validated_data['created_by'] = request.user
+        if request and hasattr(request, 'user') and hasattr(request.user, 'id'):
+            validated_data['created_by_id'] = request.user.id
         
         return super().create(validated_data)
     
