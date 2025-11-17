@@ -1,7 +1,7 @@
 # opd/admin.py
 from django.contrib import admin
 from django.utils.html import format_html
-from common.admin_site import TenantModelAdmin
+from common.admin_site import TenantModelAdmin, hms_admin_site
 from .models import (
     Visit, OPDBill, ProcedureMaster, ProcedurePackage,
     ProcedureBill, ProcedureBillItem, ClinicalNote,
@@ -9,7 +9,6 @@ from .models import (
 )
 
 
-@admin.register(Visit)
 class VisitAdmin(TenantModelAdmin):
     """Admin interface for Visit model."""
 
@@ -106,7 +105,6 @@ class VisitAdmin(TenantModelAdmin):
     payment_status_badge.short_description = 'Payment Status'
 
 
-@admin.register(OPDBill)
 class OPDBillAdmin(TenantModelAdmin):
     """Admin interface for OPDBill model."""
 
@@ -208,7 +206,6 @@ class OPDBillAdmin(TenantModelAdmin):
     payment_status_badge.short_description = 'Payment Status'
 
 
-@admin.register(ProcedureMaster)
 class ProcedureMasterAdmin(TenantModelAdmin):
     """Admin interface for ProcedureMaster model."""
 
@@ -273,7 +270,6 @@ class ProcedureMasterAdmin(TenantModelAdmin):
     is_active_badge.short_description = 'Status'
 
 
-@admin.register(ProcedurePackage)
 class ProcedurePackageAdmin(TenantModelAdmin):
     """Admin interface for ProcedurePackage model."""
 
@@ -369,7 +365,6 @@ class ProcedureBillItemInline(admin.TabularInline):
     autocomplete_fields = ['procedure']
 
 
-@admin.register(ProcedureBill)
 class ProcedureBillAdmin(TenantModelAdmin):
     """Admin interface for ProcedureBill model."""
 
@@ -465,7 +460,6 @@ class ProcedureBillAdmin(TenantModelAdmin):
     payment_status_badge.short_description = 'Payment Status'
 
 
-@admin.register(ClinicalNote)
 class ClinicalNoteAdmin(TenantModelAdmin):
     """Admin interface for ClinicalNote model."""
 
@@ -545,7 +539,6 @@ class ClinicalNoteAdmin(TenantModelAdmin):
     diagnosis_short.short_description = 'Diagnosis'
 
 
-@admin.register(VisitFinding)
 class VisitFindingAdmin(TenantModelAdmin):
     """Admin interface for VisitFinding model."""
 
@@ -645,7 +638,6 @@ class VisitFindingAdmin(TenantModelAdmin):
     bmi_category_display.short_description = 'BMI Category'
 
 
-@admin.register(VisitAttachment)
 class VisitAttachmentAdmin(TenantModelAdmin):
     """Admin interface for VisitAttachment model."""
 
@@ -708,3 +700,13 @@ class VisitAttachmentAdmin(TenantModelAdmin):
 # @admin.register(Doctor)
 # class DoctorAdmin(admin.ModelAdmin):
 #     search_fields = ['first_name', 'last_name', 'phone', 'email', 'specialization']
+
+# Register models with custom admin site
+hms_admin_site.register(Visit, VisitAdmin)
+hms_admin_site.register(OPDBill, OPDBillAdmin)
+hms_admin_site.register(ProcedureMaster, ProcedureMasterAdmin)
+hms_admin_site.register(ProcedurePackage, ProcedurePackageAdmin)
+hms_admin_site.register(ProcedureBill, ProcedureBillAdmin)
+hms_admin_site.register(ClinicalNote, ClinicalNoteAdmin)
+hms_admin_site.register(VisitFinding, VisitFindingAdmin)
+hms_admin_site.register(VisitAttachment, VisitAttachmentAdmin)

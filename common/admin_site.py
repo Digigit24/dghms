@@ -138,6 +138,27 @@ class TenantModelAdmin(admin.ModelAdmin):
 
         super().save_model(request, obj, form, change)
 
+    # Override permission methods to bypass Django's permission system
+    def has_module_permission(self, request):
+        """Allow access to the module"""
+        return True
+
+    def has_view_permission(self, request, obj=None):
+        """Allow viewing objects"""
+        return True
+
+    def has_add_permission(self, request):
+        """Allow adding new objects"""
+        return True
+
+    def has_change_permission(self, request, obj=None):
+        """Allow changing objects"""
+        return True
+
+    def has_delete_permission(self, request, obj=None):
+        """Allow deleting objects"""
+        return True
+
 
 # Create custom admin site instance
 hms_admin_site = HMSAdminSite(name='hms_admin')

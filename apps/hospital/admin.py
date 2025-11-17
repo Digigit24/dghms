@@ -1,10 +1,9 @@
 from django.contrib import admin
 from django.utils.html import format_html
-from common.admin_site import TenantModelAdmin
+from common.admin_site import TenantModelAdmin, hms_admin_site
 from .models import Hospital
 
 
-@admin.register(Hospital)
 class HospitalAdmin(TenantModelAdmin):
     """Hospital configuration admin"""
 
@@ -58,4 +57,8 @@ class HospitalAdmin(TenantModelAdmin):
         return super().changeform_view(
             request, object_id, form_url, extra_context=extra_context
         )
+
+
+# Register models with custom admin site
+hms_admin_site.register(Hospital, HospitalAdmin)
 
