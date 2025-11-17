@@ -133,7 +133,7 @@ class AppointmentAdmin(TenantModelAdmin):
                 'approved_at',
                 'created_at',
                 'updated_at',
-                'created_by_user_id',
+                'created_by_id',
                 'cancelled_by_id',
                 'approved_by_id',
                 'tenant_id',
