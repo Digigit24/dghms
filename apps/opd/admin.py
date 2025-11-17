@@ -82,7 +82,7 @@ class VisitAdmin(TenantModelAdmin):
         }),
         ('Audit', {
             'fields': (
-                'created_by_user_id',
+                'created_by_id',
                 'tenant_id',
                 'created_at',
                 'updated_at',
@@ -523,7 +523,7 @@ class ClinicalNoteAdmin(TenantModelAdmin):
         }),
         ('Audit', {
             'fields': (
-                'created_by_user_id',
+                'created_by_id',
                 'tenant_id',
                 'created_at',
                 'updated_at',
@@ -605,7 +605,7 @@ class VisitFindingAdmin(TenantModelAdmin):
         }),
         ('Audit', {
             'fields': (
-                'recorded_by_user_id',
+                'recorded_by_id',
                 'tenant_id',
                 'created_at',
                 'updated_at',
@@ -675,7 +675,7 @@ class VisitAttachmentAdmin(TenantModelAdmin):
         }),
         ('Audit', {
             'fields': (
-                'uploaded_by_user_id',
+                'uploaded_by_id',
                 'tenant_id',
                 'uploaded_at',
             )
