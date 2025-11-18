@@ -1,9 +1,12 @@
 import jwt
 import json
+import logging
 import threading
 from django.conf import settings
 from django.http import JsonResponse
 from django.utils.deprecation import MiddlewareMixin
+
+logger = logging.getLogger(__name__)
 
 # Thread-local storage for tenant_id and request (for future database routing)
 _thread_locals = threading.local()
@@ -51,30 +54,53 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
     def process_request(self, request):
         """Process incoming request and validate JWT token"""
 
+        # TEMP: Force print to console to verify middleware is running
+        print(f"[JWT MIDDLEWARE] Processing: {request.method} {request.path}")
+
         # Store request in thread-local storage for authentication backends
         set_current_request(request)
 
         # Skip validation for public paths
         if any(request.path.startswith(path) for path in self.PUBLIC_PATHS):
+            print(f"[JWT MIDDLEWARE] Skipping public path: {request.path}")
             return None
+
+        # Debug: Log all incoming request details
+        print(f"[JWT MIDDLEWARE] Starting authentication for {request.path}")
+        logger.debug("="*80)
+        logger.debug(f"Incoming Request: {request.method} {request.path}")
+        logger.debug(f"Request Headers:")
+        for key, value in request.META.items():
+            if key.startswith('HTTP_'):
+                # Truncate token for security
+                display_value = value[:50] + '...' if key == 'HTTP_AUTHORIZATION' and len(value) > 50 else value
+                logger.debug(f"  {key}: {display_value}")
 
         # Get Authorization header
         auth_header = request.META.get('HTTP_AUTHORIZATION')
         if not auth_header:
+            print(f"[JWT MIDDLEWARE] ❌ NO AUTHORIZATION HEADER - Path: {request.path}")
+            logger.warning(f"Missing Authorization header - Path: {request.path}, Method: {request.method}")
             return JsonResponse(
                 {'error': 'Authorization header required'},
                 status=401
             )
 
         # Extract token from "Bearer <token>" format
+        logger.debug(f"Authorization header present: {auth_header[:50]}...")
         try:
             scheme, token = auth_header.split(' ', 1)
+            logger.debug(f"Auth scheme: {scheme}")
+            logger.debug(f"Token length: {len(token)} characters")
+
             if scheme.lower() != 'bearer':
+                logger.warning(f"Invalid auth scheme '{scheme}' - Path: {request.path}")
                 return JsonResponse(
                     {'error': 'Invalid authorization scheme. Use Bearer token'},
                     status=401
                 )
         except ValueError:
+            logger.warning(f"Malformed Authorization header - Path: {request.path}")
             return JsonResponse(
                 {'error': 'Invalid authorization header format'},
                 status=401
@@ -87,6 +113,12 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
             algorithm = getattr(settings, 'JWT_ALGORITHM', 'HS256')
             leeway = getattr(settings, 'JWT_LEEWAY', 30)
 
+            logger.debug(f"JWT Configuration:")
+            logger.debug(f"  Algorithm: {algorithm}")
+            logger.debug(f"  Leeway: {leeway}s")
+            logger.debug(f"  Secret key configured: {'Yes' if secret_key else 'No'}")
+            logger.debug(f"  Secret key length: {len(secret_key) if secret_key else 0} chars")
+
             if not secret_key:
                 return JsonResponse(
                     {'error': 'JWT_SECRET_KEY not configured'},
@@ -94,19 +126,31 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
                 )
 
             # Decode JWT token
+            logger.debug("Attempting to decode JWT token...")
             payload = jwt.decode(
                 token,
                 secret_key,
                 algorithms=[algorithm],
                 leeway=leeway  # Tolerate clock skew between servers
             )
+            logger.debug(f"JWT decoded successfully!")
+            logger.debug(f"JWT Payload keys: {list(payload.keys())}")
+            logger.debug(f"JWT Payload: {json.dumps(payload, indent=2)}")
 
-        except jwt.ExpiredSignatureError:
+        except jwt.ExpiredSignatureError as e:
+            logger.warning(f"Expired JWT token - Path: {request.path}")
+            logger.debug(f"Token expiry details: {str(e)}")
             return JsonResponse(
                 {'error': 'Token has expired'},
                 status=401
             )
         except jwt.InvalidTokenError as e:
+            print(f"[JWT MIDDLEWARE] ❌ INVALID TOKEN: {str(e)}")
+            print(f"[JWT MIDDLEWARE] Algorithm used: {algorithm}")
+            print(f"[JWT MIDDLEWARE] Token preview: {token[:100]}...")
+            logger.error(f"Invalid JWT token: {str(e)} - Path: {request.path}, Algorithm: {algorithm}")
+            logger.debug(f"Full token error: {repr(e)}")
+            logger.debug(f"Token (first 100 chars): {token[:100]}...")
             return JsonResponse(
                 {'error': f'Invalid token: {str(e)}'},
                 status=401
@@ -118,16 +162,34 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
             'is_super_admin', 'permissions', 'enabled_modules'
         ]
 
+        logger.debug(f"Validating required fields: {required_fields}")
         for field in required_fields:
             if field not in payload:
+                print(f"[JWT MIDDLEWARE] ❌ MISSING FIELD: '{field}'")
+                print(f"[JWT MIDDLEWARE] Available fields: {list(payload.keys())}")
+                print(f"[JWT MIDDLEWARE] Full payload: {json.dumps(payload, indent=2)}")
+                logger.error(
+                    f"Missing JWT field '{field}' - Path: {request.path}, "
+                    f"Available fields: {list(payload.keys())}"
+                )
+                logger.debug(f"Full payload: {json.dumps(payload, indent=2)}")
                 return JsonResponse(
                     {'error': f'Missing required field in token: {field}'},
                     status=401
                 )
+            else:
+                logger.debug(f"  ✓ {field}: {payload[field]}")
 
         # Check if HMS module is enabled
         enabled_modules = payload.get('enabled_modules', [])
         if 'hms' not in enabled_modules:
+            print(f"[JWT MIDDLEWARE] ❌ HMS MODULE NOT ENABLED")
+            print(f"[JWT MIDDLEWARE] User: {payload.get('email')}")
+            print(f"[JWT MIDDLEWARE] Enabled modules: {enabled_modules}")
+            logger.warning(
+                f"HMS module not enabled - Path: {request.path}, "
+                f"User: {payload.get('email')}, Enabled modules: {enabled_modules}"
+            )
             return JsonResponse(
                 {'error': 'HMS module not enabled for this user'},
                 status=403
@@ -165,6 +227,18 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
 
         # Store tenant_id in thread-local storage for database routing
         set_current_tenant_id(request.tenant_id)
+
+        # CRITICAL: Create TenantUser and set request.user for DRF authentication
+        from .auth_backends import TenantUser
+        request.user = TenantUser(payload)
+        request._cached_user = request.user  # Cache to prevent re-authentication
+
+        print(f"[JWT MIDDLEWARE] ✅ AUTH SUCCESS - User: {request.email}, Tenant: {request.tenant_id}")
+        logger.info(
+            f"JWT auth successful - Path: {request.path}, User: {request.email}, "
+            f"Tenant: {request.tenant_id}, Modules: {request.enabled_modules}"
+        )
+        logger.debug("="*80)
 
         return None
 

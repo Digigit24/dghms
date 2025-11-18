@@ -38,9 +38,23 @@ LOGGING = {
             "filename": str(LOG_DIR / "django_errors.log"),
             "formatter": "verbose",
         },
+        "debug_file": {
+            "class": "logging.FileHandler",
+            "filename": str(LOG_DIR / "jwt_debug.log"),
+            "formatter": "verbose",
+        },
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "verbose",
+        },
+    },
+
+    "loggers": {
+        # JWT authentication middleware logger
+        "common.middleware": {
+            "handlers": ["console", "file", "debug_file"],
+            "level": "DEBUG",  # Show all debug info for auth issues
+            "propagate": False,
         },
     },
 
