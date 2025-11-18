@@ -71,12 +71,12 @@ from .serializers import (
 class SpecialtyViewSet(viewsets.ModelViewSet):
     """
     Medical Specialties Management
-    
-    Uses Django model permissions for access control.
+
+    JWT authentication handled by middleware
     """
     queryset = Specialty.objects.all()
     serializer_class = SpecialtySerializer
-    permission_classes = [IsAuthenticated, DjangoModelPermissions]
+    permission_classes = []  # Auth handled by JWT middleware
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['is_active', 'department']
@@ -218,15 +218,13 @@ class SpecialtyViewSet(viewsets.ModelViewSet):
 class DoctorProfileViewSet(viewsets.ModelViewSet):
     """
     Doctor Profile Management
-    
-    Uses Django model permissions with owner shortcuts:
-    - Doctors can view/edit their own profile without global permissions
-    - Others need appropriate model permissions
+
+    JWT authentication handled by middleware
     """
     queryset = DoctorProfile.objects.prefetch_related(
         'specialties', 'availability'
     ).all()
-    permission_classes = [IsAuthenticated, DjangoModelPermissions]
+    permission_classes = []  # Auth handled by JWT middleware
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['status', 'is_available_online', 'is_available_offline']
@@ -290,7 +288,7 @@ class DoctorProfileViewSet(viewsets.ModelViewSet):
 
     def _is_owner(self, request, instance):
         """Check if request user is the owner of the profile"""
-        return instance.user_id == request.user.id
+        return instance.user_id == getattr(request, 'user_id', None)
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
@@ -323,19 +321,9 @@ class DoctorProfileViewSet(viewsets.ModelViewSet):
         )
 
     def update(self, request, *args, **kwargs):
-        """Allow update if user has permission OR is the owner"""
+        """Update doctor profile"""
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
-
-        # Check permission: has change permission OR is owner
-        has_perm = request.user.has_perm('doctors.change_doctorprofile')
-        is_owner = self._is_owner(request, instance)
-
-        if not has_perm and not is_owner:
-            return Response(
-                {'success': False, 'error': 'Permission denied'},
-                status=status.HTTP_403_FORBIDDEN
-            )
 
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
@@ -477,16 +465,6 @@ class DoctorProfileViewSet(viewsets.ModelViewSet):
         """Add availability slot"""
         doctor = self.get_object()
 
-        # Check permission: has add permission OR is owner
-        has_perm = request.user.has_perm('doctors.add_doctoravailability')
-        is_owner = self._is_owner(request, doctor)
-
-        if not has_perm and not is_owner:
-            return Response(
-                {'success': False, 'error': 'Permission denied'},
-                status=status.HTTP_403_FORBIDDEN
-            )
-
         serializer = DoctorAvailabilityCreateUpdateSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save(doctor=doctor)
@@ -512,13 +490,6 @@ class DoctorProfileViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def statistics(self, request):
         """Get doctor statistics"""
-        # Require view permission
-        if not request.user.has_perm('doctors.view_doctorprofile'):
-            return Response(
-                {'success': False, 'error': 'Permission denied'},
-                status=status.HTTP_403_FORBIDDEN
-            )
-
         total = DoctorProfile.objects.count()
         active = DoctorProfile.objects.filter(status='active').count()
         on_leave = DoctorProfile.objects.filter(status='on_leave').count()
@@ -554,12 +525,6 @@ class DoctorProfileViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def activate(self, request, pk=None):
         """Activate doctor profile"""
-        if not request.user.has_perm('doctors.change_doctorprofile'):
-            return Response(
-                {'success': False, 'error': 'Permission denied'},
-                status=status.HTTP_403_FORBIDDEN
-            )
-
         doctor = self.get_object()
         doctor.status = 'active'
         doctor.save(update_fields=['status'])
@@ -580,12 +545,6 @@ class DoctorProfileViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def deactivate(self, request, pk=None):
         """Deactivate doctor profile"""
-        if not request.user.has_perm('doctors.change_doctorprofile'):
-            return Response(
-                {'success': False, 'error': 'Permission denied'},
-                status=status.HTTP_403_FORBIDDEN
-            )
-
         doctor = self.get_object()
         doctor.status = 'inactive'
         doctor.save(update_fields=['status'])
