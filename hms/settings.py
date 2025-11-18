@@ -44,6 +44,15 @@ LOGGING = {
         },
     },
 
+    "loggers": {
+        # JWT authentication middleware logger
+        "common.middleware": {
+            "handlers": ["console", "file"],
+            "level": "INFO",  # Show INFO, WARNING, ERROR for debugging auth issues
+            "propagate": False,
+        },
+    },
+
     "root": {  # catches all logs
         "handlers": ["console", "file"],
         "level": "ERROR",   # only errors go to the file
