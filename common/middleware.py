@@ -1,9 +1,12 @@
 import jwt
 import json
+import logging
 import threading
 from django.conf import settings
 from django.http import JsonResponse
 from django.utils.deprecation import MiddlewareMixin
+
+logger = logging.getLogger(__name__)
 
 # Thread-local storage for tenant_id and request (for future database routing)
 _thread_locals = threading.local()
@@ -61,6 +64,7 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
         # Get Authorization header
         auth_header = request.META.get('HTTP_AUTHORIZATION')
         if not auth_header:
+            logger.warning(f"Missing Authorization header - Path: {request.path}, Method: {request.method}")
             return JsonResponse(
                 {'error': 'Authorization header required'},
                 status=401
@@ -70,11 +74,13 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
         try:
             scheme, token = auth_header.split(' ', 1)
             if scheme.lower() != 'bearer':
+                logger.warning(f"Invalid auth scheme '{scheme}' - Path: {request.path}")
                 return JsonResponse(
                     {'error': 'Invalid authorization scheme. Use Bearer token'},
                     status=401
                 )
         except ValueError:
+            logger.warning(f"Malformed Authorization header - Path: {request.path}")
             return JsonResponse(
                 {'error': 'Invalid authorization header format'},
                 status=401
@@ -102,11 +108,13 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
             )
 
         except jwt.ExpiredSignatureError:
+            logger.warning(f"Expired JWT token - Path: {request.path}")
             return JsonResponse(
                 {'error': 'Token has expired'},
                 status=401
             )
         except jwt.InvalidTokenError as e:
+            logger.error(f"Invalid JWT token: {str(e)} - Path: {request.path}, Algorithm: {algorithm}")
             return JsonResponse(
                 {'error': f'Invalid token: {str(e)}'},
                 status=401
@@ -120,6 +128,10 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
 
         for field in required_fields:
             if field not in payload:
+                logger.error(
+                    f"Missing JWT field '{field}' - Path: {request.path}, "
+                    f"Available fields: {list(payload.keys())}"
+                )
                 return JsonResponse(
                     {'error': f'Missing required field in token: {field}'},
                     status=401
@@ -128,6 +140,10 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
         # Check if HMS module is enabled
         enabled_modules = payload.get('enabled_modules', [])
         if 'hms' not in enabled_modules:
+            logger.warning(
+                f"HMS module not enabled - Path: {request.path}, "
+                f"User: {payload.get('email')}, Enabled modules: {enabled_modules}"
+            )
             return JsonResponse(
                 {'error': 'HMS module not enabled for this user'},
                 status=403
@@ -165,6 +181,11 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
 
         # Store tenant_id in thread-local storage for database routing
         set_current_tenant_id(request.tenant_id)
+
+        logger.info(
+            f"JWT auth successful - Path: {request.path}, User: {request.email}, "
+            f"Tenant: {request.tenant_id}, Modules: {request.enabled_modules}"
+        )
 
         return None
 
