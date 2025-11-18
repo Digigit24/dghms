@@ -18,6 +18,39 @@ from apps.appointments.models import Appointment
 
 
 # ============================================================================
+# HELPER MIXIN
+# ============================================================================
+
+class TenantSerializerMixin:
+    """
+    Mixin to automatically set tenant_id and user_id fields from request.
+
+    This mixin provides a helper method to inject tenant_id and user_id
+    into validated_data when creating objects.
+    """
+
+    def inject_tenant_and_user(self, validated_data, user_field_name=None):
+        """
+        Inject tenant_id and optionally user_id into validated_data.
+
+        Args:
+            validated_data: The validated data dictionary
+            user_field_name: Name of the user ID field (e.g., 'created_by_id', 'billed_by_id')
+                           If None, only tenant_id is injected.
+        """
+        request = self.context.get('request')
+        if request:
+            # Set tenant_id from request
+            validated_data['tenant_id'] = request.tenant_id
+
+            # Set user ID field if specified
+            if user_field_name and hasattr(request, 'user_id'):
+                validated_data[user_field_name] = request.user_id
+
+        return validated_data
+
+
+# ============================================================================
 # VISIT SERIALIZERS
 # ============================================================================
 
@@ -101,7 +134,7 @@ class VisitDetailSerializer(serializers.ModelSerializer):
         return hasattr(obj, 'clinical_note')
 
 
-class VisitCreateUpdateSerializer(serializers.ModelSerializer):
+class VisitCreateUpdateSerializer(TenantSerializerMixin, serializers.ModelSerializer):
     """Serializer for creating/updating visits"""
     
     class Meta:
@@ -123,10 +156,7 @@ class VisitCreateUpdateSerializer(serializers.ModelSerializer):
     
     def create(self, validated_data):
         """Create visit with auto-generated visit number"""
-        request = self.context.get('request')
-        if request and request.user:
-            validated_data['created_by'] = request.user
-        
+        self.inject_tenant_and_user(validated_data, 'created_by_id')
         return super().create(validated_data)
 
 
@@ -169,7 +199,7 @@ class OPDBillDetailSerializer(serializers.ModelSerializer):
         ]
 
 
-class OPDBillCreateUpdateSerializer(serializers.ModelSerializer):
+class OPDBillCreateUpdateSerializer(TenantSerializerMixin, serializers.ModelSerializer):
     """Serializer for creating/updating OPD bills"""
     
     class Meta:
@@ -204,10 +234,7 @@ class OPDBillCreateUpdateSerializer(serializers.ModelSerializer):
     
     def create(self, validated_data):
         """Create OPD bill with auto-calculations"""
-        request = self.context.get('request')
-        if request and request.user:
-            validated_data['billed_by'] = request.user
-        
+        self.inject_tenant_and_user(validated_data, 'billed_by_id')
         return super().create(validated_data)
 
 
@@ -234,7 +261,7 @@ class ProcedureMasterDetailSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at', 'updated_at']
 
 
-class ProcedureMasterCreateUpdateSerializer(serializers.ModelSerializer):
+class ProcedureMasterCreateUpdateSerializer(TenantSerializerMixin, serializers.ModelSerializer):
     """Serializer for creating/updating procedure masters"""
     
     class Meta:
@@ -250,6 +277,11 @@ class ProcedureMasterCreateUpdateSerializer(serializers.ModelSerializer):
             if ProcedureMaster.objects.filter(code=value).exists():
                 raise serializers.ValidationError("Procedure code already exists")
         return value
+
+    def create(self, validated_data):
+        """Create procedure master with tenant"""
+        self.inject_tenant_and_user(validated_data)
+        return super().create(validated_data)
 
 
 # ============================================================================
@@ -299,7 +331,7 @@ class ProcedurePackageDetailSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at', 'updated_at']
 
 
-class ProcedurePackageCreateUpdateSerializer(serializers.ModelSerializer):
+class ProcedurePackageCreateUpdateSerializer(TenantSerializerMixin, serializers.ModelSerializer):
     """Serializer for creating/updating procedure packages"""
     
     class Meta:
@@ -313,13 +345,18 @@ class ProcedurePackageCreateUpdateSerializer(serializers.ModelSerializer):
         """Validate package data"""
         total = data.get('total_charge', Decimal('0'))
         discounted = data.get('discounted_charge', Decimal('0'))
-        
+
         if discounted > total:
             raise serializers.ValidationError({
                 'discounted_charge': 'Discounted charge cannot exceed total charge'
             })
-        
+
         return data
+
+    def create(self, validated_data):
+        """Create procedure package with tenant"""
+        self.inject_tenant_and_user(validated_data)
+        return super().create(validated_data)
 
 
 # ============================================================================
@@ -387,7 +424,7 @@ class ProcedureBillDetailSerializer(serializers.ModelSerializer):
         ]
 
 
-class ProcedureBillCreateUpdateSerializer(serializers.ModelSerializer):
+class ProcedureBillCreateUpdateSerializer(TenantSerializerMixin, serializers.ModelSerializer):
     """Serializer for creating/updating procedure bills with items"""
     
     items = ProcedureBillItemSerializer(many=True)
@@ -404,11 +441,9 @@ class ProcedureBillCreateUpdateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         """Create procedure bill with items"""
         items_data = validated_data.pop('items', [])
-        
-        request = self.context.get('request')
-        if request and request.user:
-            validated_data['billed_by'] = request.user
-        
+
+        self.inject_tenant_and_user(validated_data, 'billed_by_id')
+
         validated_data['total_amount'] = Decimal('0.00')
         validated_data['payable_amount'] = Decimal('0.00')
         
@@ -495,7 +530,7 @@ class ClinicalNoteDetailSerializer(serializers.ModelSerializer):
         read_only_fields = ['note_date', 'created_at', 'updated_at']
 
 
-class ClinicalNoteCreateUpdateSerializer(serializers.ModelSerializer):
+class ClinicalNoteCreateUpdateSerializer(TenantSerializerMixin, serializers.ModelSerializer):
     """Serializer for creating/updating clinical notes"""
     
     class Meta:
@@ -519,10 +554,7 @@ class ClinicalNoteCreateUpdateSerializer(serializers.ModelSerializer):
     
     def create(self, validated_data):
         """Create clinical note"""
-        request = self.context.get('request')
-        if request and request.user:
-            validated_data['created_by'] = request.user
-        
+        self.inject_tenant_and_user(validated_data, 'created_by_id')
         return super().create(validated_data)
 
 
@@ -565,7 +597,7 @@ class VisitFindingDetailSerializer(serializers.ModelSerializer):
         ]
 
 
-class VisitFindingCreateUpdateSerializer(serializers.ModelSerializer):
+class VisitFindingCreateUpdateSerializer(TenantSerializerMixin, serializers.ModelSerializer):
     """Serializer for creating/updating visit findings"""
     
     class Meta:
@@ -579,10 +611,7 @@ class VisitFindingCreateUpdateSerializer(serializers.ModelSerializer):
     
     def create(self, validated_data):
         """Create finding"""
-        request = self.context.get('request')
-        if request and request.user:
-            validated_data['recorded_by'] = request.user
-        
+        self.inject_tenant_and_user(validated_data, 'recorded_by_id')
         return super().create(validated_data)
 
 
@@ -635,7 +664,7 @@ class VisitAttachmentDetailSerializer(serializers.ModelSerializer):
         return obj.get_file_extension()
 
 
-class VisitAttachmentCreateUpdateSerializer(serializers.ModelSerializer):
+class VisitAttachmentCreateUpdateSerializer(TenantSerializerMixin, serializers.ModelSerializer):
     """Serializer for creating/updating visit attachments"""
 
     class Meta:
@@ -644,10 +673,7 @@ class VisitAttachmentCreateUpdateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         """Create attachment"""
-        request = self.context.get('request')
-        if request and request.user:
-            validated_data['uploaded_by'] = request.user
-
+        self.inject_tenant_and_user(validated_data, 'uploaded_by_id')
         return super().create(validated_data)
 
 
@@ -737,7 +763,7 @@ class ClinicalNoteTemplateFieldDetailSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at', 'updated_at']
 
 
-class ClinicalNoteTemplateFieldCreateUpdateSerializer(serializers.ModelSerializer):
+class ClinicalNoteTemplateFieldCreateUpdateSerializer(TenantSerializerMixin, serializers.ModelSerializer):
     """Serializer for creating/updating fields."""
 
     options = ClinicalNoteTemplateFieldOptionSerializer(many=True, required=False)
@@ -754,10 +780,17 @@ class ClinicalNoteTemplateFieldCreateUpdateSerializer(serializers.ModelSerialize
 
     def create(self, validated_data):
         """Create field with options."""
+        self.inject_tenant_and_user(validated_data)
         options_data = validated_data.pop('options', [])
         field = ClinicalNoteTemplateField.objects.create(**validated_data)
 
+        # Get tenant_id from the request for options
+        request = self.context.get('request')
+        tenant_id = request.tenant_id if request else None
+
         for option_data in options_data:
+            if tenant_id:
+                option_data['tenant_id'] = tenant_id
             ClinicalNoteTemplateFieldOption.objects.create(
                 field=field,
                 **option_data
@@ -779,8 +812,14 @@ class ClinicalNoteTemplateFieldCreateUpdateSerializer(serializers.ModelSerialize
             # Clear existing options
             instance.options.all().delete()
 
+            # Get tenant_id from the request for options
+            request = self.context.get('request')
+            tenant_id = request.tenant_id if request else None
+
             # Create new options
             for option_data in options_data:
+                if tenant_id:
+                    option_data['tenant_id'] = tenant_id
                 ClinicalNoteTemplateFieldOption.objects.create(
                     field=instance,
                     **option_data
@@ -834,7 +873,7 @@ class ClinicalNoteTemplateDetailSerializer(serializers.ModelSerializer):
         return [s.name for s in obj.specialties.all()]
 
 
-class ClinicalNoteTemplateCreateUpdateSerializer(serializers.ModelSerializer):
+class ClinicalNoteTemplateCreateUpdateSerializer(TenantSerializerMixin, serializers.ModelSerializer):
     """Serializer for creating/updating templates."""
 
     class Meta:
@@ -843,6 +882,11 @@ class ClinicalNoteTemplateCreateUpdateSerializer(serializers.ModelSerializer):
             'name', 'code', 'group', 'description',
             'specialties', 'is_active', 'display_order'
         ]
+
+    def create(self, validated_data):
+        """Create template with tenant"""
+        self.inject_tenant_and_user(validated_data)
+        return super().create(validated_data)
 
 
 # ============================================================================
@@ -960,7 +1004,7 @@ class ClinicalNoteTemplateResponseDetailSerializer(serializers.ModelSerializer):
         ]
 
 
-class ClinicalNoteTemplateResponseCreateUpdateSerializer(serializers.ModelSerializer):
+class ClinicalNoteTemplateResponseCreateUpdateSerializer(TenantSerializerMixin, serializers.ModelSerializer):
     """Serializer for creating/updating responses."""
 
     field_responses = ClinicalNoteTemplateFieldResponseCreateUpdateSerializer(
@@ -991,14 +1035,17 @@ class ClinicalNoteTemplateResponseCreateUpdateSerializer(serializers.ModelSerial
         """Create response with field responses."""
         field_responses_data = validated_data.pop('field_responses', [])
 
-        request = self.context.get('request')
-        if request and request.user:
-            validated_data['filled_by_id'] = request.user.id
+        self.inject_tenant_and_user(validated_data, 'filled_by_id')
 
         response = ClinicalNoteTemplateResponse.objects.create(**validated_data)
 
         # Create field responses
+        request = self.context.get('request')
+        tenant_id = request.tenant_id if request else None
+
         for field_response_data in field_responses_data:
+            if tenant_id:
+                field_response_data['tenant_id'] = tenant_id
             selected_options = field_response_data.pop('selected_options', [])
             field_response = ClinicalNoteTemplateFieldResponse.objects.create(
                 response=response,
@@ -1027,8 +1074,14 @@ class ClinicalNoteTemplateResponseCreateUpdateSerializer(serializers.ModelSerial
             # Delete existing field responses
             instance.field_responses.all().delete()
 
+            # Get tenant_id from the request for field responses
+            request = self.context.get('request')
+            tenant_id = request.tenant_id if request else None
+
             # Create new field responses
             for field_response_data in field_responses_data:
+                if tenant_id:
+                    field_response_data['tenant_id'] = tenant_id
                 selected_options = field_response_data.pop('selected_options', [])
                 field_response = ClinicalNoteTemplateFieldResponse.objects.create(
                     response=instance,
