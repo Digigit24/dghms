@@ -228,6 +228,11 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
         # Store tenant_id in thread-local storage for database routing
         set_current_tenant_id(request.tenant_id)
 
+        # CRITICAL: Create TenantUser and set request.user for DRF authentication
+        from .auth_backends import TenantUser
+        request.user = TenantUser(payload)
+        request._cached_user = request.user  # Cache to prevent re-authentication
+
         print(f"[JWT MIDDLEWARE] ✅ AUTH SUCCESS - User: {request.email}, Tenant: {request.tenant_id}")
         logger.info(
             f"JWT auth successful - Path: {request.path}, User: {request.email}, "
