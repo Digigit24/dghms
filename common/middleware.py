@@ -61,6 +61,16 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
         if any(request.path.startswith(path) for path in self.PUBLIC_PATHS):
             return None
 
+        # Debug: Log all incoming request details
+        logger.debug("="*80)
+        logger.debug(f"Incoming Request: {request.method} {request.path}")
+        logger.debug(f"Request Headers:")
+        for key, value in request.META.items():
+            if key.startswith('HTTP_'):
+                # Truncate token for security
+                display_value = value[:50] + '...' if key == 'HTTP_AUTHORIZATION' and len(value) > 50 else value
+                logger.debug(f"  {key}: {display_value}")
+
         # Get Authorization header
         auth_header = request.META.get('HTTP_AUTHORIZATION')
         if not auth_header:
@@ -71,8 +81,12 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
             )
 
         # Extract token from "Bearer <token>" format
+        logger.debug(f"Authorization header present: {auth_header[:50]}...")
         try:
             scheme, token = auth_header.split(' ', 1)
+            logger.debug(f"Auth scheme: {scheme}")
+            logger.debug(f"Token length: {len(token)} characters")
+
             if scheme.lower() != 'bearer':
                 logger.warning(f"Invalid auth scheme '{scheme}' - Path: {request.path}")
                 return JsonResponse(
@@ -93,6 +107,12 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
             algorithm = getattr(settings, 'JWT_ALGORITHM', 'HS256')
             leeway = getattr(settings, 'JWT_LEEWAY', 30)
 
+            logger.debug(f"JWT Configuration:")
+            logger.debug(f"  Algorithm: {algorithm}")
+            logger.debug(f"  Leeway: {leeway}s")
+            logger.debug(f"  Secret key configured: {'Yes' if secret_key else 'No'}")
+            logger.debug(f"  Secret key length: {len(secret_key) if secret_key else 0} chars")
+
             if not secret_key:
                 return JsonResponse(
                     {'error': 'JWT_SECRET_KEY not configured'},
@@ -100,21 +120,28 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
                 )
 
             # Decode JWT token
+            logger.debug("Attempting to decode JWT token...")
             payload = jwt.decode(
                 token,
                 secret_key,
                 algorithms=[algorithm],
                 leeway=leeway  # Tolerate clock skew between servers
             )
+            logger.debug(f"JWT decoded successfully!")
+            logger.debug(f"JWT Payload keys: {list(payload.keys())}")
+            logger.debug(f"JWT Payload: {json.dumps(payload, indent=2)}")
 
-        except jwt.ExpiredSignatureError:
+        except jwt.ExpiredSignatureError as e:
             logger.warning(f"Expired JWT token - Path: {request.path}")
+            logger.debug(f"Token expiry details: {str(e)}")
             return JsonResponse(
                 {'error': 'Token has expired'},
                 status=401
             )
         except jwt.InvalidTokenError as e:
             logger.error(f"Invalid JWT token: {str(e)} - Path: {request.path}, Algorithm: {algorithm}")
+            logger.debug(f"Full token error: {repr(e)}")
+            logger.debug(f"Token (first 100 chars): {token[:100]}...")
             return JsonResponse(
                 {'error': f'Invalid token: {str(e)}'},
                 status=401
@@ -126,16 +153,20 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
             'is_super_admin', 'permissions', 'enabled_modules'
         ]
 
+        logger.debug(f"Validating required fields: {required_fields}")
         for field in required_fields:
             if field not in payload:
                 logger.error(
                     f"Missing JWT field '{field}' - Path: {request.path}, "
                     f"Available fields: {list(payload.keys())}"
                 )
+                logger.debug(f"Full payload: {json.dumps(payload, indent=2)}")
                 return JsonResponse(
                     {'error': f'Missing required field in token: {field}'},
                     status=401
                 )
+            else:
+                logger.debug(f"  ✓ {field}: {payload[field]}")
 
         # Check if HMS module is enabled
         enabled_modules = payload.get('enabled_modules', [])
@@ -186,6 +217,7 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
             f"JWT auth successful - Path: {request.path}, User: {request.email}, "
             f"Tenant: {request.tenant_id}, Modules: {request.enabled_modules}"
         )
+        logger.debug("="*80)
 
         return None
 
