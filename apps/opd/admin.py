@@ -5,7 +5,10 @@ from common.admin_site import TenantModelAdmin, hms_admin_site
 from .models import (
     Visit, OPDBill, ProcedureMaster, ProcedurePackage,
     ProcedureBill, ProcedureBillItem, ClinicalNote,
-    VisitFinding, VisitAttachment
+    VisitFinding, VisitAttachment,
+    ClinicalNoteTemplateGroup, ClinicalNoteTemplate,
+    ClinicalNoteTemplateField, ClinicalNoteTemplateFieldOption,
+    ClinicalNoteTemplateResponse, ClinicalNoteTemplateFieldResponse
 )
 
 
@@ -688,6 +691,349 @@ class VisitAttachmentAdmin(TenantModelAdmin):
     file_size_display.short_description = 'File Size'
 
 
+# ============================================================================
+# CLINICAL NOTE TEMPLATE ADMIN
+# ============================================================================
+
+
+class ClinicalNoteTemplateGroupAdmin(TenantModelAdmin):
+    """Admin interface for ClinicalNoteTemplateGroup model."""
+
+    list_display = [
+        'name',
+        'display_order',
+        'template_count',
+        'is_active_badge',
+    ]
+    list_filter = [
+        'is_active',
+        'created_at',
+    ]
+    search_fields = [
+        'name',
+        'description',
+    ]
+    readonly_fields = [
+        'created_at',
+        'updated_at',
+        'tenant_id',
+    ]
+
+    fieldsets = (
+        ('Basic Information', {
+            'fields': (
+                'name',
+                'description',
+                'display_order',
+            )
+        }),
+        ('Status', {
+            'fields': (
+                'is_active',
+            )
+        }),
+        ('Timestamps', {
+            'fields': (
+                'tenant_id',
+                'created_at',
+                'updated_at',
+            )
+        }),
+    )
+
+    def template_count(self, obj):
+        """Display number of templates in this group."""
+        return obj.templates.count()
+    template_count.short_description = 'Templates'
+
+    def is_active_badge(self, obj):
+        """Display active status with badge."""
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 3px 10px; border-radius: 3px;">{}</span>',
+            'green' if obj.is_active else 'red',
+            'Active' if obj.is_active else 'Inactive'
+        )
+    is_active_badge.short_description = 'Status'
+
+
+class ClinicalNoteTemplateFieldOptionInline(admin.TabularInline):
+    """Inline admin for ClinicalNoteTemplateFieldOption."""
+
+    model = ClinicalNoteTemplateFieldOption
+    extra = 1
+    fields = [
+        'option_value',
+        'option_label',
+        'display_order',
+        'is_active',
+    ]
+
+
+class ClinicalNoteTemplateFieldInline(admin.StackedInline):
+    """Inline admin for ClinicalNoteTemplateField."""
+
+    model = ClinicalNoteTemplateField
+    extra = 0
+    fields = [
+        'field_name',
+        'field_label',
+        'field_type',
+        'help_text',
+        'placeholder',
+        'default_value',
+        'is_required',
+        'min_value',
+        'max_value',
+        'min_length',
+        'max_length',
+        'display_order',
+        'column_width',
+        'is_active',
+    ]
+
+
+class ClinicalNoteTemplateAdmin(TenantModelAdmin):
+    """Admin interface for ClinicalNoteTemplate model."""
+
+    list_display = [
+        'code',
+        'name',
+        'group',
+        'field_count',
+        'is_active_badge',
+    ]
+    list_filter = [
+        'is_active',
+        'group',
+        'created_at',
+    ]
+    search_fields = [
+        'code',
+        'name',
+        'description',
+    ]
+    readonly_fields = [
+        'created_at',
+        'updated_at',
+        'tenant_id',
+    ]
+    filter_horizontal = ['specialties']
+    inlines = [ClinicalNoteTemplateFieldInline]
+
+    fieldsets = (
+        ('Basic Information', {
+            'fields': (
+                'name',
+                'code',
+                'group',
+                'description',
+            )
+        }),
+        ('Specialties', {
+            'fields': (
+                'specialties',
+            )
+        }),
+        ('Display', {
+            'fields': (
+                'display_order',
+                'is_active',
+            )
+        }),
+        ('Timestamps', {
+            'fields': (
+                'tenant_id',
+                'created_at',
+                'updated_at',
+            )
+        }),
+    )
+
+    def field_count(self, obj):
+        """Display number of fields in this template."""
+        return obj.fields.count()
+    field_count.short_description = 'Fields'
+
+    def is_active_badge(self, obj):
+        """Display active status with badge."""
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 3px 10px; border-radius: 3px;">{}</span>',
+            'green' if obj.is_active else 'red',
+            'Active' if obj.is_active else 'Inactive'
+        )
+    is_active_badge.short_description = 'Status'
+
+
+class ClinicalNoteTemplateFieldAdmin(TenantModelAdmin):
+    """Admin interface for ClinicalNoteTemplateField model."""
+
+    list_display = [
+        'field_label',
+        'template',
+        'field_type',
+        'is_required',
+        'display_order',
+        'is_active_badge',
+    ]
+    list_filter = [
+        'field_type',
+        'is_required',
+        'is_active',
+        'template',
+    ]
+    search_fields = [
+        'field_name',
+        'field_label',
+        'template__name',
+    ]
+    readonly_fields = [
+        'created_at',
+        'updated_at',
+        'tenant_id',
+    ]
+    inlines = [ClinicalNoteTemplateFieldOptionInline]
+
+    fieldsets = (
+        ('Field Definition', {
+            'fields': (
+                'template',
+                'field_name',
+                'field_label',
+                'field_type',
+            )
+        }),
+        ('Configuration', {
+            'fields': (
+                'help_text',
+                'placeholder',
+                'default_value',
+            )
+        }),
+        ('Validation', {
+            'fields': (
+                'is_required',
+                'min_value',
+                'max_value',
+                'min_length',
+                'max_length',
+            )
+        }),
+        ('Display', {
+            'fields': (
+                'display_order',
+                'column_width',
+                'show_condition',
+                'is_active',
+            )
+        }),
+        ('Timestamps', {
+            'fields': (
+                'tenant_id',
+                'created_at',
+                'updated_at',
+            )
+        }),
+    )
+
+    def is_active_badge(self, obj):
+        """Display active status with badge."""
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 3px 10px; border-radius: 3px;">{}</span>',
+            'green' if obj.is_active else 'red',
+            'Active' if obj.is_active else 'Inactive'
+        )
+    is_active_badge.short_description = 'Status'
+
+
+class ClinicalNoteTemplateFieldResponseInline(admin.TabularInline):
+    """Inline admin for ClinicalNoteTemplateFieldResponse."""
+
+    model = ClinicalNoteTemplateFieldResponse
+    extra = 0
+    fields = [
+        'field',
+        'value_text',
+        'value_number',
+        'value_boolean',
+    ]
+    readonly_fields = ['field']
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
+class ClinicalNoteTemplateResponseAdmin(TenantModelAdmin):
+    """Admin interface for ClinicalNoteTemplateResponse model."""
+
+    list_display = [
+        'visit',
+        'template',
+        'response_date',
+        'status_badge',
+    ]
+    list_filter = [
+        'status',
+        'template',
+        'response_date',
+    ]
+    search_fields = [
+        'visit__visit_number',
+        'visit__patient__first_name',
+        'visit__patient__last_name',
+        'template__name',
+    ]
+    readonly_fields = [
+        'response_date',
+        'response_summary',
+        'created_at',
+        'updated_at',
+        'tenant_id',
+    ]
+    autocomplete_fields = ['visit', 'template']
+    inlines = [ClinicalNoteTemplateFieldResponseInline]
+
+    fieldsets = (
+        ('Response Information', {
+            'fields': (
+                'visit',
+                'template',
+                'response_date',
+                'status',
+            )
+        }),
+        ('Summary', {
+            'fields': (
+                'response_summary',
+            )
+        }),
+        ('Audit', {
+            'fields': (
+                'filled_by_id',
+                'reviewed_by_id',
+                'reviewed_at',
+                'tenant_id',
+                'created_at',
+                'updated_at',
+            )
+        }),
+    )
+
+    def status_badge(self, obj):
+        """Display status with color badge."""
+        colors = {
+            'draft': 'gray',
+            'completed': 'blue',
+            'reviewed': 'green',
+            'archived': 'orange',
+        }
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 3px 10px; border-radius: 3px;">{}</span>',
+            colors.get(obj.status, 'gray'),
+            obj.get_status_display()
+        )
+    status_badge.short_description = 'Status'
+
+
 # Enable autocomplete for Patient and Doctor models in other apps
 # Add these to patients/admin.py and doctors/admin.py respectively
 
@@ -710,3 +1056,9 @@ hms_admin_site.register(ProcedureBill, ProcedureBillAdmin)
 hms_admin_site.register(ClinicalNote, ClinicalNoteAdmin)
 hms_admin_site.register(VisitFinding, VisitFindingAdmin)
 hms_admin_site.register(VisitAttachment, VisitAttachmentAdmin)
+
+# Register template models
+hms_admin_site.register(ClinicalNoteTemplateGroup, ClinicalNoteTemplateGroupAdmin)
+hms_admin_site.register(ClinicalNoteTemplate, ClinicalNoteTemplateAdmin)
+hms_admin_site.register(ClinicalNoteTemplateField, ClinicalNoteTemplateFieldAdmin)
+hms_admin_site.register(ClinicalNoteTemplateResponse, ClinicalNoteTemplateResponseAdmin)

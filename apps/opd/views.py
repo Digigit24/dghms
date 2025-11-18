@@ -22,12 +22,15 @@ from drf_spectacular.utils import (
 from .models import (
     Visit, OPDBill, ProcedureMaster, ProcedurePackage,
     ProcedureBill, ProcedureBillItem, ClinicalNote,
-    VisitFinding, VisitAttachment
+    VisitFinding, VisitAttachment,
+    ClinicalNoteTemplateGroup, ClinicalNoteTemplate,
+    ClinicalNoteTemplateField, ClinicalNoteTemplateFieldOption,
+    ClinicalNoteTemplateResponse, ClinicalNoteTemplateFieldResponse
 )
 from .serializers import (
     VisitListSerializer, VisitDetailSerializer, VisitCreateUpdateSerializer,
     OPDBillListSerializer, OPDBillDetailSerializer, OPDBillCreateUpdateSerializer,
-    ProcedureMasterListSerializer, ProcedureMasterDetailSerializer, 
+    ProcedureMasterListSerializer, ProcedureMasterDetailSerializer,
     ProcedureMasterCreateUpdateSerializer,
     ProcedurePackageListSerializer, ProcedurePackageDetailSerializer,
     ProcedurePackageCreateUpdateSerializer,
@@ -38,7 +41,14 @@ from .serializers import (
     VisitFindingListSerializer, VisitFindingDetailSerializer,
     VisitFindingCreateUpdateSerializer,
     VisitAttachmentListSerializer, VisitAttachmentDetailSerializer,
-    VisitAttachmentCreateUpdateSerializer
+    VisitAttachmentCreateUpdateSerializer,
+    ClinicalNoteTemplateGroupSerializer,
+    ClinicalNoteTemplateListSerializer, ClinicalNoteTemplateDetailSerializer,
+    ClinicalNoteTemplateCreateUpdateSerializer,
+    ClinicalNoteTemplateFieldListSerializer, ClinicalNoteTemplateFieldDetailSerializer,
+    ClinicalNoteTemplateFieldCreateUpdateSerializer,
+    ClinicalNoteTemplateResponseListSerializer, ClinicalNoteTemplateResponseDetailSerializer,
+    ClinicalNoteTemplateResponseCreateUpdateSerializer
 )
 
 
@@ -750,7 +760,7 @@ class VisitFindingViewSet(viewsets.ModelViewSet):
 class VisitAttachmentViewSet(viewsets.ModelViewSet):
     """
     Visit Attachment Management
-    
+
     Manages medical documents and file uploads.
     Uses Django model permissions for access control.
     """
@@ -760,13 +770,13 @@ class VisitAttachmentViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, ActionPermissions]
     permission_model_name = 'visitattachment'
     parser_classes = [MultiPartParser, FormParser]
-    
+
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['visit', 'file_type']
     search_fields = ['visit__visit_number', 'file_name', 'description']
     ordering_fields = ['uploaded_at']
     ordering = ['-uploaded_at']
-    
+
     def get_serializer_class(self):
         """Return appropriate serializer"""
         if self.action == 'list':
@@ -774,3 +784,247 @@ class VisitAttachmentViewSet(viewsets.ModelViewSet):
         elif self.action in ['create', 'update', 'partial_update']:
             return VisitAttachmentCreateUpdateSerializer
         return VisitAttachmentDetailSerializer
+
+
+# ============================================================================
+# CLINICAL NOTE TEMPLATE VIEWSETS
+# ============================================================================
+
+
+@extend_schema_view(
+    list=extend_schema(
+        summary="List Template Groups",
+        description="Get list of clinical note template groups",
+        tags=['Clinical Templates']
+    ),
+    retrieve=extend_schema(
+        summary="Get Group Details",
+        description="Retrieve template group details",
+        tags=['Clinical Templates']
+    )
+)
+class ClinicalNoteTemplateGroupViewSet(viewsets.ModelViewSet):
+    """Template Group Management."""
+
+    queryset = ClinicalNoteTemplateGroup.objects.prefetch_related('templates')
+    serializer_class = ClinicalNoteTemplateGroupSerializer
+    permission_classes = [IsAuthenticated]
+
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['is_active']
+    search_fields = ['name', 'description']
+    ordering_fields = ['display_order', 'name']
+    ordering = ['display_order', 'name']
+
+
+@extend_schema_view(
+    list=extend_schema(
+        summary="List Template Fields",
+        description="Get list of template fields",
+        tags=['Clinical Templates']
+    ),
+    retrieve=extend_schema(
+        summary="Get Field Details",
+        description="Retrieve field details with options",
+        tags=['Clinical Templates']
+    )
+)
+class ClinicalNoteTemplateFieldViewSet(viewsets.ModelViewSet):
+    """Template Field Management."""
+
+    queryset = ClinicalNoteTemplateField.objects.select_related('template').prefetch_related('options')
+    permission_classes = [IsAuthenticated]
+
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['template', 'field_type', 'is_required', 'is_active']
+    search_fields = ['field_name', 'field_label']
+    ordering_fields = ['display_order', 'field_label']
+    ordering = ['template', 'display_order']
+
+    def get_serializer_class(self):
+        """Return appropriate serializer."""
+        if self.action == 'list':
+            return ClinicalNoteTemplateFieldListSerializer
+        elif self.action in ['create', 'update', 'partial_update']:
+            return ClinicalNoteTemplateFieldCreateUpdateSerializer
+        return ClinicalNoteTemplateFieldDetailSerializer
+
+
+@extend_schema_view(
+    list=extend_schema(
+        summary="List Clinical Note Templates",
+        description="Get list of available clinical note templates",
+        tags=['Clinical Templates']
+    ),
+    retrieve=extend_schema(
+        summary="Get Template Details",
+        description="Retrieve template with all fields and options",
+        tags=['Clinical Templates']
+    )
+)
+class ClinicalNoteTemplateViewSet(viewsets.ModelViewSet):
+    """Clinical Note Template Management."""
+
+    queryset = ClinicalNoteTemplate.objects.select_related('group').prefetch_related(
+        'fields__options',
+        'specialties'
+    )
+    permission_classes = [IsAuthenticated]
+
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['group', 'is_active']
+    search_fields = ['name', 'code', 'description']
+    ordering_fields = ['display_order', 'name']
+    ordering = ['display_order', 'name']
+
+    def get_serializer_class(self):
+        """Return appropriate serializer."""
+        if self.action == 'list':
+            return ClinicalNoteTemplateListSerializer
+        elif self.action in ['create', 'update', 'partial_update']:
+            return ClinicalNoteTemplateCreateUpdateSerializer
+        return ClinicalNoteTemplateDetailSerializer
+
+    @extend_schema(
+        summary="Get Template by Specialty",
+        description="Get templates relevant to a specific specialty",
+        parameters=[
+            OpenApiParameter(name='specialty_id', type=int, required=True)
+        ],
+        tags=['Clinical Templates']
+    )
+    @action(detail=False, methods=['get'])
+    def by_specialty(self, request):
+        """Get templates by specialty."""
+        specialty_id = request.query_params.get('specialty_id')
+
+        if not specialty_id:
+            return Response(
+                {'success': False, 'error': 'specialty_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        templates = self.get_queryset().filter(
+            specialties__id=specialty_id,
+            is_active=True
+        )
+
+        serializer = ClinicalNoteTemplateListSerializer(templates, many=True)
+        return Response({
+            'success': True,
+            'count': templates.count(),
+            'data': serializer.data
+        })
+
+
+@extend_schema_view(
+    list=extend_schema(
+        summary="List Template Responses",
+        description="Get list of filled clinical note templates",
+        tags=['Clinical Templates']
+    ),
+    retrieve=extend_schema(
+        summary="Get Response Details",
+        description="Retrieve complete template response with all field values",
+        tags=['Clinical Templates']
+    ),
+    create=extend_schema(
+        summary="Create Template Response",
+        description="Fill in a clinical note template for a visit",
+        tags=['Clinical Templates']
+    )
+)
+class ClinicalNoteTemplateResponseViewSet(viewsets.ModelViewSet):
+    """Template Response Management."""
+
+    queryset = ClinicalNoteTemplateResponse.objects.select_related(
+        'visit__patient',
+        'template'
+    ).prefetch_related(
+        'field_responses__field__options',
+        'field_responses__selected_options'
+    )
+    permission_classes = [IsAuthenticated, ActionPermissions]
+    permission_model_name = 'clinicalnotetemplate response'
+
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['visit', 'template', 'status']
+    search_fields = ['visit__visit_number', 'visit__patient__first_name']
+    ordering_fields = ['response_date', 'status']
+    ordering = ['-response_date']
+
+    def get_serializer_class(self):
+        """Return appropriate serializer."""
+        if self.action == 'list':
+            return ClinicalNoteTemplateResponseListSerializer
+        elif self.action in ['create', 'update', 'partial_update']:
+            return ClinicalNoteTemplateResponseCreateUpdateSerializer
+        return ClinicalNoteTemplateResponseDetailSerializer
+
+    def get_queryset(self):
+        """Filter by user role."""
+        queryset = super().get_queryset()
+        user = self.request.user
+
+        # Doctors can see their patients' responses
+        if user.groups.filter(name='Doctor').exists():
+            if hasattr(user, 'doctor_profile'):
+                queryset = queryset.filter(
+                    visit__doctor=user.doctor_profile
+                )
+
+        # Patients can see their own responses
+        elif user.groups.filter(name='Patient').exists():
+            if hasattr(user, 'patient_profile'):
+                queryset = queryset.filter(
+                    visit__patient=user.patient_profile
+                )
+
+        return queryset
+
+    @extend_schema(
+        summary="Mark as Reviewed",
+        description="Mark a template response as reviewed",
+        tags=['Clinical Templates']
+    )
+    @action(detail=True, methods=['post'])
+    def mark_reviewed(self, request, pk=None):
+        """Mark response as reviewed."""
+        response = self.get_object()
+
+        response.status = 'reviewed'
+        response.reviewed_by_id = request.user.id
+        response.reviewed_at = timezone.now()
+        response.save()
+
+        serializer = ClinicalNoteTemplateResponseDetailSerializer(response)
+        return Response({
+            'success': True,
+            'message': 'Response marked as reviewed',
+            'data': serializer.data
+        })
+
+    @extend_schema(
+        summary="Get Visit Templates",
+        description="Get all template responses for a specific visit",
+        tags=['Clinical Templates']
+    )
+    @action(detail=False, methods=['get'])
+    def by_visit(self, request):
+        """Get all template responses for a visit."""
+        visit_id = request.query_params.get('visit_id')
+
+        if not visit_id:
+            return Response(
+                {'success': False, 'error': 'visit_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        responses = self.get_queryset().filter(visit_id=visit_id)
+        serializer = ClinicalNoteTemplateResponseListSerializer(responses, many=True)
+
+        return Response({
+            'success': True,
+            'count': responses.count(),
+            'data': serializer.data
+        })

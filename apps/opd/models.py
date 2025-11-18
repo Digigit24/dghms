@@ -1247,3 +1247,507 @@ class VisitAttachment(models.Model):
         if self.file:
             return os.path.splitext(self.file.name)[1].lower()
         return None
+
+
+# ============================================================================
+# CLINICAL NOTE TEMPLATE MODELS
+# ============================================================================
+
+
+class ClinicalNoteTemplateGroup(models.Model):
+    """
+    Template Group Model - Organize templates into categories.
+
+    Groups like: General Examination, Cardiology Assessment, etc.
+    """
+
+    id = models.AutoField(primary_key=True)
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
+
+    name = models.CharField(
+        max_length=200,
+        unique=True,
+        help_text="Group name (e.g., General Examination)"
+    )
+    description = models.TextField(blank=True)
+    display_order = models.IntegerField(
+        default=0,
+        help_text="Order in which to display this group"
+    )
+    is_active = models.BooleanField(default=True)
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'clinical_note_template_groups'
+        ordering = ['display_order', 'name']
+        verbose_name = 'Clinical Note Template Group'
+        verbose_name_plural = 'Clinical Note Template Groups'
+        indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'is_active']),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+class ClinicalNoteTemplate(models.Model):
+    """
+    Clinical Note Template Model - Define reusable form templates.
+
+    Each template can have multiple fields of different types.
+    """
+
+    id = models.AutoField(primary_key=True)
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
+
+    name = models.CharField(
+        max_length=200,
+        unique=True,
+        help_text="Template name (e.g., Initial Consultation Form)"
+    )
+    code = models.CharField(
+        max_length=50,
+        unique=True,
+        help_text="Unique template code"
+    )
+    group = models.ForeignKey(
+        ClinicalNoteTemplateGroup,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='templates'
+    )
+    description = models.TextField(blank=True)
+
+    # Specialty/Department specific
+    specialties = models.ManyToManyField(
+        'doctors.Specialty',
+        blank=True,
+        related_name='clinical_note_templates',
+        help_text="Specialties this template applies to"
+    )
+
+    is_active = models.BooleanField(default=True)
+    display_order = models.IntegerField(default=0)
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'clinical_note_templates'
+        ordering = ['display_order', 'name']
+        verbose_name = 'Clinical Note Template'
+        verbose_name_plural = 'Clinical Note Templates'
+        indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'is_active']),
+            models.Index(fields=['code']),
+        ]
+
+    def __str__(self):
+        return f"{self.code} - {self.name}"
+
+
+class ClinicalNoteTemplateField(models.Model):
+    """
+    Template Field Model - Individual fields in a template.
+
+    Defines the structure of each field (name, type, options, validation).
+    """
+
+    FIELD_TYPE_CHOICES = [
+        ('text', 'Text (Short)'),
+        ('textarea', 'Text Area (Long)'),
+        ('number', 'Number'),
+        ('decimal', 'Decimal'),
+        ('boolean', 'Boolean (Yes/No)'),
+        ('date', 'Date'),
+        ('datetime', 'Date & Time'),
+        ('time', 'Time'),
+        ('select', 'Single Select'),
+        ('multiselect', 'Multiple Select'),
+        ('radio', 'Radio Buttons'),
+        ('checkbox', 'Checkboxes'),
+        ('image', 'Image Upload'),
+        ('file', 'File Upload'),
+        ('json', 'JSON Data'),
+    ]
+
+    id = models.AutoField(primary_key=True)
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
+
+    template = models.ForeignKey(
+        ClinicalNoteTemplate,
+        on_delete=models.CASCADE,
+        related_name='fields'
+    )
+
+    # Field Definition
+    field_name = models.CharField(
+        max_length=100,
+        help_text="Internal field name (use lowercase, no spaces)"
+    )
+    field_label = models.CharField(
+        max_length=200,
+        help_text="Display label for the field"
+    )
+    field_type = models.CharField(
+        max_length=20,
+        choices=FIELD_TYPE_CHOICES
+    )
+
+    # Field Configuration
+    help_text = models.CharField(
+        max_length=500,
+        blank=True,
+        help_text="Help text to display below the field"
+    )
+    placeholder = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Placeholder text for input fields"
+    )
+    default_value = models.TextField(
+        blank=True,
+        help_text="Default value for the field"
+    )
+
+    # Validation Rules
+    is_required = models.BooleanField(
+        default=False,
+        help_text="Is this field mandatory?"
+    )
+    min_value = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Minimum value (for number fields)"
+    )
+    max_value = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Maximum value (for number fields)"
+    )
+    min_length = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Minimum length (for text fields)"
+    )
+    max_length = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Maximum length (for text fields)"
+    )
+
+    # Display Configuration
+    display_order = models.IntegerField(
+        default=0,
+        help_text="Order in which to display this field"
+    )
+    column_width = models.IntegerField(
+        default=12,
+        choices=[(i, f"{i}/12") for i in range(1, 13)],
+        help_text="Bootstrap column width (1-12)"
+    )
+
+    # Conditional Display
+    show_condition = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Conditions to show this field based on other fields"
+    )
+
+    is_active = models.BooleanField(default=True)
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'clinical_note_template_fields'
+        ordering = ['template', 'display_order', 'id']
+        verbose_name = 'Clinical Note Template Field'
+        verbose_name_plural = 'Clinical Note Template Fields'
+        unique_together = ['template', 'field_name']
+        indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'template']),
+            models.Index(fields=['template', 'display_order']),
+        ]
+
+    def __str__(self):
+        return f"{self.template.code} - {self.field_label}"
+
+
+class ClinicalNoteTemplateFieldOption(models.Model):
+    """
+    Field Option Model - Options for select/multiselect fields.
+
+    Stores dropdown options, radio button options, etc.
+    """
+
+    id = models.AutoField(primary_key=True)
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
+
+    field = models.ForeignKey(
+        ClinicalNoteTemplateField,
+        on_delete=models.CASCADE,
+        related_name='options'
+    )
+
+    option_value = models.CharField(
+        max_length=100,
+        help_text="Internal value"
+    )
+    option_label = models.CharField(
+        max_length=200,
+        help_text="Display label"
+    )
+    display_order = models.IntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    # Additional metadata for options
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Additional data for the option"
+    )
+
+    class Meta:
+        db_table = 'clinical_note_template_field_options'
+        ordering = ['field', 'display_order', 'option_label']
+        verbose_name = 'Template Field Option'
+        verbose_name_plural = 'Template Field Options'
+        unique_together = ['field', 'option_value']
+        indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'field']),
+        ]
+
+    def __str__(self):
+        return f"{self.field.field_label} - {self.option_label}"
+
+
+class ClinicalNoteTemplateResponse(models.Model):
+    """
+    Template Response Model - Actual filled form data.
+
+    Links a completed template to a visit with all field responses.
+    """
+
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('completed', 'Completed'),
+        ('reviewed', 'Reviewed'),
+        ('archived', 'Archived'),
+    ]
+
+    id = models.AutoField(primary_key=True)
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
+
+    visit = models.ForeignKey(
+        Visit,
+        on_delete=models.CASCADE,
+        related_name='template_responses'
+    )
+    template = models.ForeignKey(
+        ClinicalNoteTemplate,
+        on_delete=models.PROTECT,
+        related_name='responses'
+    )
+
+    # Response Metadata
+    response_date = models.DateTimeField(auto_now_add=True)
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='draft'
+    )
+
+    # Summary (computed from field responses)
+    response_summary = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Cached summary of all responses"
+    )
+
+    # Audit
+    filled_by_id = models.UUIDField(null=True, blank=True, help_text="User who filled this template")
+    reviewed_by_id = models.UUIDField(null=True, blank=True, help_text="User who reviewed this template")
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'clinical_note_template_responses'
+        ordering = ['-response_date']
+        verbose_name = 'Clinical Note Template Response'
+        verbose_name_plural = 'Clinical Note Template Responses'
+        unique_together = ['visit', 'template']
+        indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'visit']),
+            models.Index(fields=['tenant_id', 'template']),
+            models.Index(fields=['visit', 'template']),
+            models.Index(fields=['status']),
+        ]
+
+    def __str__(self):
+        return f"{self.visit.visit_number} - {self.template.name}"
+
+    def generate_summary(self):
+        """Generate a summary of all field responses."""
+        summary = {}
+        for field_response in self.field_responses.all():
+            summary[field_response.field.field_name] = {
+                'label': field_response.field.field_label,
+                'value': field_response.get_display_value(),
+                'type': field_response.field.field_type
+            }
+        self.response_summary = summary
+        self.save()
+        return summary
+
+
+class ClinicalNoteTemplateFieldResponse(models.Model):
+    """
+    Field Response Model - Individual field answers.
+
+    Stores the actual value for each field in a template response.
+    """
+
+    id = models.AutoField(primary_key=True)
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
+
+    response = models.ForeignKey(
+        ClinicalNoteTemplateResponse,
+        on_delete=models.CASCADE,
+        related_name='field_responses'
+    )
+    field = models.ForeignKey(
+        ClinicalNoteTemplateField,
+        on_delete=models.CASCADE,
+        related_name='responses'
+    )
+
+    # Value Storage (use appropriate field based on type)
+    value_text = models.TextField(blank=True)
+    value_number = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True
+    )
+    value_boolean = models.BooleanField(null=True, blank=True)
+    value_date = models.DateField(null=True, blank=True)
+    value_datetime = models.DateTimeField(null=True, blank=True)
+    value_time = models.TimeField(null=True, blank=True)
+    value_json = models.JSONField(default=dict, blank=True)
+    value_file = models.FileField(
+        upload_to='clinical_notes/responses/%Y/%m/',
+        null=True,
+        blank=True
+    )
+
+    # For multiselect - store selected option IDs
+    selected_options = models.ManyToManyField(
+        ClinicalNoteTemplateFieldOption,
+        blank=True,
+        related_name='field_responses'
+    )
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'clinical_note_template_field_responses'
+        ordering = ['response', 'field__display_order']
+        verbose_name = 'Template Field Response'
+        verbose_name_plural = 'Template Field Responses'
+        unique_together = ['response', 'field']
+        indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'response']),
+            models.Index(fields=['response', 'field']),
+        ]
+
+    def __str__(self):
+        return f"{self.response.visit.visit_number} - {self.field.field_label}"
+
+    def get_value(self):
+        """Get the value based on field type."""
+        field_type = self.field.field_type
+
+        if field_type in ['text', 'textarea']:
+            return self.value_text
+        elif field_type in ['number', 'decimal']:
+            return self.value_number
+        elif field_type == 'boolean':
+            return self.value_boolean
+        elif field_type == 'date':
+            return self.value_date
+        elif field_type == 'datetime':
+            return self.value_datetime
+        elif field_type == 'time':
+            return self.value_time
+        elif field_type == 'json':
+            return self.value_json
+        elif field_type in ['image', 'file']:
+            return self.value_file.url if self.value_file else None
+        elif field_type in ['select', 'radio']:
+            # Return single selected option
+            option = self.selected_options.first()
+            return option.option_value if option else None
+        elif field_type in ['multiselect', 'checkbox']:
+            # Return list of selected options
+            return list(self.selected_options.values_list('option_value', flat=True))
+
+        return None
+
+    def get_display_value(self):
+        """Get human-readable display value."""
+        field_type = self.field.field_type
+
+        if field_type in ['select', 'radio']:
+            option = self.selected_options.first()
+            return option.option_label if option else None
+        elif field_type in ['multiselect', 'checkbox']:
+            return list(self.selected_options.values_list('option_label', flat=True))
+        elif field_type == 'boolean':
+            return 'Yes' if self.value_boolean else 'No' if self.value_boolean is False else None
+
+        return self.get_value()
+
+    def set_value(self, value):
+        """Set the value based on field type."""
+        field_type = self.field.field_type
+
+        if field_type in ['text', 'textarea']:
+            self.value_text = str(value) if value else ''
+        elif field_type in ['number', 'decimal']:
+            self.value_number = Decimal(str(value)) if value else None
+        elif field_type == 'boolean':
+            self.value_boolean = bool(value) if value is not None else None
+        elif field_type == 'date':
+            self.value_date = value
+        elif field_type == 'datetime':
+            self.value_datetime = value
+        elif field_type == 'time':
+            self.value_time = value
+        elif field_type == 'json':
+            self.value_json = value if isinstance(value, dict) else {}
+        elif field_type in ['image', 'file']:
+            self.value_file = value
+
+        self.save()
