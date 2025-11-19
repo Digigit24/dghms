@@ -44,7 +44,29 @@ class TenantUser:
         self.user_type = user_data.get('user_type', 'staff')
         self.is_patient = user_data.get('is_patient', False)
         self._state = type('obj', (object,), {'adding': False, 'db': None})()
-        
+
+        # Mock groups attribute for compatibility with Django's group-based permissions
+        # Since we use JWT permissions, this returns an empty manager
+        class MockGroupManager:
+            def filter(self, **kwargs):
+                # Return a mock queryset that always has no results
+                class MockQuerySet:
+                    def exists(self):
+                        return False
+                    def count(self):
+                        return 0
+                    def all(self):
+                        return []
+                return MockQuerySet()
+
+            def all(self):
+                return []
+
+            def exists(self):
+                return False
+
+        self.groups = MockGroupManager()
+
         # Add _meta attribute for Django compatibility
         class MockMeta:
             app_label = 'common'
