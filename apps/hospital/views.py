@@ -1,6 +1,8 @@
 from rest_framework import generics, status
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+
+from common.drf_auth import HMSPermission, AllowAny
+
 from .models import Hospital
 from .serializers import HospitalSerializer, HospitalUpdateSerializer
 
@@ -9,22 +11,26 @@ from .serializers import HospitalSerializer, HospitalUpdateSerializer
 class HospitalConfigView(generics.RetrieveUpdateAPIView):
     """
     Hospital Configuration View
-    
+
     GET: Retrieve hospital configuration (public)
-    PUT/PATCH: Update hospital configuration (admin only)
+    PUT/PATCH: Update hospital configuration (requires edit_config permission)
     """
     queryset = Hospital.objects.all()
-    
+
     def get_serializer_class(self):
         if self.request.method in ['PUT', 'PATCH']:
             return HospitalUpdateSerializer
         return HospitalSerializer
-    
+
     def get_permissions(self):
         """Anyone can view, only admins can update"""
         if self.request.method == 'GET':
-            return []  # Public access
-        return [IsAuthenticated]
+            return [AllowAny()]  # Public access
+        # For updates, use HMS permission
+        hms_perm = HMSPermission()
+        hms_perm.hms_module = 'hospital'
+        hms_perm.action_permission_map = {'update': 'edit_config', 'partial_update': 'edit_config'}
+        return [hms_perm]
     
     def get_object(self):
         """Get the singleton hospital instance"""

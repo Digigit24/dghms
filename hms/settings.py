@@ -199,11 +199,11 @@ SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 # --- DRF ---
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.TokenAuthentication',  # Keep for backward compatibility
-        'rest_framework.authentication.SessionAuthentication',
+        'common.drf_auth.JWTAuthentication',  # Primary: JWT authentication via middleware
+        'rest_framework.authentication.SessionAuthentication',  # Fallback for admin/browsable API
     ],
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.IsAuthenticated',
+        'common.drf_auth.IsAuthenticated',  # Use custom IsAuthenticated that works with JWT
     ],
     'DEFAULT_FILTER_BACKENDS': [
         'django_filters.rest_framework.DjangoFilterBackend',

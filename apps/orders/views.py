@@ -1,7 +1,6 @@
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 
 from django.db.models import Q, Sum, Avg, Count
@@ -15,6 +14,8 @@ from drf_spectacular.utils import (
     OpenApiResponse
 )
 
+from common.drf_auth import HMSPermission
+
 from .models import Order, OrderItem, FeeType
 from .serializers import (
     OrderCreateUpdateSerializer,
@@ -22,10 +23,6 @@ from .serializers import (
     OrderListSerializer,
     FeeTypeSerializer
 )
-
-# Utility function for group-based permissions
-def _in_any_group(user, names):
-    return user and user.is_authenticated and user.groups.filter(name__in=names).exists()
 
 
 # Fee Type Management
@@ -50,13 +47,17 @@ class FeeTypeViewSet(viewsets.ModelViewSet):
     """Fee Type Management"""
     queryset = FeeType.objects.all()
     serializer_class = FeeTypeSerializer
-    
-    def get_permissions(self):
-        """Custom permissions"""
-        if self.action in ['list', 'retrieve']:
-            return [IsAuthenticated()]
-        # Write actions (create, update, delete) are admin-only
-        return [IsAuthenticated()]  # Rely on group-based auth in Django Admin
+    permission_classes = [HMSPermission]
+    hms_module = 'orders'
+
+    action_permission_map = {
+        'list': 'view_fee_types',
+        'retrieve': 'view_fee_types',
+        'create': 'manage_fee_types',
+        'update': 'manage_fee_types',
+        'partial_update': 'manage_fee_types',
+        'destroy': 'manage_fee_types',
+    }
     
     def list(self, request, *args, **kwargs):
         """List fee types with ability to filter"""
@@ -111,24 +112,36 @@ class OrderViewSet(viewsets.ModelViewSet):
     ).prefetch_related(
         'order_items', 'order_fee_details'
     )
-    
+    permission_classes = [HMSPermission]
+    hms_module = 'orders'
+
+    action_permission_map = {
+        'list': 'view',
+        'retrieve': 'view',
+        'create': 'create',
+        'update': 'edit',
+        'partial_update': 'edit',
+        'destroy': 'cancel',
+        'statistics': 'view_reports',
+    }
+
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = [
-        'patient', 'services_type', 
+        'patient', 'services_type',
         'status', 'is_paid'
     ]
     search_fields = [
-        'order_number', 
-        'patient__first_name', 
-        'patient__last_name', 
+        'order_number',
+        'patient__first_name',
+        'patient__last_name',
         'patient__mobile_primary'
     ]
     ordering_fields = [
-        'created_at', 'total_amount', 
+        'created_at', 'total_amount',
         'status', 'services_type'
     ]
     ordering = ['-created_at']
-    
+
     def get_serializer_class(self):
         """Return appropriate serializer"""
         if self.action == 'list':
@@ -137,23 +150,21 @@ class OrderViewSet(viewsets.ModelViewSet):
             return OrderCreateUpdateSerializer
         return OrderDetailSerializer
     
-    def get_permissions(self):
-        """Custom permissions per action"""
-        # Default to authenticated users
-        return [IsAuthenticated()]
-    
     def get_queryset(self):
         """Custom queryset filtering"""
         queryset = super().get_queryset()
-        
+
         # Users in patient/staff roles can only see specific orders
         user = self.request.user
         if user.is_authenticated:
-            if user.groups.filter(name='Patient').exists():
-                # Patient can only see their own orders
+            # Super admins can see all orders
+            if hasattr(user, 'is_super_admin') and user.is_super_admin:
+                pass  # No filtering
+            # Patients can only see their own orders
+            elif hasattr(user, 'is_patient') and user.is_patient:
                 queryset = queryset.filter(patient__user=user)
-            elif not user.groups.filter(name='Administrator').exists():
-                # Staff (non-admin) can see relevant orders
+            else:
+                # Regular staff can see orders they created
                 queryset = queryset.filter(user=user)
         
         # Additional query parameter filtering
@@ -186,12 +197,8 @@ class OrderViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['GET'])
     def statistics(self, request):
         """Generate order-wide statistics"""
-        if not _in_any_group(request.user, ['Administrator']):
-            return Response({
-                'success': False,
-                'error': 'Permission denied'
-            }, status=status.HTTP_403_FORBIDDEN)
-        
+        # Permission already checked by HMSPermission (view_reports)
+
         # Aggregate statistics
         stats = Order.objects.aggregate(
             total_orders=Count('id'),

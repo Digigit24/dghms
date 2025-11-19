@@ -1,10 +1,12 @@
 from rest_framework import viewsets, filters
 from django_filters.rest_framework import DjangoFilterBackend
 
+from common.drf_auth import HMSPermission
+
 from .models import (
-    ServiceCategory, 
-    DiagnosticTest, 
-    NursingCarePackage, 
+    ServiceCategory,
+    DiagnosticTest,
+    NursingCarePackage,
     HomeHealthcareService
 )
 from .serializers import (
@@ -13,14 +15,23 @@ from .serializers import (
     NursingCarePackageSerializer,
     HomeHealthcareServiceSerializer
 )
-from rest_framework.permissions import IsAuthenticated
 
 
 class ServiceCategoryViewSet(viewsets.ModelViewSet):
     """Service category management"""
     queryset = ServiceCategory.objects.all()
     serializer_class = ServiceCategorySerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [HMSPermission]
+    hms_module = 'services'
+
+    action_permission_map = {
+        'list': 'view_services',
+        'retrieve': 'view_services',
+        'create': 'create_service',
+        'update': 'edit_service',
+        'partial_update': 'edit_service',
+        'destroy': 'delete_service',
+    }
     filter_backends = [
         DjangoFilterBackend, 
         filters.SearchFilter, 
@@ -35,7 +46,17 @@ class DiagnosticTestViewSet(viewsets.ModelViewSet):
     """Diagnostic test management"""
     queryset = DiagnosticTest.objects.select_related('category')
     serializer_class = DiagnosticTestSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [HMSPermission]
+    hms_module = 'services'
+
+    action_permission_map = {
+        'list': 'view_services',
+        'retrieve': 'view_services',
+        'create': 'create_service',
+        'update': 'edit_service',
+        'partial_update': 'edit_service',
+        'destroy': 'delete_service',
+    }
     filter_backends = [
         DjangoFilterBackend, 
         filters.SearchFilter, 
@@ -54,7 +75,17 @@ class NursingCarePackageViewSet(viewsets.ModelViewSet):
     """Nursing care package management"""
     queryset = NursingCarePackage.objects.select_related('category')
     serializer_class = NursingCarePackageSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [HMSPermission]
+    hms_module = 'services'
+
+    action_permission_map = {
+        'list': 'view_services',
+        'retrieve': 'view_services',
+        'create': 'create_service',
+        'update': 'edit_service',
+        'partial_update': 'edit_service',
+        'destroy': 'delete_service',
+    }
     filter_backends = [
         DjangoFilterBackend, 
         filters.SearchFilter, 
@@ -72,7 +103,17 @@ class HomeHealthcareServiceViewSet(viewsets.ModelViewSet):
     """Home healthcare service management"""
     queryset = HomeHealthcareService.objects.select_related('category')
     serializer_class = HomeHealthcareServiceSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [HMSPermission]
+    hms_module = 'services'
+
+    action_permission_map = {
+        'list': 'view_services',
+        'retrieve': 'view_services',
+        'create': 'create_service',
+        'update': 'edit_service',
+        'partial_update': 'edit_service',
+        'destroy': 'delete_service',
+    }
     filter_backends = [
         DjangoFilterBackend, 
         filters.SearchFilter, 

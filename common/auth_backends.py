@@ -36,6 +36,7 @@ class TenantUser:
         self.is_active = True
         self.is_staff = True  # Allow access to admin
         self.is_superuser = user_data.get('is_super_admin', False)
+        self.is_super_admin = user_data.get('is_super_admin', False)  # For HMS permissions
         self.tenant_id = user_data.get('tenant_id')
         self.tenant_slug = user_data.get('tenant_slug')
         self.permissions = user_data.get('permissions', {})
@@ -43,7 +44,29 @@ class TenantUser:
         self.user_type = user_data.get('user_type', 'staff')
         self.is_patient = user_data.get('is_patient', False)
         self._state = type('obj', (object,), {'adding': False, 'db': None})()
-        
+
+        # Mock groups attribute for compatibility with Django's group-based permissions
+        # Since we use JWT permissions, this returns an empty manager
+        class MockGroupManager:
+            def filter(self, **kwargs):
+                # Return a mock queryset that always has no results
+                class MockQuerySet:
+                    def exists(self):
+                        return False
+                    def count(self):
+                        return 0
+                    def all(self):
+                        return []
+                return MockQuerySet()
+
+            def all(self):
+                return []
+
+            def exists(self):
+                return False
+
+        self.groups = MockGroupManager()
+
         # Add _meta attribute for Django compatibility
         class MockMeta:
             app_label = 'common'

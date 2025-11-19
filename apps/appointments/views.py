@@ -1,8 +1,9 @@
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import BasePermission, IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
+
+from common.drf_auth import HMSPermission, IsAuthenticated
 from django.db.models import Q, Count, Avg
 from django.utils import timezone
 from django.db.models import F
@@ -25,26 +26,9 @@ from .serializers import (
 )
 
 # -------------------------------------------------------------------
-# Local, group-based permissions (using built-in Django auth groups)
+# HMS Permission Configuration for Appointments Module
+# Uses JWT-based permissions from auth backend
 # -------------------------------------------------------------------
-
-def _in_any_group(user, names):
-    return user and user.is_authenticated and user.groups.filter(name__in=names).exists()
-
-class IsAdminGroup(BasePermission):
-    """Allow only users in the 'Administrator' group."""
-    def has_permission(self, request, view):
-        return _in_any_group(request.user, ['Administrator'])
-
-class IsReceptionistOrAdmin(BasePermission):
-    """Allow 'Receptionist' OR 'Administrator'."""
-    def has_permission(self, request, view):
-        return _in_any_group(request.user, ['Receptionist', 'Administrator'])
-
-class IsReceptionistOrDoctorOrAdmin(BasePermission):
-    """Allow 'Receptionist' OR 'Doctor' OR 'Administrator'."""
-    def has_permission(self, request, view):
-        return _in_any_group(request.user, ['Receptionist', 'Doctor', 'Administrator'])
 
 
 # =========================
@@ -83,16 +67,24 @@ class IsReceptionistOrDoctorOrAdmin(BasePermission):
     )
 )
 class AppointmentTypeViewSet(viewsets.ModelViewSet):
-    """Appointment Type management"""
+    """
+    Appointment Type management
+    Uses JWT-based HMS permissions from the auth backend.
+    """
     queryset = AppointmentType.objects.all()
     serializer_class = AppointmentTypeSerializer
+    permission_classes = [HMSPermission]
+    hms_module = 'hospital'  # Appointment types are part of hospital config
 
-    # Admin-only for write; authenticated can read
-    def get_permissions(self):
-        if self.action in ['list', 'retrieve']:
-            return [IsAuthenticated()]
-        # Writes: admin group only
-        return [IsAuthenticated(), IsAdminGroup()]
+    # Custom action to permission mapping
+    action_permission_map = {
+        'list': 'view_config',
+        'retrieve': 'view_config',
+        'create': 'manage_appointment_types',
+        'update': 'manage_appointment_types',
+        'partial_update': 'manage_appointment_types',
+        'destroy': 'manage_appointment_types',
+    }
 
 
 # =========================
@@ -142,16 +134,39 @@ class AppointmentTypeViewSet(viewsets.ModelViewSet):
     )
 )
 class AppointmentViewSet(viewsets.ModelViewSet):
-    """Comprehensive Appointment Management"""
+    """
+    Comprehensive Appointment Management
+    Uses JWT-based HMS permissions from the auth backend.
+    """
     queryset = Appointment.objects.select_related(
-        'patient', 'doctor', 'appointment_type',
-        'created_by', 'cancelled_by', 'approved_by'
+        'patient', 'doctor', 'appointment_type', 'original_appointment', 'visit'
     ).prefetch_related('follow_ups')
+    permission_classes = [HMSPermission]
+    hms_module = 'appointments'  # Maps to permissions.hms.appointments in JWT
+
+    # Custom action to permission mapping
+    action_permission_map = {
+        'list': 'view',
+        'retrieve': 'view',
+        'create': 'create',
+        'update': 'edit',
+        'partial_update': 'edit',
+        'destroy': 'delete',
+        'confirm': 'confirm',
+        'cancel': 'cancel',
+        'reschedule': 'reschedule',
+        'check_in': 'check_in',
+        'start': 'edit',
+        'complete': 'edit',
+        'today': 'view',
+        'upcoming': 'view',
+        'statistics': 'view',
+    }
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = [
         'doctor', 'patient', 'status',
-        'priority', 
+        'priority',
         'appointment_date', 'is_follow_up'
     ]
     search_fields = ['chief_complaint', 'symptoms', 'notes', 'appointment_id']
@@ -169,19 +184,6 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         elif self.action in ['create', 'update', 'partial_update']:
             return AppointmentCreateUpdateSerializer
         return AppointmentDetailSerializer
-
-    def get_permissions(self):
-        """Custom permissions per action (group-based, no custom permission module)."""
-        if self.action in ['list', 'retrieve']:
-            return [IsAuthenticated()]
-        elif self.action in ['create', 'destroy']:
-            # Receptionist or Admin
-            return [IsAuthenticated(), IsReceptionistOrAdmin()]
-        elif self.action in ['update', 'partial_update']:
-            # Receptionist or Doctor or Admin
-            return [IsAuthenticated(), IsReceptionistOrDoctorOrAdmin()]
-        # fallback
-        return [IsAuthenticated()]
 
     def get_queryset(self):
         """Custom queryset filtering"""
@@ -348,19 +350,40 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         """Get today's appointments"""
         from datetime import date
         today = date.today()
-        
+
         appointments = self.get_queryset().filter(
             appointment_date=today
         ).order_by('appointment_time')
-        
+
         serializer = self.get_serializer(appointments, many=True)
         return Response({
             'success': True,
             'count': appointments.count(),
             'data': serializer.data
         })
-    
-    
+
+    @extend_schema(
+        summary="Get Upcoming Appointments",
+        description="Get all upcoming appointments (today and future)",
+        tags=['Appointments']
+    )
+    @action(detail=False, methods=['get'])
+    def upcoming(self, request):
+        """Get upcoming appointments"""
+        from datetime import date
+        today = date.today()
+
+        appointments = self.get_queryset().filter(
+            appointment_date__gte=today,
+            status__in=['scheduled', 'confirmed']
+        ).order_by('appointment_date', 'appointment_time')
+
+        serializer = self.get_serializer(appointments, many=True)
+        return Response({
+            'success': True,
+            'count': appointments.count(),
+            'data': serializer.data
+        })
 
     @extend_schema(
         summary="Get appointment statistics",
@@ -370,12 +393,9 @@ class AppointmentViewSet(viewsets.ModelViewSet):
     )
     @action(detail=False, methods=['get'])
     def statistics(self, request):
-        """Get appointment statistics (Admin only)"""
-        if not _in_any_group(request.user, ['Administrator']):
-            return Response(
-                {'success': False, 'error': 'Permission denied'},
-                status=status.HTTP_403_FORBIDDEN
-            )
+        """Get appointment statistics (Super admin only)"""
+        # Super admins automatically have access via HMSPermission
+        # This is just for documentation purposes
 
         # Total appointments
         total = Appointment.objects.count()

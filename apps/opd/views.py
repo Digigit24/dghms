@@ -7,8 +7,9 @@ from datetime import date, timedelta
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, BasePermission
 from django_filters.rest_framework import DjangoFilterBackend
+
+from common.drf_auth import HMSPermission, IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser
 
 from drf_spectacular.utils import (
@@ -43,45 +44,9 @@ from .serializers import (
 
 
 # ============================================================================
-# PERMISSION CLASSES (Using Django Built-in Permissions)
+# HMS PERMISSION CONFIGURATION FOR OPD MODULE
+# Uses JWT-based permissions from auth backend
 # ============================================================================
-
-class ActionPermissions(BasePermission):
-    """
-    Maps DRF actions to Django model permissions.
-    Uses Django's built-in permission system (no custom permission classes).
-    """
-    APP_LABEL = 'opd'
-    
-    # Define action to permission mapping
-    def get_permission_map(self, model_name):
-        """Get permission map for a specific model"""
-        return {
-            'list': [f'{self.APP_LABEL}.view_{model_name}'],
-            'retrieve': [f'{self.APP_LABEL}.view_{model_name}'],
-            'create': [f'{self.APP_LABEL}.add_{model_name}'],
-            'update': [f'{self.APP_LABEL}.change_{model_name}'],
-            'partial_update': [f'{self.APP_LABEL}.change_{model_name}'],
-            'destroy': [f'{self.APP_LABEL}.delete_{model_name}'],
-        }
-    
-    def has_permission(self, request, view):
-        """Check if user has required permissions"""
-        user = request.user
-        if not user or not user.is_authenticated:
-            return False
-        
-        # Get model name from view
-        model_name = getattr(view, 'permission_model_name', None)
-        if not model_name:
-            return True  # Allow if no model specified
-        
-        # Get required permissions for this action
-        permission_map = self.get_permission_map(model_name)
-        required_perms = permission_map.get(view.action, [])
-        
-        # Check if user has all required permissions
-        return user.has_perms(required_perms) if required_perms else True
 
 
 # ============================================================================
@@ -127,17 +92,30 @@ class ActionPermissions(BasePermission):
 class VisitViewSet(viewsets.ModelViewSet):
     """
     OPD Visit Management
-    
+
     Handles patient visits, queue management, and visit workflow.
-    Uses Django model permissions for access control.
+    Uses JWT-based HMS permissions from the auth backend.
     """
     queryset = Visit.objects.select_related(
         'patient', 'doctor', 'appointment', 'referred_by', 'created_by'
     ).prefetch_related(
         'procedure_bills', 'findings', 'attachments'
     )
-    permission_classes = [IsAuthenticated, ActionPermissions]
-    permission_model_name = 'visit'
+    permission_classes = [HMSPermission]
+    hms_module = 'opd'  # Maps to permissions.hms.opd in JWT
+
+    # Custom action to permission mapping
+    action_permission_map = {
+        'list': 'view_visits',
+        'retrieve': 'view_visits',
+        'create': 'create_visit',
+        'update': 'edit_visit',
+        'partial_update': 'edit_visit',
+        'destroy': 'edit_visit',
+        'today': 'view_visits',
+        'queue': 'manage_queue',
+        'stats': 'view_visits',
+    }
     
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['patient', 'doctor', 'status', 'payment_status', 'visit_type', 'visit_date']
@@ -365,8 +343,17 @@ class OPDBillViewSet(viewsets.ModelViewSet):
     queryset = OPDBill.objects.select_related(
         'visit__patient', 'doctor', 'billed_by'
     )
-    permission_classes = [IsAuthenticated, ActionPermissions]
-    permission_model_name = 'opdbill'
+    permission_classes = [HMSPermission]
+    hms_module = 'opd'
+
+    action_permission_map = {
+        'list': 'view_bills',
+        'retrieve': 'view_bills',
+        'create': 'create_bill',
+        'update': 'edit_bill',
+        'partial_update': 'edit_bill',
+        'destroy': 'edit_bill',
+    }
     
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['doctor', 'payment_status', 'opd_type', 'charge_type']
@@ -452,8 +439,17 @@ class ProcedureMasterViewSet(viewsets.ModelViewSet):
     Uses Django model permissions for access control.
     """
     queryset = ProcedureMaster.objects.all()
-    permission_classes = [IsAuthenticated, ActionPermissions]
-    permission_model_name = 'proceduremaster'
+    permission_classes = [HMSPermission]
+    hms_module = 'opd'
+
+    action_permission_map = {
+        'list': 'view_procedure_bills',
+        'retrieve': 'view_procedure_bills',
+        'create': 'manage_procedures',
+        'update': 'manage_procedures',
+        'partial_update': 'manage_procedures',
+        'destroy': 'manage_procedures',
+    }
     
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['category', 'is_active']
@@ -510,8 +506,17 @@ class ProcedurePackageViewSet(viewsets.ModelViewSet):
     Uses Django model permissions for access control.
     """
     queryset = ProcedurePackage.objects.prefetch_related('procedures')
-    permission_classes = [IsAuthenticated, ActionPermissions]
-    permission_model_name = 'procedurepackage'
+    permission_classes = [HMSPermission]
+    hms_module = 'opd'
+
+    action_permission_map = {
+        'list': 'view_procedure_bills',
+        'retrieve': 'view_procedure_bills',
+        'create': 'manage_procedures',
+        'update': 'manage_procedures',
+        'partial_update': 'manage_procedures',
+        'destroy': 'manage_procedures',
+    }
     
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['is_active']
@@ -559,8 +564,17 @@ class ProcedureBillViewSet(viewsets.ModelViewSet):
     queryset = ProcedureBill.objects.select_related(
         'visit__patient', 'doctor', 'billed_by'
     ).prefetch_related('items__procedure')
-    permission_classes = [IsAuthenticated, ActionPermissions]
-    permission_model_name = 'procedurebill'
+    permission_classes = [HMSPermission]
+    hms_module = 'opd'
+
+    action_permission_map = {
+        'list': 'view_procedure_bills',
+        'retrieve': 'view_procedure_bills',
+        'create': 'create_procedure_bill',
+        'update': 'edit_visit',
+        'partial_update': 'edit_visit',
+        'destroy': 'edit_visit',
+    }
     
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['doctor', 'payment_status', 'bill_type']
@@ -638,8 +652,17 @@ class ClinicalNoteViewSet(viewsets.ModelViewSet):
     queryset = ClinicalNote.objects.select_related(
         'visit__patient', 'referred_doctor', 'created_by'
     )
-    permission_classes = [IsAuthenticated, ActionPermissions]
-    permission_model_name = 'clinicalnote'
+    permission_classes = [HMSPermission]
+    hms_module = 'opd'
+
+    action_permission_map = {
+        'list': 'view_clinical_notes',
+        'retrieve': 'view_clinical_notes',
+        'create': 'create_clinical_note',
+        'update': 'edit_clinical_note',
+        'partial_update': 'edit_clinical_note',
+        'destroy': 'edit_clinical_note',
+    }
     
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['visit__patient', 'referred_doctor']
@@ -708,8 +731,17 @@ class VisitFindingViewSet(viewsets.ModelViewSet):
     queryset = VisitFinding.objects.select_related(
         'visit__patient', 'recorded_by'
     )
-    permission_classes = [IsAuthenticated, ActionPermissions]
-    permission_model_name = 'visitfinding'
+    permission_classes = [HMSPermission]
+    hms_module = 'opd'
+
+    action_permission_map = {
+        'list': 'view_findings',
+        'retrieve': 'view_findings',
+        'create': 'record_findings',
+        'update': 'record_findings',
+        'partial_update': 'record_findings',
+        'destroy': 'record_findings',
+    }
     
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['visit', 'finding_type']
@@ -757,8 +789,17 @@ class VisitAttachmentViewSet(viewsets.ModelViewSet):
     queryset = VisitAttachment.objects.select_related(
         'visit__patient', 'uploaded_by'
     )
-    permission_classes = [IsAuthenticated, ActionPermissions]
-    permission_model_name = 'visitattachment'
+    permission_classes = [HMSPermission]
+    hms_module = 'opd'
+
+    action_permission_map = {
+        'list': 'view_visits',
+        'retrieve': 'view_visits',
+        'create': 'manage_attachments',
+        'update': 'manage_attachments',
+        'partial_update': 'manage_attachments',
+        'destroy': 'manage_attachments',
+    }
     parser_classes = [MultiPartParser, FormParser]
     
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]

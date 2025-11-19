@@ -39,16 +39,19 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
 
     # Public paths that don't require authentication
     PUBLIC_PATHS = [
-        '/',  # Root URL (redirects to admin)
-        '/api/docs/',
-        '/api/schema/',
-        '/admin',   # Allow all admin paths - custom admin site handles auth
-        '/auth/',   # Allow all auth endpoints
-        '/static/',  # Allow static files (CSS, JS, images)
-        '/media/',   # Allow media files
-        '/health/',
-        '/api/schema.json',
-        '/api/schema.yaml',
+        '/api/docs',      # API documentation (Swagger/ReDoc)
+        '/api/redoc',     # ReDoc documentation
+        '/api/schema',    # OpenAPI schema
+        '/admin',         # Allow all admin paths - custom admin site handles auth
+        '/api/auth/',     # Allow all auth endpoints
+        '/static/',       # Allow static files (CSS, JS, images)
+        '/media/',        # Allow media files
+        '/health/',       # Health check endpoint
+    ]
+
+    # Exact match paths (must match exactly, not just startswith)
+    EXACT_PUBLIC_PATHS = [
+        '/',  # Root URL only (not all paths starting with /)
     ]
 
     def process_request(self, request):
@@ -60,7 +63,12 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
         # Store request in thread-local storage for authentication backends
         set_current_request(request)
 
-        # Skip validation for public paths
+        # Skip validation for exact match public paths
+        if request.path in self.EXACT_PUBLIC_PATHS:
+            print(f"[JWT MIDDLEWARE] Skipping exact public path: {request.path}")
+            return None
+
+        # Skip validation for public paths (startswith check)
         if any(request.path.startswith(path) for path in self.PUBLIC_PATHS):
             print(f"[JWT MIDDLEWARE] Skipping public path: {request.path}")
             return None
@@ -178,7 +186,7 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
                     status=401
                 )
             else:
-                logger.debug(f"  ✓ {field}: {payload[field]}")
+                logger.debug(f"  [OK] {field}: {payload[field]}")
 
         # Check if HMS module is enabled
         enabled_modules = payload.get('enabled_modules', [])
@@ -247,14 +255,24 @@ class CustomAuthenticationMiddleware(MiddlewareMixin):
     """
     Custom authentication middleware that replaces Django's AuthenticationMiddleware
     Uses session-based TenantUser instead of Django's User model
+
+    NOTE: This middleware runs AFTER JWTAuthenticationMiddleware. If JWT auth
+    already set request.user, we don't overwrite it.
     """
-    
+
     def process_request(self, request):
         """Set request.user based on session data instead of Django's auth system"""
         from .auth_backends import TenantUser
         from django.contrib.auth.models import AnonymousUser
         from django.contrib.auth import SESSION_KEY
-        
+
+        # IMPORTANT: If user is already set (by JWT middleware), don't overwrite it
+        if hasattr(request, 'user') and request.user is not None:
+            # Check if it's already authenticated (not AnonymousUser)
+            if not isinstance(request.user, AnonymousUser):
+                print(f"[CUSTOM AUTH] ✅ User already set by JWT middleware: {request.user.email}")
+                return None
+
         # Clear any Django auth session keys that might cause conflicts
         if hasattr(request, 'session'):
             # Remove Django's auth session keys to prevent conflicts
@@ -264,16 +282,18 @@ class CustomAuthenticationMiddleware(MiddlewareMixin):
                 del request.session['_auth_user_backend']
             if '_auth_user_hash' in request.session:
                 del request.session['_auth_user_hash']
-        
+
         # Check if we have user data in session
         if hasattr(request, 'session') and request.session.get('user_data'):
             user_data = request.session.get('user_data')
             request.user = TenantUser(user_data)
             # Set _cached_user to prevent Django from trying to load user from database
             request._cached_user = request.user
+            print(f"[CUSTOM AUTH] ✅ User set from session: {request.user.email}")
         else:
-            # Create anonymous user
+            # Create anonymous user only if no other auth method succeeded
             request.user = AnonymousUser()
             request._cached_user = request.user
-        
+            print(f"[CUSTOM AUTH] ⚠️ No auth found - setting AnonymousUser for {request.path}")
+
         return None

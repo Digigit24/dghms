@@ -1,7 +1,6 @@
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 
 from django.db.models import Q, Sum, Count
@@ -15,16 +14,14 @@ from drf_spectacular.utils import (
     OpenApiResponse
 )
 
+from common.drf_auth import HMSPermission
+
 from .models import PaymentCategory, Transaction, AccountingPeriod
 from .serializers import (
     PaymentCategorySerializer,
     TransactionSerializer,
     AccountingPeriodSerializer
 )
-
-# Utility function for group-based permissions
-def _in_any_group(user, names):
-    return user and user.is_authenticated and user.groups.filter(name__in=names).exists()
 
 
 @extend_schema_view(
@@ -48,15 +45,20 @@ class PaymentCategoryViewSet(viewsets.ModelViewSet):
     """Payment Category Management"""
     queryset = PaymentCategory.objects.all()
     serializer_class = PaymentCategorySerializer
+    permission_classes = [HMSPermission]
+    hms_module = 'payments'
+
+    action_permission_map = {
+        'list': 'view_categories',
+        'retrieve': 'view_categories',
+        'create': 'manage_categories',
+        'update': 'manage_categories',
+        'partial_update': 'manage_categories',
+        'destroy': 'manage_categories',
+    }
+
     filter_backends = [filters.SearchFilter]
     search_fields = ['name', 'description']
-    
-    def get_permissions(self):
-        """Custom permissions"""
-        if self.action in ['list', 'retrieve']:
-            return [IsAuthenticated()]
-        # Write actions (create, update, delete) are admin-only
-        return [IsAuthenticated()]  # Rely on group-based auth in Django Admin
     
     def list(self, request, *args, **kwargs):
         """List categories with optional filtering"""
@@ -109,44 +111,55 @@ class TransactionViewSet(viewsets.ModelViewSet):
         'category', 'user', 'reconciled_by'
     )
     serializer_class = TransactionSerializer
+    permission_classes = [HMSPermission]
+    hms_module = 'payments'
+
+    action_permission_map = {
+        'list': 'view_transactions',
+        'retrieve': 'view_transactions',
+        'create': 'create_transaction',
+        'update': 'edit_transaction',
+        'partial_update': 'edit_transaction',
+        'destroy': 'delete_transaction',
+        'statistics': 'view_reports',
+        'reconcile': 'reconcile_transactions',
+    }
+
     filter_backends = [
-        DjangoFilterBackend, 
-        filters.SearchFilter, 
+        DjangoFilterBackend,
+        filters.SearchFilter,
         filters.OrderingFilter
     ]
     filterset_fields = [
-        'transaction_type', 
-        'payment_method', 
-        'category', 
+        'transaction_type',
+        'payment_method',
+        'category',
         'is_reconciled'
     ]
     search_fields = [
-        'transaction_number', 
-        'description', 
-        'user__first_name', 
+        'transaction_number',
+        'description',
+        'user__first_name',
         'user__last_name'
     ]
     ordering_fields = [
-        'created_at', 
-        'amount', 
+        'created_at',
+        'amount',
         'transaction_type'
     ]
     ordering = ['-created_at']
     
-    def get_permissions(self):
-        """Custom permissions"""
-        # Default to authenticated users
-        return [IsAuthenticated()]
-    
     def get_queryset(self):
         """Custom queryset filtering"""
         queryset = super().get_queryset()
-        
-        # Users can only see their own transactions 
-        # unless they are administrators
+
+        # Users can only see their own transactions
+        # unless they are super admins
         user = self.request.user
         if user.is_authenticated:
-            if not user.groups.filter(name='Administrator').exists():
+            # Super admins can see all transactions
+            if not (hasattr(user, 'is_super_admin') and user.is_super_admin):
+                # Regular users only see their own
                 queryset = queryset.filter(user=user)
         
         # Additional query parameter filtering
@@ -179,12 +192,8 @@ class TransactionViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['GET'])
     def statistics(self, request):
         """Generate transaction-wide statistics"""
-        if not _in_any_group(request.user, ['Administrator']):
-            return Response({
-                'success': False,
-                'error': 'Permission denied'
-            }, status=status.HTTP_403_FORBIDDEN)
-        
+        # Permission already checked by HMSPermission (view_reports)
+
         # Aggregate statistics
         stats = Transaction.objects.aggregate(
             total_transactions=Count('id'),
@@ -233,12 +242,8 @@ class TransactionViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['POST'])
     def reconcile(self, request, pk=None):
         """Mark a transaction as reconciled"""
-        if not _in_any_group(request.user, ['Administrator']):
-            return Response({
-                'success': False,
-                'error': 'Permission denied'
-            }, status=status.HTTP_403_FORBIDDEN)
-        
+        # Permission already checked by HMSPermission (reconcile_transactions)
+
         transaction = self.get_object()
         
         # Check if already reconciled
@@ -292,30 +297,37 @@ class AccountingPeriodViewSet(viewsets.ModelViewSet):
     """
     queryset = AccountingPeriod.objects.all()
     serializer_class = AccountingPeriodSerializer
+    permission_classes = [HMSPermission]
+    hms_module = 'payments'
+
+    action_permission_map = {
+        'list': 'view_periods',
+        'retrieve': 'view_periods',
+        'create': 'manage_periods',
+        'update': 'manage_periods',
+        'partial_update': 'manage_periods',
+        'destroy': 'manage_periods',
+        'recalculate': 'manage_periods',
+        'close': 'close_periods',
+    }
+
     filter_backends = [
-        DjangoFilterBackend, 
-        filters.SearchFilter, 
+        DjangoFilterBackend,
+        filters.SearchFilter,
         filters.OrderingFilter
     ]
     filterset_fields = [
-        'period_type', 
+        'period_type',
         'is_closed'
     ]
     search_fields = ['name']
     ordering_fields = [
-        'start_date', 
-        'end_date', 
-        'total_income', 
+        'start_date',
+        'end_date',
+        'total_income',
         'total_expenses'
     ]
     ordering = ['-start_date']
-    
-    def get_permissions(self):
-        """Custom permissions"""
-        if self.action in ['list', 'retrieve']:
-            return [IsAuthenticated()]
-        # Write actions (create, update, delete) require admin
-        return [IsAuthenticated()]  # Rely on group-based auth in Django Admin
     
     def get_queryset(self):
         """Custom queryset filtering"""
@@ -346,12 +358,8 @@ class AccountingPeriodViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['POST'])
     def recalculate(self, request, pk=None):
         """Force recalculation of financial summary"""
-        if not _in_any_group(request.user, ['Administrator']):
-            return Response({
-                'success': False,
-                'error': 'Permission denied'
-            }, status=status.HTTP_403_FORBIDDEN)
-        
+        # Permission already checked by HMSPermission (manage_periods)
+
         accounting_period = self.get_object()
         
         # Recalculate financial summary
@@ -377,12 +385,8 @@ class AccountingPeriodViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['POST'])
     def close(self, request, pk=None):
         """Close the accounting period"""
-        if not _in_any_group(request.user, ['Administrator']):
-            return Response({
-                'success': False,
-                'error': 'Permission denied'
-            }, status=status.HTTP_403_FORBIDDEN)
-        
+        # Permission already checked by HMSPermission (close_periods)
+
         accounting_period = self.get_object()
         
         # Check if already closed
