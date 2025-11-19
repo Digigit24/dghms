@@ -5,24 +5,20 @@ from .models import PatientProfile, PatientVitals, PatientAllergy
 
 class PatientVitalsSerializer(serializers.ModelSerializer):
     """Patient vitals serializer"""
-    recorded_by_name = serializers.CharField(
-        source='recorded_by.get_full_name',
-        read_only=True
-    )
     blood_pressure = serializers.ReadOnlyField()
-    
+
     class Meta:
         model = PatientVitals
         fields = '__all__'
-        read_only_fields = ['id', 'patient', 'recorded_by', 'recorded_at']
+        read_only_fields = ['id', 'patient', 'recorded_by_user_id', 'recorded_at']
 
 
 class PatientVitalsCreateUpdateSerializer(serializers.ModelSerializer):
     """Create/Update serializer for patient vitals"""
-    
+
     class Meta:
         model = PatientVitals
-        exclude = ['patient', 'recorded_by']
+        exclude = ['patient', 'recorded_by_user_id']
     
     def validate(self, attrs):
         """Validate vital signs"""
@@ -81,23 +77,19 @@ class PatientAllergySerializer(serializers.ModelSerializer):
         source='get_severity_display',
         read_only=True
     )
-    recorded_by_name = serializers.CharField(
-        source='recorded_by.get_full_name',
-        read_only=True
-    )
-    
+
     class Meta:
         model = PatientAllergy
         fields = '__all__'
-        read_only_fields = ['id', 'patient', 'recorded_by', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'patient', 'recorded_by_user_id', 'created_at', 'updated_at']
 
 
 class PatientAllergyCreateUpdateSerializer(serializers.ModelSerializer):
     """Create/Update serializer for patient allergies"""
-    
+
     class Meta:
         model = PatientAllergy
-        exclude = ['patient', 'recorded_by']
+        exclude = ['patient', 'recorded_by_user_id']
 
 
 class PatientProfileListSerializer(serializers.ModelSerializer):
@@ -126,11 +118,7 @@ class PatientProfileDetailSerializer(serializers.ModelSerializer):
     is_insurance_valid = serializers.ReadOnlyField()
     vitals = PatientVitalsSerializer(many=True, read_only=True)
     allergies = PatientAllergySerializer(many=True, read_only=True)
-    created_by_name = serializers.CharField(
-        source='created_by.get_full_name',
-        read_only=True
-    )
-    
+
     class Meta:
         model = PatientProfile
         fields = '__all__'

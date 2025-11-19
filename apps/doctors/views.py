@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 
 from common.drf_auth import HMSPermission, IsAuthenticated, AllowAny
+from common.mixins import TenantViewSetMixin
 
 from drf_spectacular.utils import (
     extend_schema, extend_schema_view, OpenApiParameter, OpenApiExample, OpenApiResponse
@@ -20,6 +21,7 @@ from .serializers import (
     DoctorProfileDetailSerializer,
     DoctorProfileCreateUpdateSerializer,
     DoctorRegistrationSerializer,  # NEW
+    DoctorWithUserCreationSerializer,  # NEW - For auto user creation
     SpecialtySerializer,
     DoctorAvailabilitySerializer,
     DoctorAvailabilityCreateUpdateSerializer,
@@ -68,10 +70,11 @@ from .serializers import (
         tags=['Specialties'],
     ),
 )
-class SpecialtyViewSet(viewsets.ModelViewSet):
+class SpecialtyViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """
     Medical Specialties Management
     Uses JWT-based HMS permissions from the auth backend.
+    Automatically filtered by tenant_id.
     """
     queryset = Specialty.objects.all()
     serializer_class = SpecialtySerializer
@@ -225,10 +228,11 @@ class SpecialtyViewSet(viewsets.ModelViewSet):
         tags=['Doctors'],
     ),
 )
-class DoctorProfileViewSet(viewsets.ModelViewSet):
+class DoctorProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """
     Doctor Profile Management
     Uses JWT-based HMS permissions from the auth backend.
+    Automatically filtered by tenant_id.
     """
     queryset = DoctorProfile.objects.prefetch_related(
         'specialties', 'availability'
@@ -442,6 +446,228 @@ class DoctorProfileViewSet(viewsets.ModelViewSet):
             'success': False,
             'errors': serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
+
+    # =========================================================================
+    # DOCTOR + USER CREATION ACTION (SuperAdmin Integration)
+    # =========================================================================
+
+    @extend_schema(
+        summary="Create doctor with user account",
+        description="Create a new doctor profile with optional auto-creation of user account in SuperAdmin. "
+                    "If create_user=True, creates user in SuperAdmin first, then creates doctor profile. "
+                    "If create_user=False, links to existing user_id.",
+        request=DoctorWithUserCreationSerializer,
+        responses={
+            201: OpenApiResponse(
+                description="Doctor created successfully",
+                response=DoctorProfileDetailSerializer
+            ),
+            400: OpenApiResponse(description="Validation error"),
+            500: OpenApiResponse(description="User creation failed in SuperAdmin")
+        },
+        examples=[
+            OpenApiExample(
+                'Create Doctor with New User',
+                value={
+                    'create_user': True,
+                    'email': 'doctor@hospital.com',
+                    'password': 'SecurePass123',
+                    'password_confirm': 'SecurePass123',
+                    'first_name': 'John',
+                    'last_name': 'Doe',
+                    'phone': '+919876543210',
+                    'role_ids': ['role-uuid-1'],
+                    'medical_license_number': 'MED123456',
+                    'license_issuing_authority': 'Medical Council of India',
+                    'license_issue_date': '2020-01-01',
+                    'license_expiry_date': '2030-01-01',
+                    'qualifications': 'MBBS, MD - Cardiology',
+                    'specialty_ids': [1, 2],
+                    'years_of_experience': 5,
+                    'consultation_fee': 500.00,
+                    'consultation_duration': 30,
+                    'is_available_online': True,
+                    'is_available_offline': True,
+                    'languages_spoken': 'English, Hindi'
+                },
+                request_only=True,
+            ),
+            OpenApiExample(
+                'Create Doctor with Existing User',
+                value={
+                    'create_user': False,
+                    'user_id': 'existing-user-uuid',
+                    'medical_license_number': 'MED789012',
+                    'license_issuing_authority': 'Medical Council of India',
+                    'license_issue_date': '2019-01-01',
+                    'license_expiry_date': '2029-01-01',
+                    'qualifications': 'MBBS, MD - General Medicine',
+                    'specialty_ids': [1],
+                    'years_of_experience': 3,
+                    'consultation_fee': 300.00
+                },
+                request_only=True,
+            ),
+        ],
+        tags=['Doctors'],
+    )
+    @action(detail=False, methods=['post'], permission_classes=[HMSPermission])
+    def create_with_user(self, request):
+        """
+        Create doctor profile with optional user creation in SuperAdmin.
+
+        This endpoint supports two modes:
+        1. create_user=True: Creates user in SuperAdmin, then creates doctor profile
+        2. create_user=False: Links doctor profile to existing user_id
+
+        Returns doctor profile data with user_id on success.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        serializer = DoctorWithUserCreationSerializer(data=request.data)
+
+        if not serializer.is_valid():
+            return Response({
+                'success': False,
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        validated_data = serializer.validated_data
+        create_user = validated_data.pop('create_user', False)
+        user_id = validated_data.pop('user_id', None)
+
+        try:
+            # ===== STEP 1: Create user in SuperAdmin if requested =====
+            if create_user:
+                from apps.auth.superadmin_client import get_superadmin_client, SuperAdminAPIException
+
+                # Prepare user data for SuperAdmin API
+                user_data = {
+                    'email': validated_data.pop('email'),
+                    'password': validated_data.pop('password'),
+                    'password_confirm': validated_data.pop('password_confirm'),
+                    'first_name': validated_data.pop('first_name'),
+                    'last_name': validated_data.pop('last_name', ''),
+                    'phone': validated_data.pop('phone', None),
+                    'timezone': validated_data.pop('timezone', 'Asia/Kolkata'),
+                    'role_ids': validated_data.pop('role_ids', []),
+                }
+
+                # Get tenant_id from request (JWT token)
+                tenant_id = request.tenant_id
+                if not tenant_id:
+                    logger.error("No tenant_id in request")
+                    return Response({
+                        'success': False,
+                        'error': 'Tenant information missing from authentication'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+                # Call SuperAdmin API to create user
+                try:
+                    client = get_superadmin_client(request)
+                    logger.info(f"Creating user in SuperAdmin: {user_data['email']} for tenant: {tenant_id}")
+
+                    user_response = client.create_user(
+                        user_data=user_data,
+                        tenant_id=str(tenant_id)
+                    )
+
+                    # DEBUG: Log the complete response structure
+                    logger.info(f"===== SUPERADMIN RESPONSE DEBUG =====")
+                    logger.info(f"Response type: {type(user_response)}")
+                    logger.info(f"Response keys: {user_response.keys() if isinstance(user_response, dict) else 'Not a dict'}")
+                    logger.info(f"Full response: {user_response}")
+                    logger.info(f"====================================")
+
+                    # Extract user_id from response
+                    user_id = user_response.get('id')
+                    if not user_id:
+                        # Check alternative response structures
+                        logger.error(f"No 'id' field in response. Available fields: {list(user_response.keys())}")
+
+                        # Maybe it's nested in 'user' or 'data'?
+                        if 'user' in user_response:
+                            user_id = user_response['user'].get('id')
+                            logger.info(f"Found ID in nested 'user' field: {user_id}")
+                        elif 'data' in user_response:
+                            user_id = user_response['data'].get('id')
+                            logger.info(f"Found ID in nested 'data' field: {user_id}")
+
+                        if not user_id:
+                            raise Exception(f"No user ID returned from SuperAdmin API. Response structure: {user_response}")
+
+                    logger.info(f"User created successfully in SuperAdmin: {user_id}")
+
+                except SuperAdminAPIException as e:
+                    logger.error(f"SuperAdmin API error: {e.message}")
+                    return Response({
+                        'success': False,
+                        'error': 'User creation failed in SuperAdmin',
+                        'details': e.message,
+                        'response_data': e.response_data
+                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+                except Exception as e:
+                    logger.error(f"Error creating user: {str(e)}", exc_info=True)
+                    return Response({
+                        'success': False,
+                        'error': 'User creation failed',
+                        'details': str(e)
+                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+            # ===== STEP 2: Create doctor profile with user_id =====
+            try:
+                specialty_ids = validated_data.pop('specialty_ids', [])
+
+                # Add user_id and tenant_id to validated_data
+                validated_data['user_id'] = user_id
+                validated_data['tenant_id'] = request.tenant_id
+
+                # Create doctor profile
+                doctor = DoctorProfile.objects.create(**validated_data)
+
+                # Add specialties
+                if specialty_ids:
+                    specialties = Specialty.objects.filter(id__in=specialty_ids)
+                    doctor.specialties.set(specialties)
+
+                logger.info(f"Doctor profile created successfully: {doctor.id} for user: {user_id}")
+
+                return Response({
+                    'success': True,
+                    'message': 'Doctor profile created successfully' + (
+                        ' (user auto-created)' if create_user else ''
+                    ),
+                    'data': DoctorProfileDetailSerializer(doctor).data,
+                }, status=status.HTTP_201_CREATED)
+
+            except Exception as e:
+                logger.error(f"Error creating doctor profile: {str(e)}", exc_info=True)
+
+                # If user was just created, we should note this in the error
+                if create_user:
+                    return Response({
+                        'success': False,
+                        'error': 'Doctor profile creation failed',
+                        'details': str(e),
+                        'note': f'User was created successfully with ID: {user_id}, but doctor profile failed. '
+                                'You can retry creating the doctor profile using this user_id.'
+                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                else:
+                    return Response({
+                        'success': False,
+                        'error': 'Doctor profile creation failed',
+                        'details': str(e)
+                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        except Exception as e:
+            logger.error(f"Unexpected error in create_with_user: {str(e)}", exc_info=True)
+            return Response({
+                'success': False,
+                'error': 'An unexpected error occurred',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     # =========================================================================
     # CUSTOM ACTIONS

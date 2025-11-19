@@ -15,6 +15,7 @@ from drf_spectacular.utils import (
 )
 
 from common.drf_auth import HMSPermission
+from common.mixins import TenantViewSetMixin
 
 from .models import PaymentCategory, Transaction, AccountingPeriod
 from .serializers import (
@@ -41,7 +42,7 @@ from .serializers import (
         tags=['Payment Categories']
     )
 )
-class PaymentCategoryViewSet(viewsets.ModelViewSet):
+class PaymentCategoryViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """Payment Category Management"""
     queryset = PaymentCategory.objects.all()
     serializer_class = PaymentCategorySerializer
@@ -103,13 +104,11 @@ class PaymentCategoryViewSet(viewsets.ModelViewSet):
         tags=['Transactions']
     )
 )
-class TransactionViewSet(viewsets.ModelViewSet):
+class TransactionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """
     Comprehensive Financial Transaction Management
     """
-    queryset = Transaction.objects.select_related(
-        'category', 'user', 'reconciled_by'
-    )
+    queryset = Transaction.objects.select_related('category')
     serializer_class = TransactionSerializer
     permission_classes = [HMSPermission]
     hms_module = 'payments'
@@ -256,7 +255,7 @@ class TransactionViewSet(viewsets.ModelViewSet):
         # Mark as reconciled
         transaction.is_reconciled = True
         transaction.reconciled_at = timezone.now()
-        transaction.reconciled_by = request.user
+        transaction.reconciled_by_id = request.user_id
         transaction.save()
         
         serializer = self.get_serializer(transaction)
@@ -290,7 +289,7 @@ class TransactionViewSet(viewsets.ModelViewSet):
         tags=['Accounting Periods']
     )
 )
-class AccountingPeriodViewSet(viewsets.ModelViewSet):
+class AccountingPeriodViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """
     Accounting Period Management
     Supports CRUD operations and financial reporting

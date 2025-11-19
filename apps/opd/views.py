@@ -10,6 +10,7 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 
 from common.drf_auth import HMSPermission, IsAuthenticated
+from common.mixins import TenantViewSetMixin
 from rest_framework.parsers import MultiPartParser, FormParser
 
 from drf_spectacular.utils import (
@@ -89,7 +90,7 @@ from .serializers import (
         tags=['OPD - Visits']
     )
 )
-class VisitViewSet(viewsets.ModelViewSet):
+class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """
     OPD Visit Management
 
@@ -333,7 +334,7 @@ class VisitViewSet(viewsets.ModelViewSet):
         tags=['OPD - Bills']
     )
 )
-class OPDBillViewSet(viewsets.ModelViewSet):
+class OPDBillViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """
     OPD Bill Management
     
@@ -431,7 +432,7 @@ class OPDBillViewSet(viewsets.ModelViewSet):
         tags=['OPD - Procedures']
     )
 )
-class ProcedureMasterViewSet(viewsets.ModelViewSet):
+class ProcedureMasterViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """
     Procedure Master Management
     
@@ -498,7 +499,7 @@ class ProcedureMasterViewSet(viewsets.ModelViewSet):
         tags=['OPD - Procedures']
     )
 )
-class ProcedurePackageViewSet(viewsets.ModelViewSet):
+class ProcedurePackageViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """
     Procedure Package Management
     
@@ -554,7 +555,7 @@ class ProcedurePackageViewSet(viewsets.ModelViewSet):
         tags=['OPD - Bills']
     )
 )
-class ProcedureBillViewSet(viewsets.ModelViewSet):
+class ProcedureBillViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """
     Procedure Bill Management
     
@@ -642,7 +643,7 @@ class ProcedureBillViewSet(viewsets.ModelViewSet):
         tags=['OPD - Clinical']
     )
 )
-class ClinicalNoteViewSet(viewsets.ModelViewSet):
+class ClinicalNoteViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """
     Clinical Note Management
     
@@ -721,7 +722,7 @@ class ClinicalNoteViewSet(viewsets.ModelViewSet):
         tags=['OPD - Clinical']
     )
 )
-class VisitFindingViewSet(viewsets.ModelViewSet):
+class VisitFindingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """
     Visit Finding Management
     
@@ -779,7 +780,7 @@ class VisitFindingViewSet(viewsets.ModelViewSet):
         tags=['OPD - Attachments']
     )
 )
-class VisitAttachmentViewSet(viewsets.ModelViewSet):
+class VisitAttachmentViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """
     Visit Attachment Management
     

@@ -49,7 +49,6 @@ class VisitDetailSerializer(serializers.ModelSerializer):
     doctor_name = serializers.CharField(source='doctor.full_name', read_only=True)
     doctor_details = serializers.SerializerMethodField()
     referred_by_name = serializers.CharField(source='referred_by.full_name', read_only=True)
-    created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
     waiting_time = serializers.SerializerMethodField()
     has_opd_bill = serializers.SerializerMethodField()
     has_clinical_note = serializers.SerializerMethodField()
@@ -155,8 +154,7 @@ class OPDBillDetailSerializer(serializers.ModelSerializer):
     patient_name = serializers.CharField(source='visit.patient.full_name', read_only=True)
     doctor_name = serializers.CharField(source='doctor.full_name', read_only=True)
     visit_number = serializers.CharField(source='visit.visit_number', read_only=True)
-    billed_by_name = serializers.CharField(source='billed_by.get_full_name', read_only=True)
-    
+
     class Meta:
         model = OPDBill
         fields = '__all__'
@@ -373,8 +371,7 @@ class ProcedureBillDetailSerializer(serializers.ModelSerializer):
     doctor_name = serializers.CharField(source='doctor.full_name', read_only=True)
     visit_number = serializers.CharField(source='visit.visit_number', read_only=True)
     items = ProcedureBillItemSerializer(many=True, read_only=True)
-    billed_by_name = serializers.CharField(source='billed_by.get_full_name', read_only=True)
-    
+
     class Meta:
         model = ProcedureBill
         fields = '__all__'
@@ -484,8 +481,7 @@ class ClinicalNoteDetailSerializer(serializers.ModelSerializer):
     visit_number = serializers.CharField(source='visit.visit_number', read_only=True)
     patient_name = serializers.CharField(source='visit.patient.full_name', read_only=True)
     referred_doctor_name = serializers.CharField(source='referred_doctor.full_name', read_only=True)
-    created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
-    
+
     class Meta:
         model = ClinicalNote
         fields = '__all__'
@@ -550,10 +546,9 @@ class VisitFindingDetailSerializer(serializers.ModelSerializer):
     
     visit_number = serializers.CharField(source='visit.visit_number', read_only=True)
     patient_name = serializers.CharField(source='visit.patient.full_name', read_only=True)
-    recorded_by_name = serializers.CharField(source='recorded_by.get_full_name', read_only=True)
     blood_pressure = serializers.CharField(read_only=True)
     bmi_category = serializers.CharField(read_only=True)
-    
+
     class Meta:
         model = VisitFinding
         fields = '__all__'
@@ -614,10 +609,9 @@ class VisitAttachmentDetailSerializer(serializers.ModelSerializer):
     """Detailed visit attachment serializer"""
     
     visit_number = serializers.CharField(source='visit.visit_number', read_only=True)
-    uploaded_by_name = serializers.CharField(source='uploaded_by.get_full_name', read_only=True)
     file_size = serializers.SerializerMethodField()
     file_extension = serializers.SerializerMethodField()
-    
+
     class Meta:
         model = VisitAttachment
         fields = '__all__'

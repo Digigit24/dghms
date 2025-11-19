@@ -15,6 +15,7 @@ from drf_spectacular.utils import (
 )
 
 from common.drf_auth import HMSPermission
+from common.mixins import TenantViewSetMixin
 
 from .models import Order, OrderItem, FeeType
 from .serializers import (
@@ -43,7 +44,7 @@ from .serializers import (
         tags=['Fee Types']
     )
 )
-class FeeTypeViewSet(viewsets.ModelViewSet):
+class FeeTypeViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """Fee Type Management"""
     queryset = FeeType.objects.all()
     serializer_class = FeeTypeSerializer
@@ -102,7 +103,7 @@ class FeeTypeViewSet(viewsets.ModelViewSet):
         tags=['Orders']
     )
 )
-class OrderViewSet(viewsets.ModelViewSet):
+class OrderViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """
     Comprehensive Order Management ViewSet
     Supports full CRUD operations and advanced order tracking

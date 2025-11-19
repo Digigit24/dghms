@@ -2,6 +2,7 @@ from rest_framework import viewsets, filters
 from django_filters.rest_framework import DjangoFilterBackend
 
 from common.drf_auth import HMSPermission
+from common.mixins import TenantViewSetMixin
 
 from .models import (
     ServiceCategory,
@@ -17,7 +18,7 @@ from .serializers import (
 )
 
 
-class ServiceCategoryViewSet(viewsets.ModelViewSet):
+class ServiceCategoryViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """Service category management"""
     queryset = ServiceCategory.objects.all()
     serializer_class = ServiceCategorySerializer
@@ -42,7 +43,7 @@ class ServiceCategoryViewSet(viewsets.ModelViewSet):
     ordering_fields = ['name', 'created_at']
 
 
-class DiagnosticTestViewSet(viewsets.ModelViewSet):
+class DiagnosticTestViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """Diagnostic test management"""
     queryset = DiagnosticTest.objects.select_related('category')
     serializer_class = DiagnosticTestSerializer
@@ -71,7 +72,7 @@ class DiagnosticTestViewSet(viewsets.ModelViewSet):
     ordering_fields = ['name', 'base_price', 'created_at']
 
 
-class NursingCarePackageViewSet(viewsets.ModelViewSet):
+class NursingCarePackageViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """Nursing care package management"""
     queryset = NursingCarePackage.objects.select_related('category')
     serializer_class = NursingCarePackageSerializer
@@ -99,7 +100,7 @@ class NursingCarePackageViewSet(viewsets.ModelViewSet):
     ordering_fields = ['name', 'base_price', 'created_at']
 
 
-class HomeHealthcareServiceViewSet(viewsets.ModelViewSet):
+class HomeHealthcareServiceViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """Home healthcare service management"""
     queryset = HomeHealthcareService.objects.select_related('category')
     serializer_class = HomeHealthcareServiceSerializer

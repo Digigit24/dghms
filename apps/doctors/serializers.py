@@ -283,13 +283,189 @@ class DoctorRegistrationSerializer(serializers.Serializer):
     def create(self, validated_data):
         """Create doctor profile"""
         specialty_ids = validated_data.pop('specialty_ids', [])
-        
+
         # Create doctor profile
         doctor = DoctorProfile.objects.create(**validated_data)
-        
+
         # Add specialties
         if specialty_ids:
             specialties = Specialty.objects.filter(id__in=specialty_ids)
             doctor.specialties.set(specialties)
-        
+
         return doctor
+
+
+# =============================================================================
+# DOCTOR + USER CREATION SERIALIZER (SuperAdmin Integration)
+# =============================================================================
+
+class DoctorWithUserCreationSerializer(serializers.Serializer):
+    """
+    Serializer for creating both User (in SuperAdmin) and DoctorProfile in one operation.
+    This is the preferred way to create new doctors.
+    """
+    # ===== USER CREATION FIELDS (to be sent to SuperAdmin API) =====
+    create_user = serializers.BooleanField(
+        default=False,
+        help_text="Set to true to auto-create user account in SuperAdmin"
+    )
+    user_id = serializers.UUIDField(
+        required=False,
+        allow_null=True,
+        help_text="Existing SuperAdmin user ID (required if create_user=False)"
+    )
+
+    # User account fields (required if create_user=True)
+    email = serializers.EmailField(
+        required=False,
+        help_text="User email (required if create_user=True)"
+    )
+    password = serializers.CharField(
+        write_only=True,
+        required=False,
+        min_length=8,
+        style={'input_type': 'password'},
+        help_text="User password (required if create_user=True)"
+    )
+    password_confirm = serializers.CharField(
+        write_only=True,
+        required=False,
+        min_length=8,
+        style={'input_type': 'password'},
+        help_text="Password confirmation (required if create_user=True)"
+    )
+    first_name = serializers.CharField(
+        max_length=150,
+        required=False,
+        help_text="User first name (required if create_user=True)"
+    )
+    last_name = serializers.CharField(
+        max_length=150,
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="User last name (optional)"
+    )
+    phone = serializers.CharField(
+        max_length=20,
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        help_text="User phone number (optional)"
+    )
+    timezone = serializers.CharField(
+        max_length=50,
+        default='Asia/Kolkata',
+        required=False,
+        help_text="User timezone"
+    )
+    role_ids = serializers.ListField(
+        child=serializers.UUIDField(),
+        required=False,
+        allow_empty=True,
+        help_text="List of role UUIDs to assign to the user"
+    )
+
+    # ===== DOCTOR PROFILE FIELDS =====
+    medical_license_number = serializers.CharField(max_length=64, required=True)
+    license_issuing_authority = serializers.CharField(max_length=128, required=True)
+    license_issue_date = serializers.DateField(required=True)
+    license_expiry_date = serializers.DateField(required=True)
+    qualifications = serializers.CharField(required=True)
+    specialty_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        allow_empty=True
+    )
+    years_of_experience = serializers.IntegerField(default=0)
+    consultation_fee = serializers.DecimalField(max_digits=10, decimal_places=2, default=0)
+    consultation_duration = serializers.IntegerField(default=30)
+    is_available_online = serializers.BooleanField(default=True)
+    is_available_offline = serializers.BooleanField(default=True)
+    status = serializers.ChoiceField(
+        choices=[('active', 'Active'), ('on_leave', 'On Leave'), ('inactive', 'Inactive')],
+        default='active'
+    )
+    signature = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    languages_spoken = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    def validate(self, attrs):
+        """Validate the data based on create_user flag"""
+        create_user = attrs.get('create_user', False)
+
+        if create_user:
+            # If creating user, validate user fields
+            required_fields = ['email', 'password', 'password_confirm', 'first_name']
+            for field in required_fields:
+                if not attrs.get(field):
+                    raise serializers.ValidationError({
+                        field: f'This field is required when create_user=True'
+                    })
+
+            # Validate password match
+            if attrs.get('password') != attrs.get('password_confirm'):
+                raise serializers.ValidationError({
+                    'password': "Passwords don't match"
+                })
+        else:
+            # If not creating user, user_id is required
+            if not attrs.get('user_id'):
+                raise serializers.ValidationError({
+                    'user_id': 'This field is required when create_user=False'
+                })
+
+            # Check if user_id already has a doctor profile
+            if DoctorProfile.objects.filter(user_id=attrs['user_id']).exists():
+                raise serializers.ValidationError({
+                    'user_id': 'User already has a doctor profile'
+                })
+
+        # Validate medical license number uniqueness
+        if DoctorProfile.objects.filter(
+            medical_license_number=attrs['medical_license_number']
+        ).exists():
+            raise serializers.ValidationError({
+                'medical_license_number': 'Doctor with this license number already exists'
+            })
+
+        # License dates validation
+        if attrs['license_expiry_date'] < attrs['license_issue_date']:
+            raise serializers.ValidationError({
+                'license_expiry_date': 'Expiry date must be after issue date'
+            })
+
+        # License expiry date must be in future
+        import datetime
+        if attrs['license_expiry_date'] < datetime.date.today():
+            raise serializers.ValidationError({
+                'license_expiry_date': 'License expiry date must be in the future'
+            })
+
+        # Consultation duration validation
+        if attrs['consultation_duration'] < 5:
+            raise serializers.ValidationError({
+                'consultation_duration': 'Consultation duration must be at least 5 minutes'
+            })
+
+        # Consultation fee validation
+        if attrs['consultation_fee'] < 0:
+            raise serializers.ValidationError({
+                'consultation_fee': 'Consultation fee cannot be negative'
+            })
+
+        # Years of experience validation
+        if attrs['years_of_experience'] < 0:
+            raise serializers.ValidationError({
+                'years_of_experience': 'Years of experience cannot be negative'
+            })
+
+        # Specialty validation
+        specialty_ids = attrs.get('specialty_ids', [])
+        if specialty_ids:
+            existing_specialties = Specialty.objects.filter(id__in=specialty_ids).count()
+            if existing_specialties != len(specialty_ids):
+                raise serializers.ValidationError({
+                    'specialty_ids': 'One or more specialty IDs are invalid'
+                })
+
+        return attrs
