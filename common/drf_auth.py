@@ -29,12 +29,16 @@ class JWTAuthentication(authentication.BaseAuthentication):
         The actual JWT validation is done by JWTAuthenticationMiddleware.
         This method just returns the user that was set by the middleware.
         """
-        # Check if user was set by JWT middleware
-        if hasattr(request, 'user') and request.user is not None:
+        # Access the underlying Django request (not DRF's wrapped request)
+        # to avoid recursion when accessing request.user
+        django_request = request._request if hasattr(request, '_request') else request
+
+        # Check if user was set by JWT middleware on the Django request
+        if hasattr(django_request, 'user') and django_request.user is not None:
             # Check if it's not an anonymous user
-            if not isinstance(request.user, AnonymousUser):
+            if not isinstance(django_request.user, AnonymousUser):
                 # Return (user, auth) tuple required by DRF
-                return (request.user, None)
+                return (django_request.user, None)
 
         # No authenticated user found
         return None
