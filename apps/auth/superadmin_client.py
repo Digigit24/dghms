@@ -97,6 +97,8 @@ class SuperAdminClient:
         }
 
         logger.info(f"Creating user in SuperAdmin: {user_data.get('email')} for tenant: {tenant_id}")
+        logger.debug(f"SuperAdmin API URL: {url}")
+        logger.debug(f"Payload: {payload}")
 
         try:
             response = requests.post(
@@ -105,7 +107,14 @@ class SuperAdminClient:
                 headers=self._get_headers(),
                 timeout=self.timeout
             )
+
+            # Log raw response details
+            logger.info(f"SuperAdmin response status: {response.status_code}")
+            logger.debug(f"SuperAdmin response headers: {dict(response.headers)}")
+            logger.debug(f"SuperAdmin response body: {response.text[:500]}")  # First 500 chars
+
             result = self._handle_response(response)
+            logger.info(f"Parsed response data: {result}")
             logger.info(f"User created successfully: {result.get('id')}")
             return result
 
