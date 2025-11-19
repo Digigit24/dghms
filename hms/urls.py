@@ -22,7 +22,7 @@ urlpatterns = [
     path('admin/', hms_admin_site.urls),
 
     # Authentication endpoints (SuperAdmin integration)
-    path('auth/', include('common.urls')),
+    path('api/auth/', include('apps.auth.urls')),
 
     # API endpoints
     # Note: accounts app removed - using SuperAdmin for authentication only

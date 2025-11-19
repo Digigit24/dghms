@@ -36,6 +36,7 @@ class TenantUser:
         self.is_active = True
         self.is_staff = True  # Allow access to admin
         self.is_superuser = user_data.get('is_super_admin', False)
+        self.is_super_admin = user_data.get('is_super_admin', False)  # For HMS permissions
         self.tenant_id = user_data.get('tenant_id')
         self.tenant_slug = user_data.get('tenant_slug')
         self.permissions = user_data.get('permissions', {})
