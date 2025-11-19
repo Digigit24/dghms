@@ -39,7 +39,6 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
 
     # Public paths that don't require authentication
     PUBLIC_PATHS = [
-        '/',  # Root URL (redirects to admin)
         '/api/docs/',
         '/api/schema/',
         '/admin',   # Allow all admin paths - custom admin site handles auth
@@ -51,6 +50,11 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
         '/api/schema.yaml',
     ]
 
+    # Exact match paths (must match exactly, not just startswith)
+    EXACT_PUBLIC_PATHS = [
+        '/',  # Root URL only (not all paths starting with /)
+    ]
+
     def process_request(self, request):
         """Process incoming request and validate JWT token"""
 
@@ -60,7 +64,12 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
         # Store request in thread-local storage for authentication backends
         set_current_request(request)
 
-        # Skip validation for public paths
+        # Skip validation for exact match public paths
+        if request.path in self.EXACT_PUBLIC_PATHS:
+            print(f"[JWT MIDDLEWARE] Skipping exact public path: {request.path}")
+            return None
+
+        # Skip validation for public paths (startswith check)
         if any(request.path.startswith(path) for path in self.PUBLIC_PATHS):
             print(f"[JWT MIDDLEWARE] Skipping public path: {request.path}")
             return None
