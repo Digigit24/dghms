@@ -6,9 +6,9 @@ from django.contrib.auth.models import Group
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, DjangoModelPermissions, AllowAny
-
 from django_filters.rest_framework import DjangoFilterBackend
+
+from common.drf_auth import HMSPermission, IsAuthenticated, AllowAny
 
 from drf_spectacular.utils import (
     extend_schema, extend_schema_view, OpenApiParameter, OpenApiExample, OpenApiResponse
@@ -71,12 +71,22 @@ from .serializers import (
 class SpecialtyViewSet(viewsets.ModelViewSet):
     """
     Medical Specialties Management
-
-    JWT authentication handled by middleware
+    Uses JWT-based HMS permissions from the auth backend.
     """
     queryset = Specialty.objects.all()
     serializer_class = SpecialtySerializer
-    permission_classes = []  # Auth handled by JWT middleware
+    permission_classes = [HMSPermission]
+    hms_module = 'doctors'  # Maps to permissions.hms.doctors in JWT
+
+    # Custom action to permission mapping
+    action_permission_map = {
+        'list': 'view',
+        'retrieve': 'view',
+        'create': 'manage_specialties',
+        'update': 'manage_specialties',
+        'partial_update': 'manage_specialties',
+        'destroy': 'manage_specialties',
+    }
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['is_active', 'department']
@@ -218,13 +228,27 @@ class SpecialtyViewSet(viewsets.ModelViewSet):
 class DoctorProfileViewSet(viewsets.ModelViewSet):
     """
     Doctor Profile Management
-
-    JWT authentication handled by middleware
+    Uses JWT-based HMS permissions from the auth backend.
     """
     queryset = DoctorProfile.objects.prefetch_related(
         'specialties', 'availability'
     ).all()
-    permission_classes = []  # Auth handled by JWT middleware
+    permission_classes = [HMSPermission]
+    hms_module = 'doctors'  # Maps to permissions.hms.doctors in JWT
+
+    # Custom action to permission mapping
+    action_permission_map = {
+        'list': 'view',
+        'retrieve': 'view',
+        'create': 'create',
+        'update': 'edit',
+        'partial_update': 'edit',
+        'destroy': 'delete',
+        'availability': 'view_availability',
+        'set_availability': 'manage_schedule',
+        'stats': 'view',
+        'activate': 'edit',
+    }
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['status', 'is_available_online', 'is_available_offline']

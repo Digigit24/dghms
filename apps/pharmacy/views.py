@@ -1,8 +1,9 @@
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
 from django_filters.rest_framework import DjangoFilterBackend
+
+from common.drf_auth import HMSPermission, IsAuthenticated
 from django.db.models import Q, Sum, Count, F
 from django.utils import timezone
 from datetime import timedelta
@@ -25,10 +26,23 @@ from .serializers import (
 
 
 class ProductCategoryViewSet(viewsets.ModelViewSet):
-    """Product Category Management"""
+    """
+    Product Category Management
+    Uses JWT-based HMS permissions from the auth backend.
+    """
     queryset = ProductCategory.objects.all()
     serializer_class = ProductCategorySerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [HMSPermission]
+    hms_module = 'pharmacy'
+
+    action_permission_map = {
+        'list': 'view_categories',
+        'retrieve': 'view_categories',
+        'create': 'manage_categories',
+        'update': 'manage_categories',
+        'partial_update': 'manage_categories',
+        'destroy': 'manage_categories',
+    }
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['name', 'type', 'description']
     ordering_fields = ['name', 'created_at']
@@ -60,7 +74,19 @@ class PharmacyProductViewSet(viewsets.ModelViewSet):
     """Pharmacy Product Management"""
     queryset = PharmacyProduct.objects.select_related('category')
     serializer_class = PharmacyProductSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [HMSPermission]
+    hms_module = 'pharmacy'
+
+    action_permission_map = {
+        'list': 'view_products',
+        'retrieve': 'view_products',
+        'create': 'create_product',
+        'update': 'edit_product',
+        'partial_update': 'edit_product',
+        'destroy': 'delete_product',
+        'low_stock': 'view_products',
+        'expiring_soon': 'view_products',
+    }
     filter_backends = [
         DjangoFilterBackend,
         filters.SearchFilter,
@@ -184,10 +210,27 @@ class PharmacyProductViewSet(viewsets.ModelViewSet):
 
 
 class CartViewSet(viewsets.ModelViewSet):
-    """Cart Management"""
+    """
+    Cart Management
+    Uses JWT-based HMS permissions from the auth backend.
+    """
     queryset = Cart.objects.prefetch_related('cart_items__product')
     serializer_class = CartSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [HMSPermission]
+    hms_module = 'pharmacy'
+
+    action_permission_map = {
+        'list': 'view_cart',
+        'retrieve': 'view_cart',
+        'create': 'view_cart',
+        'update': 'view_cart',
+        'partial_update': 'view_cart',
+        'destroy': 'view_cart',
+        'add_item': 'view_cart',
+        'remove_item': 'view_cart',
+        'clear': 'view_cart',
+        'checkout': 'create_order',
+    }
 
     def get_queryset(self):
         """Only access current user's cart"""
@@ -343,10 +386,25 @@ class CartViewSet(viewsets.ModelViewSet):
 
 
 class PharmacyOrderViewSet(viewsets.ModelViewSet):
-    """Pharmacy Order Management"""
+    """
+    Pharmacy Order Management
+    Uses JWT-based HMS permissions from the auth backend.
+    """
     queryset = PharmacyOrder.objects.prefetch_related('order_items__product')
     serializer_class = PharmacyOrderSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [HMSPermission]
+    hms_module = 'pharmacy'
+
+    action_permission_map = {
+        'list': 'view_orders',
+        'retrieve': 'view_orders',
+        'create': 'create_order',
+        'update': 'edit_order',
+        'partial_update': 'edit_order',
+        'destroy': 'edit_order',
+        'cancel': 'edit_order',
+        'stats': 'view_orders',
+    }
     filter_backends = [
         DjangoFilterBackend,
         filters.OrderingFilter

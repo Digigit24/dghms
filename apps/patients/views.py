@@ -5,9 +5,10 @@ from django.contrib.auth.models import Group
 
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated, BasePermission, AllowAny
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
+
+from common.drf_auth import HMSPermission, IsAuthenticated, AllowAny
 
 from drf_spectacular.utils import (
     extend_schema, extend_schema_view,
@@ -28,43 +29,9 @@ from .serializers import (
 )
 
 # --------------------------------------------------------------------------------------
-# Permission helper that maps DRF actions -> Django model permission codenames
+# HMS Permission Configuration for Patients Module
+# Maps custom actions to HMS permission names from JWT payload
 # --------------------------------------------------------------------------------------
-class ActionPermissions(BasePermission):
-    APP_LABEL = 'patients'
-
-    action_map = {
-        # Core CRUD
-        'list':            [f'{APP_LABEL}.view_patientprofile'],
-        'retrieve':        [f'{APP_LABEL}.view_patientprofile'],
-        'create':          [f'{APP_LABEL}.add_patientprofile'],
-        'update':          [f'{APP_LABEL}.change_patientprofile'],
-        'partial_update':  [f'{APP_LABEL}.change_patientprofile'],
-        'destroy':         [f'{APP_LABEL}.delete_patientprofile'],
-
-        # Vitals
-        'record_vitals':   [f'{APP_LABEL}.add_patientvitals'],
-        'vitals':          [f'{APP_LABEL}.view_patientvitals'],
-
-        # Allergies
-        'add_allergy':     [f'{APP_LABEL}.add_patientallergy'],
-        'allergies':       [f'{APP_LABEL}.view_patientallergy'],
-        'update_allergy':  [f'{APP_LABEL}.change_patientallergy'],
-        'delete_allergy':  [f'{APP_LABEL}.delete_patientallergy'],
-
-        # Other
-        'update_visit':    [f'{APP_LABEL}.change_patientprofile'],
-        'statistics':      [f'{APP_LABEL}.view_patientprofile'],
-        'activate':        [f'{APP_LABEL}.change_patientprofile'],
-        'mark_deceased':   [f'{APP_LABEL}.change_patientprofile'],
-    }
-
-    def has_permission(self, request, view):
-        user = request.user
-        if not user or not user.is_authenticated:
-            return False
-        needed = self.action_map.get(getattr(view, 'action', None), [])
-        return user.has_perms(needed) if needed else True
 
 
 @extend_schema_view(
@@ -139,9 +106,32 @@ class ActionPermissions(BasePermission):
 class PatientProfileViewSet(viewsets.ModelViewSet):
     """
     Patient Profile Management: registration, profile CRUD, vitals, allergies, visits.
+    Uses JWT-based HMS permissions from the auth backend.
     """
     queryset = PatientProfile.objects.all()
-    permission_classes = [IsAuthenticated, ActionPermissions]
+    permission_classes = [HMSPermission]
+    hms_module = 'patients'  # Maps to permissions.hms.patients in JWT
+
+    # Custom action to permission mapping
+    action_permission_map = {
+        'list': 'view',
+        'retrieve': 'view',
+        'create': 'create',
+        'update': 'edit',
+        'partial_update': 'edit',
+        'destroy': 'delete',
+        'record_vitals': 'view_vitals',
+        'vitals': 'view_vitals',
+        'add_allergy': 'manage_allergies',
+        'allergies': 'view',
+        'update_allergy': 'manage_allergies',
+        'delete_allergy': 'manage_allergies',
+        'update_visit': 'edit',
+        'statistics': 'view',
+        'activate': 'edit',
+        'mark_deceased': 'edit',
+        'export': 'export',
+    }
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['status', 'gender', 'blood_group', 'city', 'state']
