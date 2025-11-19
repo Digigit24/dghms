@@ -123,14 +123,14 @@ class CartSerializer(serializers.ModelSerializer):
         model = Cart
         fields = [
             'id',
-            'user',
+            'user_id',
             'cart_items',
             'total_items',
             'total_amount',
             'created_at',
             'updated_at'
         ]
-        read_only_fields = ['user', 'created_at', 'updated_at', 'total_items', 'total_amount']
+        read_only_fields = ['user_id', 'created_at', 'updated_at', 'total_items', 'total_amount']
 
 
 class PharmacyOrderItemSerializer(serializers.ModelSerializer):
@@ -164,7 +164,7 @@ class PharmacyOrderSerializer(serializers.ModelSerializer):
         model = PharmacyOrder
         fields = [
             'id',
-            'user',
+            'user_id',
             'total_amount',
             'status',
             'status_display',
@@ -176,7 +176,7 @@ class PharmacyOrderSerializer(serializers.ModelSerializer):
             'updated_at',
             'order_items'
         ]
-        read_only_fields = ['user', 'total_amount', 'created_at', 'updated_at']
+        read_only_fields = ['user_id', 'total_amount', 'created_at', 'updated_at']
 
     def validate_shipping_address(self, value):
         """Validate shipping address is not empty"""
