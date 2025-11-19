@@ -29,7 +29,7 @@ from .models import (
 from .serializers import (
     VisitListSerializer, VisitDetailSerializer, VisitCreateUpdateSerializer,
     OPDBillListSerializer, OPDBillDetailSerializer, OPDBillCreateUpdateSerializer,
-    ProcedureMasterListSerializer, ProcedureMasterDetailSerializer, 
+    ProcedureMasterListSerializer, ProcedureMasterDetailSerializer,
     ProcedureMasterCreateUpdateSerializer,
     ProcedurePackageListSerializer, ProcedurePackageDetailSerializer,
     ProcedurePackageCreateUpdateSerializer,
@@ -40,7 +40,8 @@ from .serializers import (
     VisitFindingListSerializer, VisitFindingDetailSerializer,
     VisitFindingCreateUpdateSerializer,
     VisitAttachmentListSerializer, VisitAttachmentDetailSerializer,
-    VisitAttachmentCreateUpdateSerializer
+    VisitAttachmentCreateUpdateSerializer,
+    OPDBillStatisticsSerializer
 )
 
 
@@ -354,6 +355,7 @@ class OPDBillViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         'update': 'edit_bill',
         'partial_update': 'edit_bill',
         'destroy': 'edit_bill',
+        'statistics': 'view_bills',
     }
     
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -409,6 +411,82 @@ class OPDBillViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             'message': 'Payment recorded',
             'data': serializer.data
         })
+
+    @extend_schema(
+        summary="Get OPD Bill Statistics",
+        description="Statistical overview of OPD bills (Admin/Superadmin only).",
+        parameters=[
+            OpenApiParameter(name='period', type=str, description='day, week, month, year (default: month)')
+        ],
+        responses={200: OPDBillStatisticsSerializer},
+        tags=['OPD - Bills']
+    )
+    @action(detail=False, methods=['get'])
+    def statistics(self, request):
+        """Get OPD bill statistics"""
+        # Allow superadmins or Administrators
+        is_superadmin = getattr(request.user, 'is_super_admin', False)
+        is_administrator = request.user.groups.filter(name='Administrator').exists()
+
+        if not (is_superadmin or is_administrator):
+            return Response({'success': False, 'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
+        period = request.query_params.get('period', 'month')
+        today = date.today()
+
+        if period == 'day':
+            start_date = today
+        elif period == 'week':
+            start_date = today - timedelta(days=7)
+        elif period == 'month':
+            start_date = today - timedelta(days=30)
+        elif period == 'year':
+            start_date = today - timedelta(days=365)
+        else:
+            start_date = today - timedelta(days=30)
+
+        bills = OPDBill.objects.filter(bill_date__date__gte=start_date)
+
+        # Calculate statistics
+        total_bills = bills.count()
+        bills_paid = bills.filter(payment_status='paid').count()
+        bills_partial = bills.filter(payment_status='partial').count()
+        bills_unpaid = bills.filter(payment_status='unpaid').count()
+
+        total_revenue = bills.aggregate(Sum('total_amount'))['total_amount__sum'] or Decimal('0.00')
+        paid_revenue = bills.aggregate(Sum('received_amount'))['received_amount__sum'] or Decimal('0.00')
+        pending_amount = bills.aggregate(Sum('balance_amount'))['balance_amount__sum'] or Decimal('0.00')
+        total_discount = bills.aggregate(Sum('discount_amount'))['discount_amount__sum'] or Decimal('0.00')
+        average_bill_amount = bills.aggregate(Avg('total_amount'))['total_amount__avg'] or Decimal('0.00')
+
+        # Breakdown by OPD type
+        by_opd_type = list(bills.values('opd_type').annotate(
+            count=Count('id'),
+            revenue=Sum('total_amount')
+        ))
+
+        # Breakdown by payment mode
+        by_payment_mode = list(bills.values('payment_mode').annotate(
+            count=Count('id'),
+            amount=Sum('received_amount')
+        ))
+
+        data = {
+            'total_bills': total_bills,
+            'total_revenue': total_revenue,
+            'paid_revenue': paid_revenue,
+            'pending_amount': pending_amount,
+            'total_discount': total_discount,
+            'bills_paid': bills_paid,
+            'bills_partial': bills_partial,
+            'bills_unpaid': bills_unpaid,
+            'by_opd_type': by_opd_type,
+            'by_payment_mode': by_payment_mode,
+            'average_bill_amount': round(average_bill_amount, 2)
+        }
+
+        serializer = OPDBillStatisticsSerializer(data)
+        return Response({'success': True, 'data': serializer.data})
 
 
 # ============================================================================

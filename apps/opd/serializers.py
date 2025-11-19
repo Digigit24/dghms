@@ -638,5 +638,33 @@ class VisitAttachmentCreateUpdateSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if request and request.user:
             validated_data['uploaded_by'] = request.user
-        
+
         return super().create(validated_data)
+
+
+# ============================================================================
+# STATISTICS SERIALIZERS
+# ============================================================================
+
+class OPDBillStatisticsSerializer(serializers.Serializer):
+    """Serializer for OPD bill statistics"""
+
+    total_bills = serializers.IntegerField()
+    total_revenue = serializers.DecimalField(max_digits=12, decimal_places=2)
+    paid_revenue = serializers.DecimalField(max_digits=12, decimal_places=2)
+    pending_amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    total_discount = serializers.DecimalField(max_digits=12, decimal_places=2)
+
+    # Payment status breakdown
+    bills_paid = serializers.IntegerField()
+    bills_partial = serializers.IntegerField()
+    bills_unpaid = serializers.IntegerField()
+
+    # OPD type breakdown
+    by_opd_type = serializers.ListField()
+
+    # Payment mode breakdown
+    by_payment_mode = serializers.ListField()
+
+    # Average bill amount
+    average_bill_amount = serializers.DecimalField(max_digits=10, decimal_places=2)
