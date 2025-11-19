@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 
 from common.drf_auth import HMSPermission, IsAuthenticated
+from common.mixins import TenantViewSetMixin
 from django.db.models import Q, Count, Avg
 from django.utils import timezone
 from django.db.models import F
@@ -66,7 +67,7 @@ from .serializers import (
         tags=['Appointment Types']
     )
 )
-class AppointmentTypeViewSet(viewsets.ModelViewSet):
+class AppointmentTypeViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """
     Appointment Type management
     Uses JWT-based HMS permissions from the auth backend.
@@ -133,7 +134,7 @@ class AppointmentTypeViewSet(viewsets.ModelViewSet):
         tags=['Appointments']
     )
 )
-class AppointmentViewSet(viewsets.ModelViewSet):
+class AppointmentViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """
     Comprehensive Appointment Management
     Uses JWT-based HMS permissions from the auth backend.

@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 
 from common.drf_auth import HMSPermission, IsAuthenticated, AllowAny
+from common.mixins import TenantViewSetMixin
 
 from drf_spectacular.utils import (
     extend_schema, extend_schema_view, OpenApiParameter, OpenApiExample, OpenApiResponse
@@ -69,10 +70,11 @@ from .serializers import (
         tags=['Specialties'],
     ),
 )
-class SpecialtyViewSet(viewsets.ModelViewSet):
+class SpecialtyViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """
     Medical Specialties Management
     Uses JWT-based HMS permissions from the auth backend.
+    Automatically filtered by tenant_id.
     """
     queryset = Specialty.objects.all()
     serializer_class = SpecialtySerializer
@@ -226,10 +228,11 @@ class SpecialtyViewSet(viewsets.ModelViewSet):
         tags=['Doctors'],
     ),
 )
-class DoctorProfileViewSet(viewsets.ModelViewSet):
+class DoctorProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """
     Doctor Profile Management
     Uses JWT-based HMS permissions from the auth backend.
+    Automatically filtered by tenant_id.
     """
     queryset = DoctorProfile.objects.prefetch_related(
         'specialties', 'availability'

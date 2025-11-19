@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 
 from common.drf_auth import HMSPermission, IsAuthenticated, AllowAny
+from common.mixins import TenantViewSetMixin
 
 from drf_spectacular.utils import (
     extend_schema, extend_schema_view,
@@ -103,7 +104,7 @@ from .serializers import (
         tags=['Patients']
     ),
 )
-class PatientProfileViewSet(viewsets.ModelViewSet):
+class PatientProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """
     Patient Profile Management: registration, profile CRUD, vitals, allergies, visits.
     Uses JWT-based HMS permissions from the auth backend.

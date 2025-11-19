@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 
 from common.drf_auth import HMSPermission, IsAuthenticated
+from common.mixins import TenantViewSetMixin
 from django.db.models import Q, Sum, Count, F
 from django.utils import timezone
 from datetime import timedelta
@@ -25,7 +26,7 @@ from .serializers import (
 )
 
 
-class ProductCategoryViewSet(viewsets.ModelViewSet):
+class ProductCategoryViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """
     Product Category Management
     Uses JWT-based HMS permissions from the auth backend.
@@ -70,7 +71,7 @@ class ProductCategoryViewSet(viewsets.ModelViewSet):
         }, status=status.HTTP_200_OK)
 
 
-class PharmacyProductViewSet(viewsets.ModelViewSet):
+class PharmacyProductViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """Pharmacy Product Management"""
     queryset = PharmacyProduct.objects.select_related('category')
     serializer_class = PharmacyProductSerializer
@@ -209,7 +210,7 @@ class PharmacyProductViewSet(viewsets.ModelViewSet):
         })
 
 
-class CartViewSet(viewsets.ModelViewSet):
+class CartViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """
     Cart Management
     Uses JWT-based HMS permissions from the auth backend.
@@ -385,7 +386,7 @@ class CartViewSet(viewsets.ModelViewSet):
         })
 
 
-class PharmacyOrderViewSet(viewsets.ModelViewSet):
+class PharmacyOrderViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """
     Pharmacy Order Management
     Uses JWT-based HMS permissions from the auth backend.
