@@ -107,9 +107,7 @@ class TransactionViewSet(viewsets.ModelViewSet):
     """
     Comprehensive Financial Transaction Management
     """
-    queryset = Transaction.objects.select_related(
-        'category', 'user', 'reconciled_by'
-    )
+    queryset = Transaction.objects.select_related('category')
     serializer_class = TransactionSerializer
     permission_classes = [HMSPermission]
     hms_module = 'payments'
@@ -256,7 +254,7 @@ class TransactionViewSet(viewsets.ModelViewSet):
         # Mark as reconciled
         transaction.is_reconciled = True
         transaction.reconciled_at = timezone.now()
-        transaction.reconciled_by = request.user
+        transaction.reconciled_by_id = request.user_id
         transaction.save()
         
         serializer = self.get_serializer(transaction)

@@ -71,13 +71,13 @@ class TransactionSerializer(serializers.ModelSerializer):
             'user_id',
             'description',
             'content_type', 'object_id', 'related_object_details',
-            'is_reconciled', 'reconciled_at', 'reconciled_by',
+            'is_reconciled', 'reconciled_at', 'reconciled_by_id',
             'created_at', 'updated_at'
         ]
         read_only_fields = [
-            'id', 'transaction_number', 
+            'id', 'transaction_number',
             'created_at', 'updated_at',
-            'reconciled_at'
+            'reconciled_at', 'reconciled_by_id'
         ]
     
     def get_related_object_details(self, obj):
