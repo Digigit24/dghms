@@ -118,11 +118,7 @@ class PatientProfileDetailSerializer(serializers.ModelSerializer):
     is_insurance_valid = serializers.ReadOnlyField()
     vitals = PatientVitalsSerializer(many=True, read_only=True)
     allergies = PatientAllergySerializer(many=True, read_only=True)
-    created_by_name = serializers.CharField(
-        source='created_by.get_full_name',
-        read_only=True
-    )
-    
+
     class Meta:
         model = PatientProfile
         fields = '__all__'

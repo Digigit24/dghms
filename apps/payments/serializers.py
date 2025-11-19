@@ -55,26 +55,20 @@ class TransactionSerializer(serializers.ModelSerializer):
     """Serializer for Financial Transactions"""
     category = PaymentCategorySerializer(read_only=True)
     category_id = serializers.PrimaryKeyRelatedField(
-        queryset=PaymentCategory.objects.all(), 
-        source='category', 
+        queryset=PaymentCategory.objects.all(),
+        source='category',
         write_only=True
     )
-    
-    user_name = serializers.CharField(
-        source='user.get_full_name', 
-        read_only=True, 
-        allow_null=True
-    )
-    
+
     related_object_details = serializers.SerializerMethodField()
-    
+
     class Meta:
         model = Transaction
         fields = [
-            'id', 'transaction_number', 'amount', 
-            'category', 'category_id', 
+            'id', 'transaction_number', 'amount',
+            'category', 'category_id',
             'transaction_type', 'payment_method',
-            'user', 'user_name',
+            'user_id',
             'description',
             'content_type', 'object_id', 'related_object_details',
             'is_reconciled', 'reconciled_at', 'reconciled_by',
@@ -128,23 +122,18 @@ class TransactionSerializer(serializers.ModelSerializer):
 
 class AccountingPeriodSerializer(serializers.ModelSerializer):
     """Serializer for Accounting Periods"""
-    closed_by_name = serializers.CharField(
-        source='closed_by.get_full_name', 
-        read_only=True, 
-        allow_null=True
-    )
-    
+
     class Meta:
         model = AccountingPeriod
         fields = [
-            'id', 'name', 'start_date', 'end_date', 
-            'period_type', 'total_income', 'total_expenses', 
-            'net_profit', 'is_closed', 'closed_at', 
-            'closed_by', 'closed_by_name'
+            'id', 'name', 'start_date', 'end_date',
+            'period_type', 'total_income', 'total_expenses',
+            'net_profit', 'is_closed', 'closed_at',
+            'closed_by_id'
         ]
         read_only_fields = [
-            'total_income', 'total_expenses', 
-            'net_profit', 'closed_at'
+            'total_income', 'total_expenses',
+            'net_profit', 'closed_at', 'closed_by_id'
         ]
     
     def validate(self, attrs):
