@@ -342,7 +342,7 @@ class OPDBillViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     Uses Django model permissions for access control.
     """
     queryset = OPDBill.objects.select_related(
-        'visit__patient', 'doctor', 'billed_by'
+        'visit__patient', 'doctor'
     )
     permission_classes = [HMSPermission]
     hms_module = 'opd'
@@ -563,7 +563,7 @@ class ProcedureBillViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     Uses Django model permissions for access control.
     """
     queryset = ProcedureBill.objects.select_related(
-        'visit__patient', 'doctor', 'billed_by'
+        'visit__patient', 'doctor'
     ).prefetch_related('items__procedure')
     permission_classes = [HMSPermission]
     hms_module = 'opd'
