@@ -142,7 +142,7 @@ class PatientProfileCreateUpdateSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = PatientProfile
-        exclude = ['user', 'patient_id', 'age', 'bmi', 'created_by']
+        exclude = ['patient_id', 'age', 'bmi', 'created_by_user_id']
     
     def validate_user_id(self, value):
         """Validate user_id format (UUID from SuperAdmin)"""
