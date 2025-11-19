@@ -247,14 +247,24 @@ class CustomAuthenticationMiddleware(MiddlewareMixin):
     """
     Custom authentication middleware that replaces Django's AuthenticationMiddleware
     Uses session-based TenantUser instead of Django's User model
+
+    NOTE: This middleware runs AFTER JWTAuthenticationMiddleware. If JWT auth
+    already set request.user, we don't overwrite it.
     """
-    
+
     def process_request(self, request):
         """Set request.user based on session data instead of Django's auth system"""
         from .auth_backends import TenantUser
         from django.contrib.auth.models import AnonymousUser
         from django.contrib.auth import SESSION_KEY
-        
+
+        # IMPORTANT: If user is already set (by JWT middleware), don't overwrite it
+        if hasattr(request, 'user') and request.user is not None:
+            # Check if it's already authenticated (not AnonymousUser)
+            if not isinstance(request.user, AnonymousUser):
+                print(f"[CUSTOM AUTH] ✅ User already set by JWT middleware: {request.user.email}")
+                return None
+
         # Clear any Django auth session keys that might cause conflicts
         if hasattr(request, 'session'):
             # Remove Django's auth session keys to prevent conflicts
@@ -264,16 +274,18 @@ class CustomAuthenticationMiddleware(MiddlewareMixin):
                 del request.session['_auth_user_backend']
             if '_auth_user_hash' in request.session:
                 del request.session['_auth_user_hash']
-        
+
         # Check if we have user data in session
         if hasattr(request, 'session') and request.session.get('user_data'):
             user_data = request.session.get('user_data')
             request.user = TenantUser(user_data)
             # Set _cached_user to prevent Django from trying to load user from database
             request._cached_user = request.user
+            print(f"[CUSTOM AUTH] ✅ User set from session: {request.user.email}")
         else:
-            # Create anonymous user
+            # Create anonymous user only if no other auth method succeeded
             request.user = AnonymousUser()
             request._cached_user = request.user
-        
+            print(f"[CUSTOM AUTH] ⚠️ No auth found - setting AnonymousUser for {request.path}")
+
         return None
