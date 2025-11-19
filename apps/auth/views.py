@@ -352,3 +352,347 @@ def verify_token_view(request):
             'valid': False,
             'error': 'Invalid token'
         }, status=status.HTTP_401_UNAUTHORIZED)
+
+
+# ==================== USER CRUD OPERATIONS ====================
+
+from rest_framework import viewsets
+from rest_framework.decorators import action
+from apps.auth.superadmin_client import get_superadmin_client, SuperAdminAPIException
+from apps.auth.serializers import (
+    UserSerializer, UserCreateSerializer, UserUpdateSerializer,
+    UserListFilterSerializer, RoleAssignmentSerializer
+)
+
+
+class UserViewSet(viewsets.ViewSet):
+    """
+    ViewSet for User CRUD operations via SuperAdmin API
+
+    All operations are proxied to the SuperAdmin API with proper tenant isolation.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def list(self, request):
+        """
+        List all users for the current tenant
+
+        Query parameters:
+        - page: Page number
+        - page_size: Items per page (default: 20, max: 100)
+        - search: Search by email/name
+        - is_active: Filter by active status
+        - role_id: Filter by role UUID
+        - ordering: Field to order by
+
+        GET /api/auth/users/
+        """
+        # Validate query parameters
+        filter_serializer = UserListFilterSerializer(data=request.query_params)
+        if not filter_serializer.is_valid():
+            return Response(
+                filter_serializer.errors,
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            client = get_superadmin_client(request)
+            tenant_id = request.tenant_id
+
+            if not tenant_id:
+                logger.error("No tenant_id in request")
+                return Response(
+                    {'error': 'Tenant information missing'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Get users from SuperAdmin
+            result = client.list_users(
+                tenant_id=tenant_id,
+                params=filter_serializer.validated_data
+            )
+
+            logger.info(f"Listed users for tenant {tenant_id}")
+            return Response(result, status=status.HTTP_200_OK)
+
+        except SuperAdminAPIException as e:
+            logger.error(f"SuperAdmin API error: {e.message}")
+            return Response(
+                {'error': e.message, 'details': e.response_data},
+                status=e.status_code or status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        except Exception as e:
+            logger.error(f"Error listing users: {str(e)}", exc_info=True)
+            return Response(
+                {'error': 'Failed to list users'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def create(self, request):
+        """
+        Create a new user in the current tenant
+
+        POST /api/auth/users/
+
+        Request body:
+        {
+            "email": "newuser@example.com",
+            "password": "SecurePass123",
+            "password_confirm": "SecurePass123",
+            "first_name": "John",
+            "last_name": "Doe",
+            "phone": "+1234567890",
+            "role_ids": ["role-uuid-1", "role-uuid-2"],
+            "timezone": "Asia/Kolkata"
+        }
+        """
+        serializer = UserCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                serializer.errors,
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            client = get_superadmin_client(request)
+            tenant_id = request.tenant_id
+
+            if not tenant_id:
+                logger.error("No tenant_id in request")
+                return Response(
+                    {'error': 'Tenant information missing'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Create user via SuperAdmin API
+            user_data = serializer.to_superadmin_payload()
+            result = client.create_user(
+                user_data=user_data,
+                tenant_id=tenant_id
+            )
+
+            logger.info(f"User created successfully: {result.get('id')} for tenant {tenant_id}")
+            return Response(result, status=status.HTTP_201_CREATED)
+
+        except SuperAdminAPIException as e:
+            logger.error(f"SuperAdmin API error: {e.message}")
+            return Response(
+                {'error': e.message, 'details': e.response_data},
+                status=e.status_code or status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        except Exception as e:
+            logger.error(f"Error creating user: {str(e)}", exc_info=True)
+            return Response(
+                {'error': 'Failed to create user'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def retrieve(self, request, pk=None):
+        """
+        Get details of a specific user
+
+        GET /api/auth/users/{user_id}/
+        """
+        try:
+            client = get_superadmin_client(request)
+            result = client.get_user(user_id=pk)
+
+            # Verify user belongs to the same tenant
+            if result.get('tenant') != str(request.tenant_id):
+                return Response(
+                    {'error': 'User not found in your tenant'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            logger.info(f"Retrieved user: {pk}")
+            return Response(result, status=status.HTTP_200_OK)
+
+        except SuperAdminAPIException as e:
+            logger.error(f"SuperAdmin API error: {e.message}")
+            return Response(
+                {'error': e.message, 'details': e.response_data},
+                status=e.status_code or status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            logger.error(f"Error retrieving user: {str(e)}", exc_info=True)
+            return Response(
+                {'error': 'Failed to retrieve user'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def update(self, request, pk=None):
+        """
+        Update a user (full update)
+
+        PUT /api/auth/users/{user_id}/
+        """
+        serializer = UserUpdateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                serializer.errors,
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            client = get_superadmin_client(request)
+
+            # First verify user belongs to tenant
+            user = client.get_user(user_id=pk)
+            if user.get('tenant') != str(request.tenant_id):
+                return Response(
+                    {'error': 'User not found in your tenant'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            # Update user
+            user_data = serializer.to_superadmin_payload()
+            result = client.update_user(user_id=pk, user_data=user_data)
+
+            logger.info(f"User updated successfully: {pk}")
+            return Response(result, status=status.HTTP_200_OK)
+
+        except SuperAdminAPIException as e:
+            logger.error(f"SuperAdmin API error: {e.message}")
+            return Response(
+                {'error': e.message, 'details': e.response_data},
+                status=e.status_code or status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        except Exception as e:
+            logger.error(f"Error updating user: {str(e)}", exc_info=True)
+            return Response(
+                {'error': 'Failed to update user'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def partial_update(self, request, pk=None):
+        """
+        Partially update a user
+
+        PATCH /api/auth/users/{user_id}/
+        """
+        serializer = UserUpdateSerializer(data=request.data, partial=True)
+        if not serializer.is_valid():
+            return Response(
+                serializer.errors,
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            client = get_superadmin_client(request)
+
+            # First verify user belongs to tenant
+            user = client.get_user(user_id=pk)
+            if user.get('tenant') != str(request.tenant_id):
+                return Response(
+                    {'error': 'User not found in your tenant'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            # Update user
+            user_data = serializer.to_superadmin_payload()
+            result = client.update_user(user_id=pk, user_data=user_data)
+
+            logger.info(f"User partially updated: {pk}")
+            return Response(result, status=status.HTTP_200_OK)
+
+        except SuperAdminAPIException as e:
+            logger.error(f"SuperAdmin API error: {e.message}")
+            return Response(
+                {'error': e.message, 'details': e.response_data},
+                status=e.status_code or status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        except Exception as e:
+            logger.error(f"Error updating user: {str(e)}", exc_info=True)
+            return Response(
+                {'error': 'Failed to update user'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def destroy(self, request, pk=None):
+        """
+        Delete a user (soft delete - sets is_active=False)
+
+        DELETE /api/auth/users/{user_id}/
+        """
+        try:
+            client = get_superadmin_client(request)
+
+            # First verify user belongs to tenant
+            user = client.get_user(user_id=pk)
+            if user.get('tenant') != str(request.tenant_id):
+                return Response(
+                    {'error': 'User not found in your tenant'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            # Delete user
+            client.delete_user(user_id=pk)
+
+            logger.info(f"User deleted: {pk}")
+            return Response(
+                {'message': 'User deleted successfully'},
+                status=status.HTTP_204_NO_CONTENT
+            )
+
+        except SuperAdminAPIException as e:
+            logger.error(f"SuperAdmin API error: {e.message}")
+            return Response(
+                {'error': e.message, 'details': e.response_data},
+                status=e.status_code or status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        except Exception as e:
+            logger.error(f"Error deleting user: {str(e)}", exc_info=True)
+            return Response(
+                {'error': 'Failed to delete user'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=True, methods=['post'])
+    def assign_roles(self, request, pk=None):
+        """
+        Assign roles to a user
+
+        POST /api/auth/users/{user_id}/assign_roles/
+
+        Request body:
+        {
+            "role_ids": ["role-uuid-1", "role-uuid-2"]
+        }
+        """
+        serializer = RoleAssignmentSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                serializer.errors,
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            client = get_superadmin_client(request)
+
+            # First verify user belongs to tenant
+            user = client.get_user(user_id=pk)
+            if user.get('tenant') != str(request.tenant_id):
+                return Response(
+                    {'error': 'User not found in your tenant'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            # Assign roles
+            role_ids = serializer.validated_data['role_ids']
+            result = client.assign_roles(user_id=pk, role_ids=role_ids)
+
+            logger.info(f"Roles assigned to user {pk}: {role_ids}")
+            return Response(result, status=status.HTTP_200_OK)
+
+        except SuperAdminAPIException as e:
+            logger.error(f"SuperAdmin API error: {e.message}")
+            return Response(
+                {'error': e.message, 'details': e.response_data},
+                status=e.status_code or status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        except Exception as e:
+            logger.error(f"Error assigning roles: {str(e)}", exc_info=True)
+            return Response(
+                {'error': 'Failed to assign roles'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
