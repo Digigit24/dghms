@@ -509,7 +509,11 @@ class PatientProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     )
     @action(detail=False, methods=['get'])
     def statistics(self, request):
-        if not request.user.groups.filter(name='Administrator').exists():
+        # Allow superadmins or Administrators
+        is_superadmin = getattr(request.user, 'is_super_admin', False)
+        is_administrator = request.user.groups.filter(name='Administrator').exists()
+
+        if not (is_superadmin or is_administrator):
             return Response({'success': False, 'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
 
         total = PatientProfile.objects.count()
@@ -558,7 +562,11 @@ class PatientProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     )
     @action(detail=True, methods=['post'])
     def activate(self, request, pk=None):
-        if not request.user.groups.filter(name='Administrator').exists():
+        # Allow superadmins or Administrators
+        is_superadmin = getattr(request.user, 'is_super_admin', False)
+        is_administrator = request.user.groups.filter(name='Administrator').exists()
+
+        if not (is_superadmin or is_administrator):
             return Response({'success': False, 'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
         patient = self.get_object()
         patient.status = 'active'
@@ -575,7 +583,11 @@ class PatientProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     )
     @action(detail=True, methods=['post'])
     def mark_deceased(self, request, pk=None):
-        if not request.user.groups.filter(name='Administrator').exists():
+        # Allow superadmins or Administrators
+        is_superadmin = getattr(request.user, 'is_super_admin', False)
+        is_administrator = request.user.groups.filter(name='Administrator').exists()
+
+        if not (is_superadmin or is_administrator):
             return Response({'success': False, 'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
         patient = self.get_object()
         patient.status = 'deceased'
