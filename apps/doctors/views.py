@@ -573,10 +573,29 @@ class DoctorProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                         tenant_id=str(tenant_id)
                     )
 
+                    # DEBUG: Log the complete response structure
+                    logger.info(f"===== SUPERADMIN RESPONSE DEBUG =====")
+                    logger.info(f"Response type: {type(user_response)}")
+                    logger.info(f"Response keys: {user_response.keys() if isinstance(user_response, dict) else 'Not a dict'}")
+                    logger.info(f"Full response: {user_response}")
+                    logger.info(f"====================================")
+
                     # Extract user_id from response
                     user_id = user_response.get('id')
                     if not user_id:
-                        raise Exception("No user ID returned from SuperAdmin API")
+                        # Check alternative response structures
+                        logger.error(f"No 'id' field in response. Available fields: {list(user_response.keys())}")
+
+                        # Maybe it's nested in 'user' or 'data'?
+                        if 'user' in user_response:
+                            user_id = user_response['user'].get('id')
+                            logger.info(f"Found ID in nested 'user' field: {user_id}")
+                        elif 'data' in user_response:
+                            user_id = user_response['data'].get('id')
+                            logger.info(f"Found ID in nested 'data' field: {user_id}")
+
+                        if not user_id:
+                            raise Exception(f"No user ID returned from SuperAdmin API. Response structure: {user_response}")
 
                     logger.info(f"User created successfully in SuperAdmin: {user_id}")
 

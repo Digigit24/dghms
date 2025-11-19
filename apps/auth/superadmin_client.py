@@ -111,11 +111,24 @@ class SuperAdminClient:
             # Log raw response details
             logger.info(f"SuperAdmin response status: {response.status_code}")
             logger.debug(f"SuperAdmin response headers: {dict(response.headers)}")
-            logger.debug(f"SuperAdmin response body: {response.text[:500]}")  # First 500 chars
+            logger.debug(f"SuperAdmin response body: {response.text[:1000]}")  # First 1000 chars
+
+            # EXPLICIT DEBUG - Also print to console
+            print(f"\n{'='*60}")
+            print(f"SUPERADMIN CLIENT DEBUG")
+            print(f"{'='*60}")
+            print(f"URL: {url}")
+            print(f"Status: {response.status_code}")
+            print(f"Response Text: {response.text}")
+            print(f"{'='*60}\n")
 
             result = self._handle_response(response)
             logger.info(f"Parsed response data: {result}")
             logger.info(f"User created successfully: {result.get('id')}")
+
+            print(f"Parsed result: {result}")
+            print(f"User ID from result: {result.get('id')}")
+
             return result
 
         except requests.RequestException as e:
