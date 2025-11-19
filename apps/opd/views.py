@@ -98,7 +98,7 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     Uses JWT-based HMS permissions from the auth backend.
     """
     queryset = Visit.objects.select_related(
-        'patient', 'doctor', 'appointment', 'referred_by', 'created_by'
+        'patient', 'doctor', 'appointment', 'referred_by'
     ).prefetch_related(
         'procedure_bills', 'findings', 'attachments'
     )
@@ -651,7 +651,7 @@ class ClinicalNoteViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     Uses Django model permissions for access control.
     """
     queryset = ClinicalNote.objects.select_related(
-        'visit__patient', 'referred_doctor', 'created_by'
+        'visit__patient', 'referred_doctor'
     )
     permission_classes = [HMSPermission]
     hms_module = 'opd'
@@ -730,7 +730,7 @@ class VisitFindingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     Uses Django model permissions for access control.
     """
     queryset = VisitFinding.objects.select_related(
-        'visit__patient', 'recorded_by'
+        'visit__patient'
     )
     permission_classes = [HMSPermission]
     hms_module = 'opd'
@@ -788,7 +788,7 @@ class VisitAttachmentViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     Uses Django model permissions for access control.
     """
     queryset = VisitAttachment.objects.select_related(
-        'visit__patient', 'uploaded_by'
+        'visit__patient'
     )
     permission_classes = [HMSPermission]
     hms_module = 'opd'
