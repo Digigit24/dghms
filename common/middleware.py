@@ -186,7 +186,7 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
                     status=401
                 )
             else:
-                logger.debug(f"  ✓ {field}: {payload[field]}")
+                logger.debug(f"  [OK] {field}: {payload[field]}")
 
         # Check if HMS module is enabled
         enabled_modules = payload.get('enabled_modules', [])

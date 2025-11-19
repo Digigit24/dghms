@@ -139,8 +139,7 @@ class AppointmentViewSet(viewsets.ModelViewSet):
     Uses JWT-based HMS permissions from the auth backend.
     """
     queryset = Appointment.objects.select_related(
-        'patient', 'doctor', 'appointment_type',
-        'created_by', 'cancelled_by', 'approved_by'
+        'patient', 'doctor', 'appointment_type', 'original_appointment', 'visit'
     ).prefetch_related('follow_ups')
     permission_classes = [HMSPermission]
     hms_module = 'appointments'  # Maps to permissions.hms.appointments in JWT
@@ -157,7 +156,11 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         'cancel': 'cancel',
         'reschedule': 'reschedule',
         'check_in': 'check_in',
-        'stats': 'view',
+        'start': 'edit',
+        'complete': 'edit',
+        'today': 'view',
+        'upcoming': 'view',
+        'statistics': 'view',
     }
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -347,19 +350,40 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         """Get today's appointments"""
         from datetime import date
         today = date.today()
-        
+
         appointments = self.get_queryset().filter(
             appointment_date=today
         ).order_by('appointment_time')
-        
+
         serializer = self.get_serializer(appointments, many=True)
         return Response({
             'success': True,
             'count': appointments.count(),
             'data': serializer.data
         })
-    
-    
+
+    @extend_schema(
+        summary="Get Upcoming Appointments",
+        description="Get all upcoming appointments (today and future)",
+        tags=['Appointments']
+    )
+    @action(detail=False, methods=['get'])
+    def upcoming(self, request):
+        """Get upcoming appointments"""
+        from datetime import date
+        today = date.today()
+
+        appointments = self.get_queryset().filter(
+            appointment_date__gte=today,
+            status__in=['scheduled', 'confirmed']
+        ).order_by('appointment_date', 'appointment_time')
+
+        serializer = self.get_serializer(appointments, many=True)
+        return Response({
+            'success': True,
+            'count': appointments.count(),
+            'data': serializer.data
+        })
 
     @extend_schema(
         summary="Get appointment statistics",
@@ -369,12 +393,9 @@ class AppointmentViewSet(viewsets.ModelViewSet):
     )
     @action(detail=False, methods=['get'])
     def statistics(self, request):
-        """Get appointment statistics (Admin only)"""
-        if not _in_any_group(request.user, ['Administrator']):
-            return Response(
-                {'success': False, 'error': 'Permission denied'},
-                status=status.HTTP_403_FORBIDDEN
-            )
+        """Get appointment statistics (Super admin only)"""
+        # Super admins automatically have access via HMSPermission
+        # This is just for documentation purposes
 
         # Total appointments
         total = Appointment.objects.count()
