@@ -39,15 +39,14 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
 
     # Public paths that don't require authentication
     PUBLIC_PATHS = [
-        '/api/docs/',
-        '/api/schema/',
-        '/admin',   # Allow all admin paths - custom admin site handles auth
-        '/auth/',   # Allow all auth endpoints
-        '/static/',  # Allow static files (CSS, JS, images)
-        '/media/',   # Allow media files
-        '/health/',
-        '/api/schema.json',
-        '/api/schema.yaml',
+        '/api/docs',      # API documentation (Swagger/ReDoc)
+        '/api/redoc',     # ReDoc documentation
+        '/api/schema',    # OpenAPI schema
+        '/admin',         # Allow all admin paths - custom admin site handles auth
+        '/api/auth/',     # Allow all auth endpoints
+        '/static/',       # Allow static files (CSS, JS, images)
+        '/media/',        # Allow media files
+        '/health/',       # Health check endpoint
     ]
 
     # Exact match paths (must match exactly, not just startswith)
