@@ -69,15 +69,47 @@ class PatientProfileAdmin(TenantModelAdmin):
     ]
     readonly_fields = [
         'patient_id', 'age', 'bmi', 'registration_date',
-        'created_at', 'updated_at', 'tenant_id'
+        'created_at', 'updated_at'
     ]
     inlines = [PatientVitalsInline, PatientAllergyInline]
     ordering = ['-registration_date']
     date_hierarchy = 'registration_date'
 
+    def get_readonly_fields(self, request, obj=None):
+        """Make tenant_id readonly only when editing existing objects"""
+        readonly = list(super().get_readonly_fields(request, obj))
+        if obj:  # Editing existing object
+            if 'tenant_id' not in readonly:
+                readonly.append('tenant_id')
+        return readonly
+
+    def get_form(self, request, obj=None, **kwargs):
+        """Customize form to add help text for tenant_id"""
+        form = super().get_form(request, obj, **kwargs)
+
+        # Add help text for tenant_id when creating new objects
+        if not obj and 'tenant_id' in form.base_fields:
+            # Try to get tenant_id from session or user
+            tenant_id = None
+            if hasattr(request, 'session'):
+                user_data = request.session.get('user_data', {})
+                tenant_id = user_data.get('tenant_id')
+            if not tenant_id and hasattr(request, 'user') and hasattr(request.user, 'tenant_id'):
+                tenant_id = request.user.tenant_id
+
+            if tenant_id:
+                form.base_fields['tenant_id'].help_text = f'Auto-detected tenant ID: {tenant_id}'
+                # Pre-fill the tenant_id field
+                form.base_fields['tenant_id'].initial = tenant_id
+            else:
+                form.base_fields['tenant_id'].help_text = 'Enter your tenant UUID. If you do not know it, contact your administrator.'
+
+        return form
+
     fieldsets = (
         ('Tenant & Identification', {
-            'fields': ('tenant_id', 'patient_id', 'user_id', 'status')
+            'fields': ('tenant_id', 'patient_id', 'user_id', 'status'),
+            'description': 'Tenant ID is required. Enter your tenant UUID or it will be auto-filled from your session.'
         }),
         ('Personal Information', {
             'fields': (
@@ -177,9 +209,16 @@ class PatientVitalsAdmin(TenantModelAdmin):
         'patient__patient_id', 'patient__first_name',
         'patient__last_name'
     ]
-    readonly_fields = ['recorded_at', 'tenant_id']
+    readonly_fields = ['recorded_at']
     ordering = ['-recorded_at']
     date_hierarchy = 'recorded_at'
+
+    def get_readonly_fields(self, request, obj=None):
+        """Make tenant_id readonly only when editing"""
+        readonly = list(super().get_readonly_fields(request, obj))
+        if obj and 'tenant_id' not in readonly:
+            readonly.append('tenant_id')
+        return readonly
 
     fieldsets = (
         ('Tenant & Patient Information', {
@@ -215,8 +254,15 @@ class PatientAllergyAdmin(TenantModelAdmin):
         'patient__patient_id', 'patient__first_name',
         'patient__last_name', 'allergen'
     ]
-    readonly_fields = ['created_at', 'updated_at', 'tenant_id']
+    readonly_fields = ['created_at', 'updated_at']
     ordering = ['-severity', 'allergen']
+
+    def get_readonly_fields(self, request, obj=None):
+        """Make tenant_id readonly only when editing"""
+        readonly = list(super().get_readonly_fields(request, obj))
+        if obj and 'tenant_id' not in readonly:
+            readonly.append('tenant_id')
+        return readonly
 
     fieldsets = (
         ('Tenant & Patient Information', {

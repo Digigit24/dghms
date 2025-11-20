@@ -137,29 +137,42 @@ class TenantModelAdmin(admin.ModelAdmin):
         """Automatically set tenant_id when creating objects"""
         if not change:  # Only for new objects
             tenant_id = None
+            import logging
+            import uuid
+            logger = logging.getLogger(__name__)
 
             # Try to get tenant_id from session first
             if hasattr(request, 'session'):
                 user_data = request.session.get('user_data', {})
                 tenant_id = user_data.get('tenant_id')
+                if tenant_id:
+                    logger.info(f"[TenantModelAdmin] Got tenant_id from session: {tenant_id}")
 
             # Fallback: try to get tenant_id from authenticated user (JWT)
             if not tenant_id and hasattr(request, 'user') and request.user:
                 if hasattr(request.user, 'tenant_id'):
                     tenant_id = request.user.tenant_id
+                    logger.info(f"[TenantModelAdmin] Got tenant_id from user: {tenant_id}")
 
-            # If model has tenant_id field and it's not set, set it
-            if tenant_id and hasattr(obj, 'tenant_id') and not obj.tenant_id:
-                # Convert string UUID to UUID object if needed
-                import uuid
-                if isinstance(tenant_id, str):
-                    try:
-                        tenant_id = uuid.UUID(tenant_id)
-                    except ValueError:
-                        # If conversion fails, skip setting
-                        tenant_id = None
-                if tenant_id:
-                    obj.tenant_id = tenant_id
+            # If model has tenant_id field and it's not already set
+            if hasattr(obj, 'tenant_id'):
+                # If tenant_id is already set in form, use it (manual entry)
+                if obj.tenant_id:
+                    logger.info(f"[TenantModelAdmin] tenant_id already set in form: {obj.tenant_id}")
+                # Otherwise try to set it from session/user
+                elif tenant_id:
+                    # Convert string UUID to UUID object if needed
+                    if isinstance(tenant_id, str):
+                        try:
+                            tenant_id = uuid.UUID(tenant_id)
+                        except ValueError:
+                            logger.error(f"[TenantModelAdmin] Failed to convert tenant_id to UUID: {tenant_id}")
+                            tenant_id = None
+                    if tenant_id:
+                        obj.tenant_id = tenant_id
+                        logger.info(f"[TenantModelAdmin] Set tenant_id on object: {tenant_id}")
+                else:
+                    logger.warning(f"[TenantModelAdmin] No tenant_id available! User: {request.user}, Session: {hasattr(request, 'session')}")
 
         super().save_model(request, obj, form, change)
 
