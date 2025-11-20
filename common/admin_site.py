@@ -139,6 +139,7 @@ class TenantModelAdmin(admin.ModelAdmin):
             tenant_id = None
             import logging
             import uuid
+            from django.conf import settings
             logger = logging.getLogger(__name__)
 
             # Try to get tenant_id from session first
@@ -172,7 +173,18 @@ class TenantModelAdmin(admin.ModelAdmin):
                         obj.tenant_id = tenant_id
                         logger.info(f"[TenantModelAdmin] Set tenant_id on object: {tenant_id}")
                 else:
-                    logger.warning(f"[TenantModelAdmin] No tenant_id available! User: {request.user}, Session: {hasattr(request, 'session')}")
+                    # Development fallback: Use default tenant_id if configured
+                    default_tenant_id = getattr(settings, 'DEFAULT_TENANT_ID', None)
+                    if default_tenant_id:
+                        try:
+                            tenant_id = uuid.UUID(default_tenant_id)
+                            obj.tenant_id = tenant_id
+                            logger.warning(f"[TenantModelAdmin] Using DEFAULT_TENANT_ID from settings: {tenant_id}")
+                        except (ValueError, TypeError):
+                            logger.error(f"[TenantModelAdmin] Invalid DEFAULT_TENANT_ID in settings: {default_tenant_id}")
+
+                    if not obj.tenant_id:
+                        logger.error(f"[TenantModelAdmin] No tenant_id available! User: {request.user}, Session: {hasattr(request, 'session')}, Add DEFAULT_TENANT_ID to settings.py for development")
 
         super().save_model(request, obj, form, change)
 
