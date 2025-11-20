@@ -13,12 +13,44 @@ class PatientVitalsInline(admin.TabularInline):
     readonly_fields = ['recorded_at', 'tenant_id']
     can_delete = False
 
+    def save_model(self, request, obj, form, change):
+        """Automatically set tenant_id for inline vitals"""
+        if not change and hasattr(request, 'session'):
+            user_data = request.session.get('user_data', {})
+            tenant_id = user_data.get('tenant_id')
+            if tenant_id and hasattr(obj, 'tenant_id') and not obj.tenant_id:
+                import uuid
+                if isinstance(tenant_id, str):
+                    try:
+                        tenant_id = uuid.UUID(tenant_id)
+                    except ValueError:
+                        tenant_id = None
+                if tenant_id:
+                    obj.tenant_id = tenant_id
+        return super().save_model(request, obj, form, change)
+
 
 class PatientAllergyInline(admin.TabularInline):
     model = PatientAllergy
     extra = 0
     fields = ['allergy_type', 'allergen', 'severity', 'is_active']
     readonly_fields = ['tenant_id']
+
+    def save_model(self, request, obj, form, change):
+        """Automatically set tenant_id for inline allergies"""
+        if not change and hasattr(request, 'session'):
+            user_data = request.session.get('user_data', {})
+            tenant_id = user_data.get('tenant_id')
+            if tenant_id and hasattr(obj, 'tenant_id') and not obj.tenant_id:
+                import uuid
+                if isinstance(tenant_id, str):
+                    try:
+                        tenant_id = uuid.UUID(tenant_id)
+                    except ValueError:
+                        tenant_id = None
+                if tenant_id:
+                    obj.tenant_id = tenant_id
+        return super().save_model(request, obj, form, change)
 
 
 class PatientProfileAdmin(TenantModelAdmin):
@@ -95,6 +127,38 @@ class PatientProfileAdmin(TenantModelAdmin):
             'classes': ('collapse',)
         }),
     )
+
+    def save_formset(self, request, form, formset, change):
+        """Override to set tenant_id on inline objects"""
+        instances = formset.save(commit=False)
+
+        # Get tenant_id from session first
+        tenant_id = None
+        if hasattr(request, 'session'):
+            user_data = request.session.get('user_data', {})
+            tenant_id = user_data.get('tenant_id')
+
+        # Fallback: try to get tenant_id from authenticated user (JWT)
+        if not tenant_id and hasattr(request, 'user') and request.user:
+            if hasattr(request.user, 'tenant_id'):
+                tenant_id = request.user.tenant_id
+
+        # Convert string UUID to UUID object if needed
+        if tenant_id:
+            import uuid
+            if isinstance(tenant_id, str):
+                try:
+                    tenant_id = uuid.UUID(tenant_id)
+                except ValueError:
+                    tenant_id = None
+
+        # Set tenant_id on each inline instance
+        for instance in instances:
+            if tenant_id and hasattr(instance, 'tenant_id') and not instance.tenant_id:
+                instance.tenant_id = tenant_id
+            instance.save()
+
+        formset.save_m2m()
 
     def full_name(self, obj):
         return obj.full_name

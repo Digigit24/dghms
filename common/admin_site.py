@@ -136,23 +136,30 @@ class TenantModelAdmin(admin.ModelAdmin):
     def save_model(self, request, obj, form, change):
         """Automatically set tenant_id when creating objects"""
         if not change:  # Only for new objects
-            # Get tenant_id from session
+            tenant_id = None
+
+            # Try to get tenant_id from session first
             if hasattr(request, 'session'):
                 user_data = request.session.get('user_data', {})
                 tenant_id = user_data.get('tenant_id')
 
-                # If model has tenant_id field and it's not set, set it
-                if tenant_id and hasattr(obj, 'tenant_id') and not obj.tenant_id:
-                    # Convert string UUID to UUID object if needed
-                    import uuid
-                    if isinstance(tenant_id, str):
-                        try:
-                            tenant_id = uuid.UUID(tenant_id)
-                        except ValueError:
-                            # If conversion fails, skip setting
-                            tenant_id = None
-                    if tenant_id:
-                        obj.tenant_id = tenant_id
+            # Fallback: try to get tenant_id from authenticated user (JWT)
+            if not tenant_id and hasattr(request, 'user') and request.user:
+                if hasattr(request.user, 'tenant_id'):
+                    tenant_id = request.user.tenant_id
+
+            # If model has tenant_id field and it's not set, set it
+            if tenant_id and hasattr(obj, 'tenant_id') and not obj.tenant_id:
+                # Convert string UUID to UUID object if needed
+                import uuid
+                if isinstance(tenant_id, str):
+                    try:
+                        tenant_id = uuid.UUID(tenant_id)
+                    except ValueError:
+                        # If conversion fails, skip setting
+                        tenant_id = None
+                if tenant_id:
+                    obj.tenant_id = tenant_id
 
         super().save_model(request, obj, form, change)
 
