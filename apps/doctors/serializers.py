@@ -93,32 +93,36 @@ class DoctorProfileCreateUpdateSerializer(serializers.ModelSerializer):
         required=False,
         allow_empty=True
     )
-    
+
+    # Make tenant_id and user_id optional - they'll be auto-populated
+    tenant_id = serializers.UUIDField(required=False)
+    user_id = serializers.UUIDField(required=False)
+
     class Meta:
         model = DoctorProfile
         exclude = [
             'average_rating', 'total_reviews',
             'total_consultations', 'specialties', 'created_at', 'updated_at'
         ]
-    
+
     def validate_user_id(self, value):
         """Validate user_id is a valid UUID"""
         import uuid
         try:
             # Check if it's a valid UUID
             uuid.UUID(str(value))
-            
+
             # Check if creating new profile and user_id already has a doctor profile
             if self.instance is None:
                 if DoctorProfile.objects.filter(user_id=value).exists():
                     raise serializers.ValidationError(
                         'User already has a doctor profile'
                     )
-            
+
             return value
         except (ValueError, TypeError):
             raise serializers.ValidationError('Invalid user ID format')
-    
+
     def validate_license_expiry_date(self, value):
         """Ensure license expiry date is in the future or today"""
         import datetime
@@ -127,13 +131,13 @@ class DoctorProfileCreateUpdateSerializer(serializers.ModelSerializer):
                 'License expiry date must be today or in the future'
             )
         return value
-    
+
     def validate_consultation_fee(self, value):
         """Validate consultation fee"""
         if value is not None and value < 0:
             raise serializers.ValidationError('Consultation fee cannot be negative')
         return value
-    
+
     def validate_consultation_duration(self, value):
         """Validate consultation duration"""
         if value and value < 5:
@@ -141,51 +145,75 @@ class DoctorProfileCreateUpdateSerializer(serializers.ModelSerializer):
                 'Consultation duration must be at least 5 minutes'
             )
         return value
-    
+
     def validate(self, attrs):
         """Cross-field validation"""
+        # Auto-populate tenant_id from request if not provided
+        request = self.context.get('request')
+        if request and hasattr(request, 'tenant_id'):
+            if 'tenant_id' not in attrs or attrs['tenant_id'] is None:
+                attrs['tenant_id'] = request.tenant_id
+
+        # Auto-populate user_id from request if not provided
+        if request and hasattr(request, 'user_id'):
+            if 'user_id' not in attrs or attrs['user_id'] is None:
+                attrs['user_id'] = request.user_id
+
+        # Validate that tenant_id is now present
+        if 'tenant_id' not in attrs or attrs['tenant_id'] is None:
+            raise serializers.ValidationError({
+                'tenant_id': 'Tenant ID is required. Please ensure you are authenticated.'
+            })
+
+        # Validate that user_id is now present
+        if 'user_id' not in attrs or attrs['user_id'] is None:
+            raise serializers.ValidationError({
+                'user_id': 'User ID is required. Either provide it explicitly or it will be taken from your authentication.'
+            })
+
         issue_date = attrs.get('license_issue_date') or (
             self.instance.license_issue_date if self.instance else None
         )
         expiry_date = attrs.get('license_expiry_date') or (
             self.instance.license_expiry_date if self.instance else None
         )
-        
+
         if issue_date and expiry_date:
             if expiry_date < issue_date:
                 raise serializers.ValidationError({
                     'license_expiry_date': 'Expiry date must be after issue date'
                 })
-        
+
         return attrs
-    
+
     def create(self, validated_data):
         """Create doctor profile"""
         specialty_ids = validated_data.pop('specialty_ids', [])
-        
+
         doctor = DoctorProfile.objects.create(**validated_data)
-        
+
         # Add specialties
         if specialty_ids:
             specialties = Specialty.objects.filter(id__in=specialty_ids)
             doctor.specialties.set(specialties)
-        
+
         return doctor
-    
+
     def update(self, instance, validated_data):
         """Update doctor profile"""
         specialty_ids = validated_data.pop('specialty_ids', None)
         validated_data.pop('user_id', None)  # Don't allow user_id change
-        
+        validated_data.pop('tenant_id', None)  # Don't allow tenant_id change
+
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
-        
+
         # Update specialties if provided
         if specialty_ids is not None:
             specialties = Specialty.objects.filter(id__in=specialty_ids)
             instance.specialties.set(specialties)
-        
+
         return instance
 
 
