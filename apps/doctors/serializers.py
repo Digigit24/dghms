@@ -234,12 +234,12 @@ class DoctorRegistrationSerializer(serializers.Serializer):
     # SuperAdmin user ID (required)
     user_id = serializers.UUIDField(required=True)
     
-    # Doctor Profile fields (REQUIRED)
-    medical_license_number = serializers.CharField(max_length=64, required=True)
-    license_issuing_authority = serializers.CharField(max_length=128, required=True)
-    license_issue_date = serializers.DateField(required=True)
-    license_expiry_date = serializers.DateField(required=True)
-    qualifications = serializers.CharField(required=True)
+    # Doctor Profile fields (OPTIONAL)
+    medical_license_number = serializers.CharField(max_length=64, required=False, allow_blank=True, allow_null=True)
+    license_issuing_authority = serializers.CharField(max_length=128, required=False, allow_blank=True, allow_null=True)
+    license_issue_date = serializers.DateField(required=False, allow_null=True)
+    license_expiry_date = serializers.DateField(required=False, allow_null=True)
+    qualifications = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     specialty_ids = serializers.ListField(
         child=serializers.IntegerField(),
         required=False,
@@ -265,24 +265,30 @@ class DoctorRegistrationSerializer(serializers.Serializer):
     
     def validate_medical_license_number(self, value):
         """Check if license number already exists"""
-        if DoctorProfile.objects.filter(medical_license_number=value).exists():
+        # Only validate if a value is provided
+        if value and DoctorProfile.objects.filter(medical_license_number=value).exists():
             raise serializers.ValidationError('Doctor with this license number already exists')
         return value
     
     def validate(self, attrs):
         """Cross-field validation"""
-        # License dates validation
-        if attrs['license_expiry_date'] < attrs['license_issue_date']:
-            raise serializers.ValidationError({
-                'license_expiry_date': 'Expiry date must be after issue date'
-            })
-        
-        # License expiry date must be in future
-        import datetime
-        if attrs['license_expiry_date'] < datetime.date.today():
-            raise serializers.ValidationError({
-                'license_expiry_date': 'License expiry date must be in the future'
-            })
+        # License dates validation (only if both dates are provided)
+        license_issue_date = attrs.get('license_issue_date')
+        license_expiry_date = attrs.get('license_expiry_date')
+
+        if license_issue_date and license_expiry_date:
+            if license_expiry_date < license_issue_date:
+                raise serializers.ValidationError({
+                    'license_expiry_date': 'Expiry date must be after issue date'
+                })
+
+        # License expiry date must be in future (only if provided)
+        if license_expiry_date:
+            import datetime
+            if license_expiry_date < datetime.date.today():
+                raise serializers.ValidationError({
+                    'license_expiry_date': 'License expiry date must be in the future'
+                })
         
         # Consultation duration validation
         if attrs['consultation_duration'] < 5:
@@ -400,11 +406,11 @@ class DoctorWithUserCreationSerializer(serializers.Serializer):
     )
 
     # ===== DOCTOR PROFILE FIELDS =====
-    medical_license_number = serializers.CharField(max_length=64, required=True)
-    license_issuing_authority = serializers.CharField(max_length=128, required=True)
-    license_issue_date = serializers.DateField(required=True)
-    license_expiry_date = serializers.DateField(required=True)
-    qualifications = serializers.CharField(required=True)
+    medical_license_number = serializers.CharField(max_length=64, required=False, allow_blank=True, allow_null=True)
+    license_issuing_authority = serializers.CharField(max_length=128, required=False, allow_blank=True, allow_null=True)
+    license_issue_date = serializers.DateField(required=False, allow_null=True)
+    license_expiry_date = serializers.DateField(required=False, allow_null=True)
+    qualifications = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     specialty_ids = serializers.ListField(
         child=serializers.IntegerField(),
         required=False,
@@ -463,31 +469,38 @@ class DoctorWithUserCreationSerializer(serializers.Serializer):
                     'user_id': 'User already has a doctor profile'
                 })
 
-        # Validate medical license number uniqueness within tenant
-        tenant_id = request.tenant_id if request and hasattr(request, 'tenant_id') else None
-        license_query = DoctorProfile.objects.filter(
-            medical_license_number=attrs['medical_license_number']
-        )
-        if tenant_id:
-            license_query = license_query.filter(tenant_id=tenant_id)
+        # Validate medical license number uniqueness within tenant (only if provided)
+        medical_license_number = attrs.get('medical_license_number')
+        if medical_license_number:
+            tenant_id = request.tenant_id if request and hasattr(request, 'tenant_id') else None
+            license_query = DoctorProfile.objects.filter(
+                medical_license_number=medical_license_number
+            )
+            if tenant_id:
+                license_query = license_query.filter(tenant_id=tenant_id)
 
-        if license_query.exists():
-            raise serializers.ValidationError({
-                'medical_license_number': 'Doctor with this license number already exists'
-            })
+            if license_query.exists():
+                raise serializers.ValidationError({
+                    'medical_license_number': 'Doctor with this license number already exists'
+                })
 
-        # License dates validation
-        if attrs['license_expiry_date'] < attrs['license_issue_date']:
-            raise serializers.ValidationError({
-                'license_expiry_date': 'Expiry date must be after issue date'
-            })
+        # License dates validation (only if both dates are provided)
+        license_issue_date = attrs.get('license_issue_date')
+        license_expiry_date = attrs.get('license_expiry_date')
 
-        # License expiry date must be in future
-        import datetime
-        if attrs['license_expiry_date'] < datetime.date.today():
-            raise serializers.ValidationError({
-                'license_expiry_date': 'License expiry date must be in the future'
-            })
+        if license_issue_date and license_expiry_date:
+            if license_expiry_date < license_issue_date:
+                raise serializers.ValidationError({
+                    'license_expiry_date': 'Expiry date must be after issue date'
+                })
+
+        # License expiry date must be in future (only if provided)
+        if license_expiry_date:
+            import datetime
+            if license_expiry_date < datetime.date.today():
+                raise serializers.ValidationError({
+                    'license_expiry_date': 'License expiry date must be in the future'
+                })
 
         # Consultation duration validation
         if attrs['consultation_duration'] < 5:
