@@ -1105,7 +1105,6 @@ class ClinicalNoteTemplateViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                     field=new_field,
                     option_value=option.option_value,
                     option_label=option.option_label,
-                    is_default=option.is_default,
                     display_order=option.display_order
                 )
 
@@ -1227,7 +1226,7 @@ class ClinicalNoteTemplateFieldOptionViewSet(TenantViewSetMixin, viewsets.ModelV
     }
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['field', 'is_default']
+    filterset_fields = ['field']
     search_fields = ['option_label', 'option_value']
     ordering_fields = ['display_order', 'option_label']
     ordering = ['field', 'display_order']

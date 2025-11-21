@@ -807,7 +807,7 @@ class ClinicalNoteTemplateFieldOptionSerializer(serializers.ModelSerializer):
     class Meta:
         model = ClinicalNoteTemplateFieldOption
         fields = [
-            'id', 'option_value', 'option_label', 'is_default',
+            'id', 'option_value', 'option_label',
             'display_order'
         ]
 
