@@ -317,10 +317,8 @@ class PatientRegistrationSerializer(serializers.Serializer):
     
     def validate_user_id(self, value):
         """Validate user_id (UUID from SuperAdmin)"""
-        if value:
-            # Check if user_id already has a patient profile
-            if PatientProfile.objects.filter(user_id=value).exists():
-                raise serializers.ValidationError('User already has a patient profile')
+        # Note: Uniqueness check is done in validate() method with tenant awareness
+        # This method just validates the format
         return value
     
     def validate_mobile_primary(self, value):
@@ -348,17 +346,21 @@ class PatientRegistrationSerializer(serializers.Serializer):
     
     def validate(self, attrs):
         """Cross-field validation"""
-        # Auto-populate tenant_id from request if not provided
+        # Note: tenant_id will be added by create() method from request context
+        # We use request.tenant_id for uniqueness checks but don't require it in attrs
         request = self.context.get('request')
-        if request and hasattr(request, 'tenant_id'):
-            if 'tenant_id' not in attrs or attrs.get('tenant_id') is None:
-                attrs['tenant_id'] = request.tenant_id
+        tenant_id = request.tenant_id if request and hasattr(request, 'tenant_id') else None
 
-        # Validate that tenant_id is now present
-        if 'tenant_id' not in attrs or attrs['tenant_id'] is None:
-            raise serializers.ValidationError({
-                'tenant_id': 'Tenant ID is required. Please ensure you are authenticated.'
-            })
+        # Validate user_id uniqueness within tenant (if tenant_id available)
+        user_id = attrs.get('user_id')
+        if user_id:
+            query = PatientProfile.objects.filter(user_id=user_id)
+            if tenant_id:
+                query = query.filter(tenant_id=tenant_id)
+            if query.exists():
+                raise serializers.ValidationError({
+                    'user_id': 'User already has a patient profile'
+                })
 
         # Height and weight validation
         height = attrs.get('height')
@@ -394,8 +396,18 @@ class PatientRegistrationSerializer(serializers.Serializer):
     @transaction.atomic
     def create(self, validated_data):
         """Create patient profile (user management is handled by SuperAdmin)"""
-        # Get created_by from context
+        # Get tenant_id and created_by from context
         request = self.context.get('request')
+
+        # Add tenant_id if not already in validated_data
+        if 'tenant_id' not in validated_data:
+            if request and hasattr(request, 'tenant_id'):
+                validated_data['tenant_id'] = request.tenant_id
+            else:
+                raise serializers.ValidationError({
+                    'tenant_id': 'Tenant ID is required. Please ensure you are authenticated.'
+                })
+
         created_by_user_id = None
         if request and hasattr(request, 'user_id'):
             created_by_user_id = request.user_id
