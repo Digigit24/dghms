@@ -1064,7 +1064,7 @@ class ClinicalNoteTemplateFieldResponseSerializer(serializers.ModelSerializer):
         model = ClinicalNoteTemplateFieldResponse
         fields = [
             'id', 'field', 'field_label', 'field_type',
-            'value_text', 'value_number', 'value_decimal', 'value_boolean',
+            'value_text', 'value_number', 'value_boolean',
             'value_date', 'value_datetime', 'value_time', 'value_json',
             'display_value'
         ]
@@ -1080,7 +1080,7 @@ class ClinicalNoteTemplateFieldResponseCreateUpdateSerializer(serializers.ModelS
     class Meta:
         model = ClinicalNoteTemplateFieldResponse
         fields = [
-            'field', 'value_text', 'value_number', 'value_decimal',
+            'field', 'value_text', 'value_number',
             'value_boolean', 'value_date', 'value_datetime', 'value_time',
             'value_json'
         ]
@@ -1088,7 +1088,7 @@ class ClinicalNoteTemplateFieldResponseCreateUpdateSerializer(serializers.ModelS
     def validate(self, data):
         """Validate that at least one value field is provided"""
         value_fields = [
-            'value_text', 'value_number', 'value_decimal', 'value_boolean',
+            'value_text', 'value_number', 'value_boolean',
             'value_date', 'value_datetime', 'value_time', 'value_json'
         ]
 
