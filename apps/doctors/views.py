@@ -543,12 +543,16 @@ class DoctorProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                 from apps.auth.superadmin_client import get_superadmin_client, SuperAdminAPIException
 
                 # Prepare user data for SuperAdmin API
+                # Keep first_name and last_name to store in doctor profile
+                first_name = validated_data.pop('first_name')
+                last_name = validated_data.pop('last_name', '')
+
                 user_data = {
                     'email': validated_data.pop('email'),
                     'password': validated_data.pop('password'),
                     'password_confirm': validated_data.pop('password_confirm'),
-                    'first_name': validated_data.pop('first_name'),
-                    'last_name': validated_data.pop('last_name', ''),
+                    'first_name': first_name,
+                    'last_name': last_name,
                     'phone': validated_data.pop('phone', None),
                     'timezone': validated_data.pop('timezone', 'Asia/Kolkata'),
                     'role_ids': validated_data.pop('role_ids', []),
@@ -623,6 +627,11 @@ class DoctorProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                 # Add user_id and tenant_id to validated_data
                 validated_data['user_id'] = user_id
                 validated_data['tenant_id'] = request.tenant_id
+
+                # Add name fields to doctor profile (if user was created)
+                if create_user:
+                    validated_data['first_name'] = first_name
+                    validated_data['last_name'] = last_name
 
                 # Create doctor profile
                 doctor = DoctorProfile.objects.create(**validated_data)

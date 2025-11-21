@@ -61,13 +61,14 @@ class DoctorProfileListSerializer(serializers.ModelSerializer):
     """List view serializer for doctors - minimal fields"""
     specialties = SpecialtySerializer(many=True, read_only=True)
     is_license_valid = serializers.ReadOnlyField()
-    
+    full_name = serializers.ReadOnlyField()
+
     class Meta:
         model = DoctorProfile
         fields = [
-            'id', 'user_id', 'medical_license_number',
-            'qualifications', 'specialties', 'years_of_experience',
-            'consultation_fee', 'consultation_duration',
+            'id', 'user_id', 'first_name', 'last_name', 'full_name',
+            'medical_license_number', 'qualifications', 'specialties',
+            'years_of_experience', 'consultation_fee', 'consultation_duration',
             'is_available_online', 'is_available_offline',
             'average_rating', 'total_reviews', 'total_consultations',
             'status', 'is_license_valid', 'created_at'
@@ -79,7 +80,8 @@ class DoctorProfileDetailSerializer(serializers.ModelSerializer):
     specialties = SpecialtySerializer(many=True, read_only=True)
     availability = DoctorAvailabilitySerializer(many=True, read_only=True)
     is_license_valid = serializers.ReadOnlyField()
-    
+    full_name = serializers.ReadOnlyField()
+
     class Meta:
         model = DoctorProfile
         fields = '__all__'

@@ -63,6 +63,20 @@ class DoctorProfile(models.Model):
         help_text="SuperAdmin User ID (required for doctors)"
     )
 
+    # Name fields (for display purposes - can be synced from SuperAdmin)
+    first_name = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        help_text="Doctor's first name (cached from SuperAdmin or manually entered)"
+    )
+    last_name = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        help_text="Doctor's last name (cached from SuperAdmin or manually entered)"
+    )
+
     # License Information
     medical_license_number = models.CharField(max_length=64, blank=True)
     license_issuing_authority = models.CharField(max_length=128, blank=True, null=True)
@@ -148,7 +162,20 @@ class DoctorProfile(models.Model):
         ]
 
     def __str__(self):
+        if self.first_name or self.last_name:
+            return f"Dr. {self.full_name}"
         return f"DoctorProfile ({self.user_id})"
+
+    @property
+    def full_name(self):
+        """Return doctor's full name"""
+        if self.first_name and self.last_name:
+            return f"{self.first_name} {self.last_name}"
+        elif self.first_name:
+            return self.first_name
+        elif self.last_name:
+            return self.last_name
+        return f"Doctor {self.user_id}"
 
     @property
     def is_license_valid(self):
