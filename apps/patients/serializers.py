@@ -126,12 +126,14 @@ class PatientProfileDetailSerializer(serializers.ModelSerializer):
 
 class PatientProfileCreateUpdateSerializer(serializers.ModelSerializer):
     """Create/Update serializer for patients"""
-    user_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
-    
+    user_id = serializers.UUIDField(write_only=True, required=False, allow_null=True)
+    # Make tenant_id optional - it will be auto-populated
+    tenant_id = serializers.UUIDField(required=False)
+
     class Meta:
         model = PatientProfile
         exclude = ['patient_id', 'age', 'bmi', 'created_by_user_id']
-    
+
     def validate_user_id(self, value):
         """Validate user_id format (UUID from SuperAdmin)"""
         if value is None:
@@ -146,7 +148,7 @@ class PatientProfileCreateUpdateSerializer(serializers.ModelSerializer):
                 )
 
         return value
-    
+
     def validate_date_of_birth(self, value):
         """Ensure date of birth is in the past"""
         import datetime
@@ -154,16 +156,16 @@ class PatientProfileCreateUpdateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 'Date of birth cannot be in the future'
             )
-        
+
         # Calculate age
         age = datetime.date.today().year - value.year
         if age > 150:
             raise serializers.ValidationError(
                 'Invalid date of birth - age would be over 150 years'
             )
-        
+
         return value
-    
+
     def validate_insurance_expiry_date(self, value):
         """Ensure insurance expiry date is in the future"""
         import datetime
@@ -172,35 +174,45 @@ class PatientProfileCreateUpdateSerializer(serializers.ModelSerializer):
                 'Insurance expiry date must be in the future'
             )
         return value
-    
+
     def validate(self, attrs):
         """Cross-field validation"""
+        # Auto-populate tenant_id from request if not provided
+        request = self.context.get('request')
+        if request and hasattr(request, 'tenant_id'):
+            if 'tenant_id' not in attrs or attrs['tenant_id'] is None:
+                attrs['tenant_id'] = request.tenant_id
+
+        # Validate that tenant_id is now present
+        if 'tenant_id' not in attrs or attrs['tenant_id'] is None:
+            raise serializers.ValidationError({
+                'tenant_id': 'Tenant ID is required. Please ensure you are authenticated.'
+            })
+
         # If insurance provider is given, policy number is required
         if attrs.get('insurance_provider') and not attrs.get('insurance_policy_number'):
             raise serializers.ValidationError({
                 'insurance_policy_number': 'Policy number is required when insurance provider is specified'
             })
-        
+
         # Height and weight validation
         height = attrs.get('height')
         weight = attrs.get('weight')
-        
+
         if height and (height < 30 or height > 300):
             raise serializers.ValidationError({
                 'height': 'Height must be between 30 and 300 cm'
             })
-        
+
         if weight and (weight < 1 or weight > 500):
             raise serializers.ValidationError({
                 'weight': 'Weight must be between 1 and 500 kg'
             })
-        
+
         return attrs
-    
+
     def create(self, validated_data):
         """Create patient profile"""
-        # user_id is already in validated_data, no need to pop it
-
         # Get current user ID from context
         request = self.context.get('request')
         created_by_user_id = None
@@ -213,15 +225,16 @@ class PatientProfileCreateUpdateSerializer(serializers.ModelSerializer):
         )
 
         return patient
-    
+
     def update(self, instance, validated_data):
         """Update patient profile"""
         validated_data.pop('user_id', None)  # Don't allow user change
-        
+        validated_data.pop('tenant_id', None)  # Don't allow tenant_id change
+
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
-        
+
         return instance
 
 
@@ -335,26 +348,38 @@ class PatientRegistrationSerializer(serializers.Serializer):
     
     def validate(self, attrs):
         """Cross-field validation"""
+        # Auto-populate tenant_id from request if not provided
+        request = self.context.get('request')
+        if request and hasattr(request, 'tenant_id'):
+            if 'tenant_id' not in attrs or attrs.get('tenant_id') is None:
+                attrs['tenant_id'] = request.tenant_id
+
+        # Validate that tenant_id is now present
+        if 'tenant_id' not in attrs or attrs['tenant_id'] is None:
+            raise serializers.ValidationError({
+                'tenant_id': 'Tenant ID is required. Please ensure you are authenticated.'
+            })
+
         # Height and weight validation
         height = attrs.get('height')
         weight = attrs.get('weight')
-        
+
         if height and (height < 30 or height > 300):
             raise serializers.ValidationError({
                 'height': 'Height must be between 30 and 300 cm'
             })
-        
+
         if weight and (weight < 1 or weight > 500):
             raise serializers.ValidationError({
                 'weight': 'Weight must be between 1 and 500 kg'
             })
-        
+
         # Insurance validation
         if attrs.get('insurance_provider') and not attrs.get('insurance_policy_number'):
             raise serializers.ValidationError({
                 'insurance_policy_number': 'Policy number is required when insurance provider is specified'
             })
-        
+
         # Insurance expiry date validation
         insurance_expiry = attrs.get('insurance_expiry_date')
         if insurance_expiry:
@@ -363,9 +388,9 @@ class PatientRegistrationSerializer(serializers.Serializer):
                 raise serializers.ValidationError({
                     'insurance_expiry_date': 'Insurance expiry date must be in the future'
                 })
-        
+
         return attrs
-    
+
     @transaction.atomic
     def create(self, validated_data):
         """Create patient profile (user management is handled by SuperAdmin)"""
