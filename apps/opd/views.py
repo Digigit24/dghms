@@ -1293,7 +1293,7 @@ class ClinicalNoteTemplateResponseViewSet(TenantViewSetMixin, viewsets.ModelView
     }
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['visit', 'template', 'is_completed']
+    filterset_fields = ['visit', 'template', 'status']
     search_fields = ['visit__visit_number', 'visit__patient__first_name', 'template__name']
     ordering_fields = ['response_date', 'created_at']
     ordering = ['-response_date']

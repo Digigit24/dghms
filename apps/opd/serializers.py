@@ -1109,7 +1109,7 @@ class ClinicalNoteTemplateResponseListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'visit', 'visit_number', 'patient_name',
             'template', 'template_name', 'response_date',
-            'field_response_count', 'is_completed'
+            'field_response_count', 'status'
         ]
         read_only_fields = ['response_date']
 
@@ -1141,8 +1141,7 @@ class ClinicalNoteTemplateResponseCreateUpdateSerializer(serializers.ModelSerial
     class Meta:
         model = ClinicalNoteTemplateResponse
         fields = [
-            'visit', 'template', 'additional_notes',
-            'is_completed', 'field_responses'
+            'visit', 'template', 'status', 'field_responses'
         ]
 
     def validate_visit(self, value):
