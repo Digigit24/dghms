@@ -746,7 +746,7 @@ class ClinicalNoteTemplateGroupListSerializer(serializers.ModelSerializer):
     class Meta:
         model = ClinicalNoteTemplateGroup
         fields = [
-            'id', 'name', 'code', 'template_count',
+            'id', 'name', 'template_count',
             'is_active', 'display_order'
         ]
 
@@ -770,21 +770,7 @@ class ClinicalNoteTemplateGroupCreateUpdateSerializer(serializers.ModelSerialize
 
     class Meta:
         model = ClinicalNoteTemplateGroup
-        fields = ['name', 'code', 'description', 'is_active', 'display_order']
-
-    def validate_code(self, value):
-        """Validate unique code within tenant"""
-        request = self.context.get('request')
-        if request and hasattr(request, 'tenant_id'):
-            queryset = ClinicalNoteTemplateGroup.objects.filter(
-                tenant_id=request.tenant_id,
-                code=value
-            )
-            if self.instance:
-                queryset = queryset.exclude(id=self.instance.id)
-            if queryset.exists():
-                raise serializers.ValidationError("Template group code already exists")
-        return value
+        fields = ['name', 'description', 'is_active', 'display_order']
 
     def create(self, validated_data):
         """Create template group with tenant_id"""

@@ -953,7 +953,7 @@ class ClinicalNoteTemplateGroupViewSet(TenantViewSetMixin, viewsets.ModelViewSet
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['is_active']
-    search_fields = ['name', 'code', 'description']
+    search_fields = ['name', 'description']
     ordering_fields = ['display_order', 'name']
     ordering = ['display_order', 'name']
 
