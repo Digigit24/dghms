@@ -7,7 +7,10 @@ from decimal import Decimal
 from .models import (
     Visit, OPDBill, ProcedureMaster, ProcedurePackage,
     ProcedureBill, ProcedureBillItem, ClinicalNote,
-    VisitFinding, VisitAttachment
+    VisitFinding, VisitAttachment,
+    ClinicalNoteTemplateGroup, ClinicalNoteTemplate,
+    ClinicalNoteTemplateField, ClinicalNoteTemplateFieldOption,
+    ClinicalNoteTemplateResponse, ClinicalNoteTemplateFieldResponse
 )
 from apps.patients.models import PatientProfile
 from apps.doctors.models import DoctorProfile
@@ -726,3 +729,499 @@ class OPDBillStatisticsSerializer(serializers.Serializer):
 
     # Average bill amount
     average_bill_amount = serializers.DecimalField(max_digits=10, decimal_places=2)
+
+
+# ============================================================================
+# CLINICAL NOTE TEMPLATE GROUP SERIALIZERS
+# ============================================================================
+
+class ClinicalNoteTemplateGroupListSerializer(serializers.ModelSerializer):
+    """Serializer for listing template groups"""
+
+    template_count = serializers.IntegerField(
+        source='templates.count',
+        read_only=True
+    )
+
+    class Meta:
+        model = ClinicalNoteTemplateGroup
+        fields = [
+            'id', 'name', 'code', 'template_count',
+            'is_active', 'display_order'
+        ]
+
+
+class ClinicalNoteTemplateGroupDetailSerializer(serializers.ModelSerializer):
+    """Detailed template group serializer"""
+
+    template_count = serializers.IntegerField(
+        source='templates.count',
+        read_only=True
+    )
+
+    class Meta:
+        model = ClinicalNoteTemplateGroup
+        fields = '__all__'
+        read_only_fields = ['created_at', 'updated_at']
+
+
+class ClinicalNoteTemplateGroupCreateUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for creating/updating template groups"""
+
+    class Meta:
+        model = ClinicalNoteTemplateGroup
+        fields = ['name', 'code', 'description', 'is_active', 'display_order']
+
+    def validate_code(self, value):
+        """Validate unique code within tenant"""
+        request = self.context.get('request')
+        if request and hasattr(request, 'tenant_id'):
+            queryset = ClinicalNoteTemplateGroup.objects.filter(
+                tenant_id=request.tenant_id,
+                code=value
+            )
+            if self.instance:
+                queryset = queryset.exclude(id=self.instance.id)
+            if queryset.exists():
+                raise serializers.ValidationError("Template group code already exists")
+        return value
+
+    def create(self, validated_data):
+        """Create template group with tenant_id"""
+        request = self.context.get('request')
+
+        # Add tenant_id from request context
+        if request and hasattr(request, 'tenant_id'):
+            validated_data['tenant_id'] = request.tenant_id
+
+        return super().create(validated_data)
+
+
+# ============================================================================
+# CLINICAL NOTE TEMPLATE FIELD OPTION SERIALIZERS
+# ============================================================================
+
+class ClinicalNoteTemplateFieldOptionSerializer(serializers.ModelSerializer):
+    """Serializer for template field options"""
+
+    class Meta:
+        model = ClinicalNoteTemplateFieldOption
+        fields = [
+            'id', 'option_value', 'option_label', 'is_default',
+            'display_order'
+        ]
+
+
+# ============================================================================
+# CLINICAL NOTE TEMPLATE FIELD SERIALIZERS
+# ============================================================================
+
+class ClinicalNoteTemplateFieldListSerializer(serializers.ModelSerializer):
+    """Serializer for listing template fields"""
+
+    option_count = serializers.IntegerField(
+        source='options.count',
+        read_only=True
+    )
+
+    class Meta:
+        model = ClinicalNoteTemplateField
+        fields = [
+            'id', 'label', 'field_name', 'field_type', 'is_required',
+            'option_count', 'display_order', 'is_active'
+        ]
+
+
+class ClinicalNoteTemplateFieldDetailSerializer(serializers.ModelSerializer):
+    """Detailed template field serializer with options"""
+
+    options = ClinicalNoteTemplateFieldOptionSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ClinicalNoteTemplateField
+        fields = '__all__'
+        read_only_fields = ['created_at', 'updated_at']
+
+
+class ClinicalNoteTemplateFieldCreateUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for creating/updating template fields"""
+
+    options = ClinicalNoteTemplateFieldOptionSerializer(many=True, required=False)
+
+    class Meta:
+        model = ClinicalNoteTemplateField
+        fields = [
+            'template', 'label', 'field_name', 'field_type', 'is_required',
+            'placeholder', 'help_text', 'default_value', 'validation_rules',
+            'display_order', 'is_active', 'options'
+        ]
+
+    def validate(self, data):
+        """Validate field data"""
+        field_type = data.get('field_type')
+        options = data.get('options', [])
+
+        # Validate that select/multiselect/radio/checkbox fields have options
+        if field_type in ['select', 'multiselect', 'radio', 'checkbox']:
+            if not options and not self.instance:
+                raise serializers.ValidationError({
+                    'options': f'{field_type} field type requires at least one option'
+                })
+
+        return data
+
+    @transaction.atomic
+    def create(self, validated_data):
+        """Create template field with options"""
+        options_data = validated_data.pop('options', [])
+
+        request = self.context.get('request')
+
+        # Add tenant_id from request context
+        if request and hasattr(request, 'tenant_id'):
+            validated_data['tenant_id'] = request.tenant_id
+
+        # Create field
+        field = ClinicalNoteTemplateField.objects.create(**validated_data)
+
+        # Create options
+        for option_data in options_data:
+            ClinicalNoteTemplateFieldOption.objects.create(
+                field=field,
+                tenant_id=validated_data['tenant_id'],
+                **option_data
+            )
+
+        return field
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        """Update template field and options"""
+        options_data = validated_data.pop('options', None)
+
+        # Update field fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        # Update options if provided
+        if options_data is not None:
+            # Delete existing options
+            instance.options.all().delete()
+
+            # Create new options
+            for option_data in options_data:
+                ClinicalNoteTemplateFieldOption.objects.create(
+                    field=instance,
+                    tenant_id=instance.tenant_id,
+                    **option_data
+                )
+
+        return instance
+
+
+# ============================================================================
+# CLINICAL NOTE TEMPLATE SERIALIZERS
+# ============================================================================
+
+class ClinicalNoteTemplateListSerializer(serializers.ModelSerializer):
+    """Serializer for listing templates"""
+
+    group_name = serializers.CharField(source='group.name', read_only=True, allow_null=True)
+    field_count = serializers.IntegerField(
+        source='fields.count',
+        read_only=True
+    )
+
+    class Meta:
+        model = ClinicalNoteTemplate
+        fields = [
+            'id', 'name', 'code', 'group', 'group_name',
+            'field_count', 'is_active', 'display_order'
+        ]
+
+
+class ClinicalNoteTemplateDetailSerializer(serializers.ModelSerializer):
+    """Detailed template serializer with fields"""
+
+    group_name = serializers.CharField(source='group.name', read_only=True, allow_null=True)
+    fields = ClinicalNoteTemplateFieldDetailSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ClinicalNoteTemplate
+        fields = '__all__'
+        read_only_fields = ['created_at', 'updated_at']
+
+
+class ClinicalNoteTemplateCreateUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for creating/updating templates"""
+
+    fields = ClinicalNoteTemplateFieldCreateUpdateSerializer(many=True, required=False)
+
+    class Meta:
+        model = ClinicalNoteTemplate
+        fields = [
+            'name', 'code', 'group', 'description',
+            'is_active', 'display_order', 'fields'
+        ]
+
+    def validate_code(self, value):
+        """Validate unique code within tenant"""
+        request = self.context.get('request')
+        if request and hasattr(request, 'tenant_id'):
+            queryset = ClinicalNoteTemplate.objects.filter(
+                tenant_id=request.tenant_id,
+                code=value
+            )
+            if self.instance:
+                queryset = queryset.exclude(id=self.instance.id)
+            if queryset.exists():
+                raise serializers.ValidationError("Template code already exists")
+        return value
+
+    @transaction.atomic
+    def create(self, validated_data):
+        """Create template with fields"""
+        fields_data = validated_data.pop('fields', [])
+
+        request = self.context.get('request')
+
+        # Add tenant_id from request context
+        if request and hasattr(request, 'tenant_id'):
+            validated_data['tenant_id'] = request.tenant_id
+
+        # Create template
+        template = ClinicalNoteTemplate.objects.create(**validated_data)
+
+        # Create fields
+        for field_data in fields_data:
+            options_data = field_data.pop('options', [])
+
+            field = ClinicalNoteTemplateField.objects.create(
+                template=template,
+                tenant_id=validated_data['tenant_id'],
+                **field_data
+            )
+
+            # Create options for this field
+            for option_data in options_data:
+                ClinicalNoteTemplateFieldOption.objects.create(
+                    field=field,
+                    tenant_id=validated_data['tenant_id'],
+                    **option_data
+                )
+
+        return template
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        """Update template and fields"""
+        fields_data = validated_data.pop('fields', None)
+
+        # Update template fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        # Update fields if provided
+        if fields_data is not None:
+            # Delete existing fields (cascade will delete options)
+            instance.fields.all().delete()
+
+            # Create new fields
+            for field_data in fields_data:
+                options_data = field_data.pop('options', [])
+
+                field = ClinicalNoteTemplateField.objects.create(
+                    template=instance,
+                    tenant_id=instance.tenant_id,
+                    **field_data
+                )
+
+                # Create options for this field
+                for option_data in options_data:
+                    ClinicalNoteTemplateFieldOption.objects.create(
+                        field=field,
+                        tenant_id=instance.tenant_id,
+                        **option_data
+                    )
+
+        return instance
+
+
+# ============================================================================
+# CLINICAL NOTE TEMPLATE FIELD RESPONSE SERIALIZERS
+# ============================================================================
+
+class ClinicalNoteTemplateFieldResponseSerializer(serializers.ModelSerializer):
+    """Serializer for template field responses"""
+
+    field_label = serializers.CharField(source='field.label', read_only=True)
+    field_type = serializers.CharField(source='field.field_type', read_only=True)
+    display_value = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ClinicalNoteTemplateFieldResponse
+        fields = [
+            'id', 'field', 'field_label', 'field_type',
+            'value_text', 'value_number', 'value_decimal', 'value_boolean',
+            'value_date', 'value_datetime', 'value_time', 'value_json',
+            'display_value'
+        ]
+
+    def get_display_value(self, obj):
+        """Get display value for the field"""
+        return obj.get_display_value()
+
+
+class ClinicalNoteTemplateFieldResponseCreateUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for creating/updating field responses"""
+
+    class Meta:
+        model = ClinicalNoteTemplateFieldResponse
+        fields = [
+            'field', 'value_text', 'value_number', 'value_decimal',
+            'value_boolean', 'value_date', 'value_datetime', 'value_time',
+            'value_json'
+        ]
+
+    def validate(self, data):
+        """Validate that at least one value field is provided"""
+        value_fields = [
+            'value_text', 'value_number', 'value_decimal', 'value_boolean',
+            'value_date', 'value_datetime', 'value_time', 'value_json'
+        ]
+
+        has_value = any(data.get(field) is not None for field in value_fields)
+
+        if not has_value:
+            raise serializers.ValidationError(
+                "At least one value field must be provided"
+            )
+
+        return data
+
+
+# ============================================================================
+# CLINICAL NOTE TEMPLATE RESPONSE SERIALIZERS
+# ============================================================================
+
+class ClinicalNoteTemplateResponseListSerializer(serializers.ModelSerializer):
+    """Serializer for listing template responses"""
+
+    template_name = serializers.CharField(source='template.name', read_only=True)
+    visit_number = serializers.CharField(source='visit.visit_number', read_only=True)
+    patient_name = serializers.CharField(source='visit.patient.full_name', read_only=True)
+    field_response_count = serializers.IntegerField(
+        source='field_responses.count',
+        read_only=True
+    )
+
+    class Meta:
+        model = ClinicalNoteTemplateResponse
+        fields = [
+            'id', 'visit', 'visit_number', 'patient_name',
+            'template', 'template_name', 'response_date',
+            'field_response_count', 'is_completed'
+        ]
+        read_only_fields = ['response_date']
+
+
+class ClinicalNoteTemplateResponseDetailSerializer(serializers.ModelSerializer):
+    """Detailed template response serializer with field responses"""
+
+    template_name = serializers.CharField(source='template.name', read_only=True)
+    visit_number = serializers.CharField(source='visit.visit_number', read_only=True)
+    patient_name = serializers.CharField(source='visit.patient.full_name', read_only=True)
+    field_responses = ClinicalNoteTemplateFieldResponseSerializer(many=True, read_only=True)
+    summary = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ClinicalNoteTemplateResponse
+        fields = '__all__'
+        read_only_fields = ['response_date', 'created_at', 'updated_at']
+
+    def get_summary(self, obj):
+        """Get generated summary"""
+        return obj.generate_summary()
+
+
+class ClinicalNoteTemplateResponseCreateUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for creating/updating template responses"""
+
+    field_responses = ClinicalNoteTemplateFieldResponseCreateUpdateSerializer(many=True)
+
+    class Meta:
+        model = ClinicalNoteTemplateResponse
+        fields = [
+            'visit', 'template', 'additional_notes',
+            'is_completed', 'field_responses'
+        ]
+
+    def validate_visit(self, value):
+        """Validate that visit-template combination is unique"""
+        if self.instance is None:  # Only for creation
+            template = self.initial_data.get('template')
+            if template:
+                exists = ClinicalNoteTemplateResponse.objects.filter(
+                    visit=value,
+                    template_id=template
+                ).exists()
+                if exists:
+                    raise serializers.ValidationError(
+                        "A response for this template already exists for this visit"
+                    )
+        return value
+
+    @transaction.atomic
+    def create(self, validated_data):
+        """Create template response with field responses"""
+        field_responses_data = validated_data.pop('field_responses', [])
+
+        request = self.context.get('request')
+
+        # Add tenant_id from request context
+        if request and hasattr(request, 'tenant_id'):
+            validated_data['tenant_id'] = request.tenant_id
+
+        # Add filled_by_id from request context
+        if request and hasattr(request, 'user_id'):
+            validated_data['filled_by_id'] = request.user_id
+
+        # Create response
+        response = ClinicalNoteTemplateResponse.objects.create(**validated_data)
+
+        # Create field responses
+        for field_response_data in field_responses_data:
+            ClinicalNoteTemplateFieldResponse.objects.create(
+                response=response,
+                tenant_id=validated_data['tenant_id'],
+                **field_response_data
+            )
+
+        return response
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        """Update template response and field responses"""
+        field_responses_data = validated_data.pop('field_responses', None)
+
+        # Update response fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        # Update field responses if provided
+        if field_responses_data is not None:
+            # Delete existing field responses
+            instance.field_responses.all().delete()
+
+            # Create new field responses
+            for field_response_data in field_responses_data:
+                ClinicalNoteTemplateFieldResponse.objects.create(
+                    response=instance,
+                    tenant_id=instance.tenant_id,
+                    **field_response_data
+                )
+
+        return instance

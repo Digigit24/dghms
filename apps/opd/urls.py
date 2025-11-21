@@ -10,7 +10,13 @@ from .views import (
     ProcedureBillViewSet,
     ClinicalNoteViewSet,
     VisitFindingViewSet,
-    VisitAttachmentViewSet
+    VisitAttachmentViewSet,
+    ClinicalNoteTemplateGroupViewSet,
+    ClinicalNoteTemplateViewSet,
+    ClinicalNoteTemplateFieldViewSet,
+    ClinicalNoteTemplateFieldOptionViewSet,
+    ClinicalNoteTemplateResponseViewSet,
+    ClinicalNoteTemplateFieldResponseViewSet
 )
 
 app_name = 'opd'
@@ -25,6 +31,14 @@ router.register(r'procedure-bills', ProcedureBillViewSet, basename='procedure-bi
 router.register(r'clinical-notes', ClinicalNoteViewSet, basename='clinical-note')
 router.register(r'visit-findings', VisitFindingViewSet, basename='visit-finding')
 router.register(r'visit-attachments', VisitAttachmentViewSet, basename='visit-attachment')
+
+# Clinical Note Template Routes
+router.register(r'template-groups', ClinicalNoteTemplateGroupViewSet, basename='template-group')
+router.register(r'templates', ClinicalNoteTemplateViewSet, basename='template')
+router.register(r'template-fields', ClinicalNoteTemplateFieldViewSet, basename='template-field')
+router.register(r'template-field-options', ClinicalNoteTemplateFieldOptionViewSet, basename='template-field-option')
+router.register(r'template-responses', ClinicalNoteTemplateResponseViewSet, basename='template-response')
+router.register(r'template-field-responses', ClinicalNoteTemplateFieldResponseViewSet, basename='template-field-response')
 
 urlpatterns = [
     path('', include(router.urls)),

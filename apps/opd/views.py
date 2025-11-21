@@ -24,7 +24,10 @@ from drf_spectacular.utils import (
 from .models import (
     Visit, OPDBill, ProcedureMaster, ProcedurePackage,
     ProcedureBill, ProcedureBillItem, ClinicalNote,
-    VisitFinding, VisitAttachment
+    VisitFinding, VisitAttachment,
+    ClinicalNoteTemplateGroup, ClinicalNoteTemplate,
+    ClinicalNoteTemplateField, ClinicalNoteTemplateFieldOption,
+    ClinicalNoteTemplateResponse, ClinicalNoteTemplateFieldResponse
 )
 from .serializers import (
     VisitListSerializer, VisitDetailSerializer, VisitCreateUpdateSerializer,
@@ -41,7 +44,18 @@ from .serializers import (
     VisitFindingCreateUpdateSerializer,
     VisitAttachmentListSerializer, VisitAttachmentDetailSerializer,
     VisitAttachmentCreateUpdateSerializer,
-    OPDBillStatisticsSerializer
+    OPDBillStatisticsSerializer,
+    ClinicalNoteTemplateGroupListSerializer, ClinicalNoteTemplateGroupDetailSerializer,
+    ClinicalNoteTemplateGroupCreateUpdateSerializer,
+    ClinicalNoteTemplateListSerializer, ClinicalNoteTemplateDetailSerializer,
+    ClinicalNoteTemplateCreateUpdateSerializer,
+    ClinicalNoteTemplateFieldListSerializer, ClinicalNoteTemplateFieldDetailSerializer,
+    ClinicalNoteTemplateFieldCreateUpdateSerializer,
+    ClinicalNoteTemplateFieldOptionSerializer,
+    ClinicalNoteTemplateResponseListSerializer, ClinicalNoteTemplateResponseDetailSerializer,
+    ClinicalNoteTemplateResponseCreateUpdateSerializer,
+    ClinicalNoteTemplateFieldResponseSerializer,
+    ClinicalNoteTemplateFieldResponseCreateUpdateSerializer
 )
 
 
@@ -894,3 +908,484 @@ class VisitAttachmentViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         elif self.action in ['create', 'update', 'partial_update']:
             return VisitAttachmentCreateUpdateSerializer
         return VisitAttachmentDetailSerializer
+
+
+# ============================================================================
+# CLINICAL NOTE TEMPLATE GROUP VIEWSET
+# ============================================================================
+
+@extend_schema_view(
+    list=extend_schema(
+        summary="List Template Groups",
+        description="Get list of clinical note template groups",
+        tags=['OPD - Clinical Templates']
+    ),
+    retrieve=extend_schema(
+        summary="Get Template Group Details",
+        description="Retrieve template group details with template count",
+        tags=['OPD - Clinical Templates']
+    ),
+    create=extend_schema(
+        summary="Create Template Group",
+        description="Create a new template group (Admin only)",
+        tags=['OPD - Clinical Templates']
+    )
+)
+class ClinicalNoteTemplateGroupViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
+    """
+    Clinical Note Template Group Management
+
+    Manages template groups for organizing clinical note templates.
+    Uses Django model permissions for access control.
+    """
+    queryset = ClinicalNoteTemplateGroup.objects.prefetch_related('templates')
+    permission_classes = [HMSPermission]
+    hms_module = 'opd'
+
+    action_permission_map = {
+        'list': 'view_clinical_notes',
+        'retrieve': 'view_clinical_notes',
+        'create': 'manage_templates',
+        'update': 'manage_templates',
+        'partial_update': 'manage_templates',
+        'destroy': 'manage_templates',
+    }
+
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['is_active']
+    search_fields = ['name', 'code', 'description']
+    ordering_fields = ['display_order', 'name']
+    ordering = ['display_order', 'name']
+
+    def get_serializer_class(self):
+        """Return appropriate serializer"""
+        if self.action == 'list':
+            return ClinicalNoteTemplateGroupListSerializer
+        elif self.action in ['create', 'update', 'partial_update']:
+            return ClinicalNoteTemplateGroupCreateUpdateSerializer
+        return ClinicalNoteTemplateGroupDetailSerializer
+
+    def get_queryset(self):
+        """Filter active groups by default"""
+        queryset = super().get_queryset()
+
+        # Show only active groups unless explicitly requested
+        show_inactive = self.request.query_params.get('show_inactive', 'false')
+        if show_inactive.lower() != 'true':
+            queryset = queryset.filter(is_active=True)
+
+        return queryset
+
+
+# ============================================================================
+# CLINICAL NOTE TEMPLATE VIEWSET
+# ============================================================================
+
+@extend_schema_view(
+    list=extend_schema(
+        summary="List Clinical Note Templates",
+        description="Get list of clinical note templates with field count",
+        tags=['OPD - Clinical Templates']
+    ),
+    retrieve=extend_schema(
+        summary="Get Template Details",
+        description="Retrieve template with all fields and options",
+        tags=['OPD - Clinical Templates']
+    ),
+    create=extend_schema(
+        summary="Create Template",
+        description="Create a new clinical note template with fields (Admin only)",
+        tags=['OPD - Clinical Templates']
+    )
+)
+class ClinicalNoteTemplateViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
+    """
+    Clinical Note Template Management
+
+    Manages clinical note templates with dynamic fields.
+    Uses Django model permissions for access control.
+    """
+    queryset = ClinicalNoteTemplate.objects.select_related(
+        'group'
+    ).prefetch_related(
+        'fields__options'
+    )
+    permission_classes = [HMSPermission]
+    hms_module = 'opd'
+
+    action_permission_map = {
+        'list': 'view_clinical_notes',
+        'retrieve': 'view_clinical_notes',
+        'create': 'manage_templates',
+        'update': 'manage_templates',
+        'partial_update': 'manage_templates',
+        'destroy': 'manage_templates',
+        'duplicate': 'manage_templates',
+    }
+
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['group', 'is_active']
+    search_fields = ['name', 'code', 'description']
+    ordering_fields = ['display_order', 'name', 'created_at']
+    ordering = ['display_order', 'name']
+
+    def get_serializer_class(self):
+        """Return appropriate serializer"""
+        if self.action == 'list':
+            return ClinicalNoteTemplateListSerializer
+        elif self.action in ['create', 'update', 'partial_update', 'duplicate']:
+            return ClinicalNoteTemplateCreateUpdateSerializer
+        return ClinicalNoteTemplateDetailSerializer
+
+    def get_queryset(self):
+        """Filter active templates by default"""
+        queryset = super().get_queryset()
+
+        # Show only active templates unless explicitly requested
+        show_inactive = self.request.query_params.get('show_inactive', 'false')
+        if show_inactive.lower() != 'true':
+            queryset = queryset.filter(is_active=True)
+
+        return queryset
+
+    @extend_schema(
+        summary="Duplicate Template",
+        description="Create a copy of an existing template with all fields and options",
+        request={
+            'application/json': {
+                'type': 'object',
+                'properties': {
+                    'name': {'type': 'string'},
+                    'code': {'type': 'string'}
+                }
+            }
+        },
+        tags=['OPD - Clinical Templates']
+    )
+    @action(detail=True, methods=['post'])
+    def duplicate(self, request, pk=None):
+        """Duplicate a template with all fields and options"""
+        original = self.get_object()
+
+        new_name = request.data.get('name', f"{original.name} (Copy)")
+        new_code = request.data.get('code', f"{original.code}_copy")
+
+        # Create new template
+        new_template = ClinicalNoteTemplate.objects.create(
+            tenant_id=original.tenant_id,
+            name=new_name,
+            code=new_code,
+            group=original.group,
+            description=original.description,
+            is_active=original.is_active,
+            display_order=original.display_order
+        )
+
+        # Duplicate all fields
+        for field in original.fields.all():
+            new_field = ClinicalNoteTemplateField.objects.create(
+                tenant_id=field.tenant_id,
+                template=new_template,
+                label=field.label,
+                field_name=field.field_name,
+                field_type=field.field_type,
+                is_required=field.is_required,
+                placeholder=field.placeholder,
+                help_text=field.help_text,
+                default_value=field.default_value,
+                validation_rules=field.validation_rules,
+                display_order=field.display_order,
+                is_active=field.is_active
+            )
+
+            # Duplicate options
+            for option in field.options.all():
+                ClinicalNoteTemplateFieldOption.objects.create(
+                    tenant_id=option.tenant_id,
+                    field=new_field,
+                    option_value=option.option_value,
+                    option_label=option.option_label,
+                    is_default=option.is_default,
+                    display_order=option.display_order
+                )
+
+        serializer = ClinicalNoteTemplateDetailSerializer(new_template)
+        return Response({
+            'success': True,
+            'message': 'Template duplicated successfully',
+            'data': serializer.data
+        })
+
+
+# ============================================================================
+# CLINICAL NOTE TEMPLATE FIELD VIEWSET
+# ============================================================================
+
+@extend_schema_view(
+    list=extend_schema(
+        summary="List Template Fields",
+        description="Get list of template fields",
+        tags=['OPD - Clinical Templates']
+    ),
+    retrieve=extend_schema(
+        summary="Get Field Details",
+        description="Retrieve field details with options",
+        tags=['OPD - Clinical Templates']
+    ),
+    create=extend_schema(
+        summary="Create Template Field",
+        description="Create a new template field with options (Admin only)",
+        tags=['OPD - Clinical Templates']
+    )
+)
+class ClinicalNoteTemplateFieldViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
+    """
+    Clinical Note Template Field Management
+
+    Manages individual fields within templates.
+    Uses Django model permissions for access control.
+    """
+    queryset = ClinicalNoteTemplateField.objects.select_related(
+        'template'
+    ).prefetch_related('options')
+    permission_classes = [HMSPermission]
+    hms_module = 'opd'
+
+    action_permission_map = {
+        'list': 'view_clinical_notes',
+        'retrieve': 'view_clinical_notes',
+        'create': 'manage_templates',
+        'update': 'manage_templates',
+        'partial_update': 'manage_templates',
+        'destroy': 'manage_templates',
+    }
+
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['template', 'field_type', 'is_required', 'is_active']
+    search_fields = ['label', 'field_name', 'help_text']
+    ordering_fields = ['display_order', 'label']
+    ordering = ['template', 'display_order']
+
+    def get_serializer_class(self):
+        """Return appropriate serializer"""
+        if self.action == 'list':
+            return ClinicalNoteTemplateFieldListSerializer
+        elif self.action in ['create', 'update', 'partial_update']:
+            return ClinicalNoteTemplateFieldCreateUpdateSerializer
+        return ClinicalNoteTemplateFieldDetailSerializer
+
+    def get_queryset(self):
+        """Filter by template if provided"""
+        queryset = super().get_queryset()
+
+        template_id = self.request.query_params.get('template_id')
+        if template_id:
+            queryset = queryset.filter(template_id=template_id)
+
+        return queryset
+
+
+# ============================================================================
+# CLINICAL NOTE TEMPLATE FIELD OPTION VIEWSET
+# ============================================================================
+
+@extend_schema_view(
+    list=extend_schema(
+        summary="List Field Options",
+        description="Get list of options for a specific field",
+        tags=['OPD - Clinical Templates']
+    ),
+    retrieve=extend_schema(
+        summary="Get Option Details",
+        description="Retrieve option details",
+        tags=['OPD - Clinical Templates']
+    ),
+    create=extend_schema(
+        summary="Create Field Option",
+        description="Create a new option for a field (Admin only)",
+        tags=['OPD - Clinical Templates']
+    )
+)
+class ClinicalNoteTemplateFieldOptionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
+    """
+    Clinical Note Template Field Option Management
+
+    Manages options for select/radio/checkbox fields.
+    Uses Django model permissions for access control.
+    """
+    queryset = ClinicalNoteTemplateFieldOption.objects.select_related('field')
+    permission_classes = [HMSPermission]
+    hms_module = 'opd'
+
+    action_permission_map = {
+        'list': 'view_clinical_notes',
+        'retrieve': 'view_clinical_notes',
+        'create': 'manage_templates',
+        'update': 'manage_templates',
+        'partial_update': 'manage_templates',
+        'destroy': 'manage_templates',
+    }
+
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['field', 'is_default']
+    search_fields = ['option_label', 'option_value']
+    ordering_fields = ['display_order', 'option_label']
+    ordering = ['field', 'display_order']
+
+    serializer_class = ClinicalNoteTemplateFieldOptionSerializer
+
+    def get_queryset(self):
+        """Filter by field if provided"""
+        queryset = super().get_queryset()
+
+        field_id = self.request.query_params.get('field_id')
+        if field_id:
+            queryset = queryset.filter(field_id=field_id)
+
+        return queryset
+
+
+# ============================================================================
+# CLINICAL NOTE TEMPLATE RESPONSE VIEWSET
+# ============================================================================
+
+@extend_schema_view(
+    list=extend_schema(
+        summary="List Template Responses",
+        description="Get list of filled template forms",
+        tags=['OPD - Clinical Templates']
+    ),
+    retrieve=extend_schema(
+        summary="Get Response Details",
+        description="Retrieve filled template with all field responses",
+        tags=['OPD - Clinical Templates']
+    ),
+    create=extend_schema(
+        summary="Create Template Response",
+        description="Fill out a clinical note template for a visit",
+        tags=['OPD - Clinical Templates']
+    )
+)
+class ClinicalNoteTemplateResponseViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
+    """
+    Clinical Note Template Response Management
+
+    Manages filled-out clinical note templates.
+    Uses Django model permissions for access control.
+    """
+    queryset = ClinicalNoteTemplateResponse.objects.select_related(
+        'visit__patient', 'template'
+    ).prefetch_related('field_responses__field')
+    permission_classes = [HMSPermission]
+    hms_module = 'opd'
+
+    action_permission_map = {
+        'list': 'view_clinical_notes',
+        'retrieve': 'view_clinical_notes',
+        'create': 'create_clinical_note',
+        'update': 'edit_clinical_note',
+        'partial_update': 'edit_clinical_note',
+        'destroy': 'edit_clinical_note',
+    }
+
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['visit', 'template', 'is_completed']
+    search_fields = ['visit__visit_number', 'visit__patient__first_name', 'template__name']
+    ordering_fields = ['response_date', 'created_at']
+    ordering = ['-response_date']
+
+    def get_serializer_class(self):
+        """Return appropriate serializer"""
+        if self.action == 'list':
+            return ClinicalNoteTemplateResponseListSerializer
+        elif self.action in ['create', 'update', 'partial_update']:
+            return ClinicalNoteTemplateResponseCreateUpdateSerializer
+        return ClinicalNoteTemplateResponseDetailSerializer
+
+    def get_queryset(self):
+        """Filter by visit or patient if provided"""
+        queryset = super().get_queryset()
+        user = self.request.user
+
+        # Doctors can only see their own visit responses
+        if user.groups.filter(name='Doctor').exists():
+            if hasattr(user, 'doctor_profile'):
+                queryset = queryset.filter(visit__doctor=user.doctor_profile)
+
+        # Patients can see their own responses
+        elif user.groups.filter(name='Patient').exists():
+            if hasattr(user, 'patient_profile'):
+                queryset = queryset.filter(visit__patient=user.patient_profile)
+
+        # Filter by visit if provided
+        visit_id = self.request.query_params.get('visit_id')
+        if visit_id:
+            queryset = queryset.filter(visit_id=visit_id)
+
+        return queryset
+
+
+# ============================================================================
+# CLINICAL NOTE TEMPLATE FIELD RESPONSE VIEWSET
+# ============================================================================
+
+@extend_schema_view(
+    list=extend_schema(
+        summary="List Field Responses",
+        description="Get list of individual field responses",
+        tags=['OPD - Clinical Templates']
+    ),
+    retrieve=extend_schema(
+        summary="Get Field Response Details",
+        description="Retrieve field response details",
+        tags=['OPD - Clinical Templates']
+    ),
+    create=extend_schema(
+        summary="Create Field Response",
+        description="Create individual field response",
+        tags=['OPD - Clinical Templates']
+    )
+)
+class ClinicalNoteTemplateFieldResponseViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
+    """
+    Clinical Note Template Field Response Management
+
+    Manages individual field responses within template responses.
+    Uses Django model permissions for access control.
+    """
+    queryset = ClinicalNoteTemplateFieldResponse.objects.select_related(
+        'response__visit', 'field'
+    )
+    permission_classes = [HMSPermission]
+    hms_module = 'opd'
+
+    action_permission_map = {
+        'list': 'view_clinical_notes',
+        'retrieve': 'view_clinical_notes',
+        'create': 'create_clinical_note',
+        'update': 'edit_clinical_note',
+        'partial_update': 'edit_clinical_note',
+        'destroy': 'edit_clinical_note',
+    }
+
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['response', 'field']
+    search_fields = ['field__label', 'value_text']
+    ordering_fields = ['field__display_order']
+    ordering = ['response', 'field__display_order']
+
+    def get_serializer_class(self):
+        """Return appropriate serializer"""
+        if self.action in ['create', 'update', 'partial_update']:
+            return ClinicalNoteTemplateFieldResponseCreateUpdateSerializer
+        return ClinicalNoteTemplateFieldResponseSerializer
+
+    def get_queryset(self):
+        """Filter by response if provided"""
+        queryset = super().get_queryset()
+
+        response_id = self.request.query_params.get('response_id')
+        if response_id:
+            queryset = queryset.filter(response_id=response_id)
+
+        return queryset
