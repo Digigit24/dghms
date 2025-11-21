@@ -150,29 +150,12 @@ class DoctorProfileCreateUpdateSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         """Cross-field validation"""
-        # Auto-populate tenant_id from request if not provided
+        # Note: tenant_id and user_id will be auto-populated in create() method
+        # We don't require them during validation - they're added later
+
         request = self.context.get('request')
-        if request and hasattr(request, 'tenant_id'):
-            if 'tenant_id' not in attrs or attrs['tenant_id'] is None:
-                attrs['tenant_id'] = request.tenant_id
 
-        # Auto-populate user_id from request if not provided
-        if request and hasattr(request, 'user_id'):
-            if 'user_id' not in attrs or attrs['user_id'] is None:
-                attrs['user_id'] = request.user_id
-
-        # Validate that tenant_id is now present
-        if 'tenant_id' not in attrs or attrs['tenant_id'] is None:
-            raise serializers.ValidationError({
-                'tenant_id': 'Tenant ID is required. Please ensure you are authenticated.'
-            })
-
-        # Validate that user_id is now present
-        if 'user_id' not in attrs or attrs['user_id'] is None:
-            raise serializers.ValidationError({
-                'user_id': 'User ID is required. Either provide it explicitly or it will be taken from your authentication.'
-            })
-
+        # Validate license dates
         issue_date = attrs.get('license_issue_date') or (
             self.instance.license_issue_date if self.instance else None
         )
@@ -190,6 +173,26 @@ class DoctorProfileCreateUpdateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         """Create doctor profile"""
+        request = self.context.get('request')
+
+        # Add tenant_id from request context if not already present
+        if 'tenant_id' not in validated_data:
+            if request and hasattr(request, 'tenant_id'):
+                validated_data['tenant_id'] = request.tenant_id
+            else:
+                raise serializers.ValidationError({
+                    'tenant_id': 'Tenant ID is required. Please ensure you are authenticated.'
+                })
+
+        # Add user_id from request context if not already present
+        if 'user_id' not in validated_data:
+            if request and hasattr(request, 'user_id'):
+                validated_data['user_id'] = request.user_id
+            else:
+                raise serializers.ValidationError({
+                    'user_id': 'User ID is required. Either provide it explicitly or ensure you are authenticated.'
+                })
+
         specialty_ids = validated_data.pop('specialty_ids', [])
 
         doctor = DoctorProfile.objects.create(**validated_data)
