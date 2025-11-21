@@ -88,26 +88,32 @@ class DoctorProfile(models.Model):
     specialties = models.ManyToManyField(
         Specialty,
         related_name='doctors',
-        blank=True
+    
+        blank=True, 
+       
     )
-    years_of_experience = models.PositiveIntegerField(default=0)
+    years_of_experience = models.PositiveIntegerField(default=0,blank=True, null=True)
 
     # Consultation Settings
     consultation_fee = models.DecimalField(
         max_digits=10,
         decimal_places=2,
         default=0,
-        help_text="Consultation fee in INR"
+        help_text="Consultation fee in INR",
+        blank=True, 
+        null=True,
     )
     follow_up_fee = models.DecimalField(
         max_digits=10,
         decimal_places=2,
         default=0,
+        blank=True, null=True,
         help_text="Follow-up consultation fee in INR"
     )
 
     consultation_duration = models.PositiveIntegerField(
         default=15,
+        
         help_text="Duration in minutes"
     )
     is_available_online = models.BooleanField(default=False)
@@ -118,6 +124,7 @@ class DoctorProfile(models.Model):
         max_length=16,
         choices=STATUS_CHOICES,
         default='active'
+
     )
 
     # Ratings & Statistics (read-only, updated by system)
