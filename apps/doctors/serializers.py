@@ -419,6 +419,10 @@ class DoctorWithUserCreationSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         """Validate the data based on create_user flag"""
+        # Auto-populate tenant_id from request context if available
+        # Note: tenant_id will be added by the view later, so we don't validate it here
+        request = self.context.get('request')
+
         create_user = attrs.get('create_user', False)
 
         if create_user:
@@ -443,15 +447,26 @@ class DoctorWithUserCreationSerializer(serializers.Serializer):
                 })
 
             # Check if user_id already has a doctor profile
-            if DoctorProfile.objects.filter(user_id=attrs['user_id']).exists():
+            # Filter by tenant to ensure we're checking within the same tenant
+            tenant_id = request.tenant_id if request and hasattr(request, 'tenant_id') else None
+            query = DoctorProfile.objects.filter(user_id=attrs['user_id'])
+            if tenant_id:
+                query = query.filter(tenant_id=tenant_id)
+
+            if query.exists():
                 raise serializers.ValidationError({
                     'user_id': 'User already has a doctor profile'
                 })
 
-        # Validate medical license number uniqueness
-        if DoctorProfile.objects.filter(
+        # Validate medical license number uniqueness within tenant
+        tenant_id = request.tenant_id if request and hasattr(request, 'tenant_id') else None
+        license_query = DoctorProfile.objects.filter(
             medical_license_number=attrs['medical_license_number']
-        ).exists():
+        )
+        if tenant_id:
+            license_query = license_query.filter(tenant_id=tenant_id)
+
+        if license_query.exists():
             raise serializers.ValidationError({
                 'medical_license_number': 'Doctor with this license number already exists'
             })
@@ -487,10 +502,14 @@ class DoctorWithUserCreationSerializer(serializers.Serializer):
                 'years_of_experience': 'Years of experience cannot be negative'
             })
 
-        # Specialty validation
+        # Specialty validation (within tenant context)
         specialty_ids = attrs.get('specialty_ids', [])
         if specialty_ids:
-            existing_specialties = Specialty.objects.filter(id__in=specialty_ids).count()
+            specialty_query = Specialty.objects.filter(id__in=specialty_ids)
+            if tenant_id:
+                specialty_query = specialty_query.filter(tenant_id=tenant_id)
+
+            existing_specialties = specialty_query.count()
             if existing_specialties != len(specialty_ids):
                 raise serializers.ValidationError({
                     'specialty_ids': 'One or more specialty IDs are invalid'
