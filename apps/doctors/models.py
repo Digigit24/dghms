@@ -78,7 +78,7 @@ class DoctorProfile(models.Model):
     )
 
     # License Information
-    medical_license_number = models.CharField(max_length=64, blank=True)
+    medical_license_number = models.CharField(max_length=64, blank=True, null=True)
     license_issuing_authority = models.CharField(max_length=128, blank=True, null=True)
     license_issue_date = models.DateField(blank=True, null=True)
     license_expiry_date = models.DateField(blank=True, null=True)
