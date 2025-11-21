@@ -177,17 +177,8 @@ class PatientProfileCreateUpdateSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         """Cross-field validation"""
-        # Auto-populate tenant_id from request if not provided
-        request = self.context.get('request')
-        if request and hasattr(request, 'tenant_id'):
-            if 'tenant_id' not in attrs or attrs['tenant_id'] is None:
-                attrs['tenant_id'] = request.tenant_id
-
-        # Validate that tenant_id is now present
-        if 'tenant_id' not in attrs or attrs['tenant_id'] is None:
-            raise serializers.ValidationError({
-                'tenant_id': 'Tenant ID is required. Please ensure you are authenticated.'
-            })
+        # Note: tenant_id will be added by create() method from request context
+        # We don't require it in attrs during validation
 
         # If insurance provider is given, policy number is required
         if attrs.get('insurance_provider') and not attrs.get('insurance_policy_number'):
@@ -213,8 +204,18 @@ class PatientProfileCreateUpdateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         """Create patient profile"""
-        # Get current user ID from context
+        # Get tenant_id and created_by from context
         request = self.context.get('request')
+
+        # Add tenant_id if not already in validated_data
+        if 'tenant_id' not in validated_data:
+            if request and hasattr(request, 'tenant_id'):
+                validated_data['tenant_id'] = request.tenant_id
+            else:
+                raise serializers.ValidationError({
+                    'tenant_id': 'Tenant ID is required. Please ensure you are authenticated.'
+                })
+
         created_by_user_id = None
         if request and hasattr(request, 'user_id'):
             created_by_user_id = request.user_id
