@@ -120,9 +120,15 @@ class VisitCreateUpdateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         """Create visit with auto-generated visit number"""
         request = self.context.get('request')
-        if request and request.user:
-            validated_data['created_by'] = request.user
-        
+
+        # Add tenant_id from request context
+        if request and hasattr(request, 'tenant_id'):
+            validated_data['tenant_id'] = request.tenant_id
+
+        # Add created_by_id from request context
+        if request and hasattr(request, 'user_id'):
+            validated_data['created_by_id'] = request.user_id
+
         return super().create(validated_data)
 
 
@@ -200,9 +206,15 @@ class OPDBillCreateUpdateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         """Create OPD bill with auto-calculations"""
         request = self.context.get('request')
-        if request and request.user:
-            validated_data['billed_by'] = request.user
-        
+
+        # Add tenant_id from request context
+        if request and hasattr(request, 'tenant_id'):
+            validated_data['tenant_id'] = request.tenant_id
+
+        # Add billed_by_id from request context
+        if request and hasattr(request, 'user_id'):
+            validated_data['billed_by_id'] = request.user_id
+
         return super().create(validated_data)
 
 
@@ -231,20 +243,30 @@ class ProcedureMasterDetailSerializer(serializers.ModelSerializer):
 
 class ProcedureMasterCreateUpdateSerializer(serializers.ModelSerializer):
     """Serializer for creating/updating procedure masters"""
-    
+
     class Meta:
         model = ProcedureMaster
         fields = [
-            'name', 'code', 'category', 'description', 
+            'name', 'code', 'category', 'description',
             'default_charge', 'is_active'
         ]
-    
+
     def validate_code(self, value):
         """Validate unique code"""
         if self.instance is None:  # Only for creation
             if ProcedureMaster.objects.filter(code=value).exists():
                 raise serializers.ValidationError("Procedure code already exists")
         return value
+
+    def create(self, validated_data):
+        """Create procedure master with tenant_id"""
+        request = self.context.get('request')
+
+        # Add tenant_id from request context
+        if request and hasattr(request, 'tenant_id'):
+            validated_data['tenant_id'] = request.tenant_id
+
+        return super().create(validated_data)
 
 
 # ============================================================================
@@ -296,25 +318,35 @@ class ProcedurePackageDetailSerializer(serializers.ModelSerializer):
 
 class ProcedurePackageCreateUpdateSerializer(serializers.ModelSerializer):
     """Serializer for creating/updating procedure packages"""
-    
+
     class Meta:
         model = ProcedurePackage
         fields = [
             'name', 'code', 'procedures', 'total_charge',
             'discounted_charge', 'is_active'
         ]
-    
+
     def validate(self, data):
         """Validate package data"""
         total = data.get('total_charge', Decimal('0'))
         discounted = data.get('discounted_charge', Decimal('0'))
-        
+
         if discounted > total:
             raise serializers.ValidationError({
                 'discounted_charge': 'Discounted charge cannot exceed total charge'
             })
-        
+
         return data
+
+    def create(self, validated_data):
+        """Create procedure package with tenant_id"""
+        request = self.context.get('request')
+
+        # Add tenant_id from request context
+        if request and hasattr(request, 'tenant_id'):
+            validated_data['tenant_id'] = request.tenant_id
+
+        return super().create(validated_data)
 
 
 # ============================================================================
@@ -398,28 +430,36 @@ class ProcedureBillCreateUpdateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         """Create procedure bill with items"""
         items_data = validated_data.pop('items', [])
-        
+
         request = self.context.get('request')
-        if request and request.user:
-            validated_data['billed_by'] = request.user
-        
+
+        # Add tenant_id from request context
+        if request and hasattr(request, 'tenant_id'):
+            validated_data['tenant_id'] = request.tenant_id
+
+        # Add billed_by_id from request context
+        if request and hasattr(request, 'user_id'):
+            validated_data['billed_by_id'] = request.user_id
+
         validated_data['total_amount'] = Decimal('0.00')
         validated_data['payable_amount'] = Decimal('0.00')
-        
+
         # Create bill first
         bill = ProcedureBill.objects.create(**validated_data)
-        
+
         # Create items
         for item_data in items_data:
+            # Add tenant_id to each item
+            item_data['tenant_id'] = validated_data['tenant_id']
             ProcedureBillItem.objects.create(
                 procedure_bill=bill,
                 **item_data
             )
-        
+
         # Now recalculate totals after items are created
         bill.calculate_totals()
         bill.save()
-        
+
         return bill
     
     @transaction.atomic
@@ -513,9 +553,15 @@ class ClinicalNoteCreateUpdateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         """Create clinical note"""
         request = self.context.get('request')
-        if request and request.user:
-            validated_data['created_by'] = request.user
-        
+
+        # Add tenant_id from request context
+        if request and hasattr(request, 'tenant_id'):
+            validated_data['tenant_id'] = request.tenant_id
+
+        # Add created_by_id from request context
+        if request and hasattr(request, 'user_id'):
+            validated_data['created_by_id'] = request.user_id
+
         return super().create(validated_data)
 
 
@@ -572,9 +618,15 @@ class VisitFindingCreateUpdateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         """Create finding"""
         request = self.context.get('request')
-        if request and request.user:
-            validated_data['recorded_by'] = request.user
-        
+
+        # Add tenant_id from request context
+        if request and hasattr(request, 'tenant_id'):
+            validated_data['tenant_id'] = request.tenant_id
+
+        # Add recorded_by_id from request context
+        if request and hasattr(request, 'user_id'):
+            validated_data['recorded_by_id'] = request.user_id
+
         return super().create(validated_data)
 
 
@@ -636,8 +688,14 @@ class VisitAttachmentCreateUpdateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         """Create attachment"""
         request = self.context.get('request')
-        if request and request.user:
-            validated_data['uploaded_by'] = request.user
+
+        # Add tenant_id from request context
+        if request and hasattr(request, 'tenant_id'):
+            validated_data['tenant_id'] = request.tenant_id
+
+        # Add uploaded_by_id from request context
+        if request and hasattr(request, 'user_id'):
+            validated_data['uploaded_by_id'] = request.user_id
 
         return super().create(validated_data)
 
