@@ -852,8 +852,9 @@ class ClinicalNoteTemplateFieldCreateUpdateSerializer(serializers.ModelSerialize
         model = ClinicalNoteTemplateField
         fields = [
             'template', 'field_label', 'field_name', 'field_type', 'is_required',
-            'placeholder', 'help_text', 'default_value', 'validation_rules',
-            'display_order', 'is_active', 'options'
+            'placeholder', 'help_text', 'default_value',
+            'min_value', 'max_value', 'min_length', 'max_length',
+            'display_order', 'column_width', 'show_condition', 'is_active', 'options'
         ]
 
     def validate(self, data):

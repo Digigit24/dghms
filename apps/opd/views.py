@@ -1093,8 +1093,13 @@ class ClinicalNoteTemplateViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                 placeholder=field.placeholder,
                 help_text=field.help_text,
                 default_value=field.default_value,
-                validation_rules=field.validation_rules,
+                min_value=field.min_value,
+                max_value=field.max_value,
+                min_length=field.min_length,
+                max_length=field.max_length,
                 display_order=field.display_order,
+                column_width=field.column_width,
+                show_condition=field.show_condition,
                 is_active=field.is_active
             )
 
