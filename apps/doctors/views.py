@@ -335,10 +335,15 @@ class DoctorProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         return Response({'success': True, 'data': serializer.data})
 
     def create(self, request, *args, **kwargs):
+        # Check if this is a create_user request
+        if request.data.get('create_user'):
+            # Delegate to create_with_user action
+            return self.create_with_user(request)
+
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         doctor = serializer.save()
-        
+
         return Response(
             {
                 'success': True,
@@ -525,7 +530,10 @@ class DoctorProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         import logging
         logger = logging.getLogger(__name__)
 
-        serializer = DoctorWithUserCreationSerializer(data=request.data)
+        serializer = DoctorWithUserCreationSerializer(
+            data=request.data,
+            context={'request': request}
+        )
 
         if not serializer.is_valid():
             return Response({
