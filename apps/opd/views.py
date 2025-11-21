@@ -953,7 +953,7 @@ class ClinicalNoteTemplateGroupViewSet(TenantViewSetMixin, viewsets.ModelViewSet
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['is_active']
-    search_fields = ['name', 'code', 'description']
+    search_fields = ['name', 'description']
     ordering_fields = ['display_order', 'name']
     ordering = ['display_order', 'name']
 
@@ -1086,15 +1086,20 @@ class ClinicalNoteTemplateViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             new_field = ClinicalNoteTemplateField.objects.create(
                 tenant_id=field.tenant_id,
                 template=new_template,
-                label=field.label,
+                field_label=field.field_label,
                 field_name=field.field_name,
                 field_type=field.field_type,
                 is_required=field.is_required,
                 placeholder=field.placeholder,
                 help_text=field.help_text,
                 default_value=field.default_value,
-                validation_rules=field.validation_rules,
+                min_value=field.min_value,
+                max_value=field.max_value,
+                min_length=field.min_length,
+                max_length=field.max_length,
                 display_order=field.display_order,
+                column_width=field.column_width,
+                show_condition=field.show_condition,
                 is_active=field.is_active
             )
 
@@ -1105,7 +1110,6 @@ class ClinicalNoteTemplateViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                     field=new_field,
                     option_value=option.option_value,
                     option_label=option.option_label,
-                    is_default=option.is_default,
                     display_order=option.display_order
                 )
 
@@ -1162,8 +1166,8 @@ class ClinicalNoteTemplateFieldViewSet(TenantViewSetMixin, viewsets.ModelViewSet
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['template', 'field_type', 'is_required', 'is_active']
-    search_fields = ['label', 'field_name', 'help_text']
-    ordering_fields = ['display_order', 'label']
+    search_fields = ['field_label', 'field_name', 'help_text']
+    ordering_fields = ['display_order', 'field_label']
     ordering = ['template', 'display_order']
 
     def get_serializer_class(self):
@@ -1227,7 +1231,7 @@ class ClinicalNoteTemplateFieldOptionViewSet(TenantViewSetMixin, viewsets.ModelV
     }
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['field', 'is_default']
+    filterset_fields = ['field']
     search_fields = ['option_label', 'option_value']
     ordering_fields = ['display_order', 'option_label']
     ordering = ['field', 'display_order']
@@ -1289,7 +1293,7 @@ class ClinicalNoteTemplateResponseViewSet(TenantViewSetMixin, viewsets.ModelView
     }
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['visit', 'template', 'is_completed']
+    filterset_fields = ['visit', 'template', 'status']
     search_fields = ['visit__visit_number', 'visit__patient__first_name', 'template__name']
     ordering_fields = ['response_date', 'created_at']
     ordering = ['-response_date']
@@ -1370,7 +1374,7 @@ class ClinicalNoteTemplateFieldResponseViewSet(TenantViewSetMixin, viewsets.Mode
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['response', 'field']
-    search_fields = ['field__label', 'value_text']
+    search_fields = ['field__field_label', 'value_text']
     ordering_fields = ['field__display_order']
     ordering = ['response', 'field__display_order']
 
