@@ -1086,7 +1086,7 @@ class ClinicalNoteTemplateViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             new_field = ClinicalNoteTemplateField.objects.create(
                 tenant_id=field.tenant_id,
                 template=new_template,
-                label=field.label,
+                field_label=field.field_label,
                 field_name=field.field_name,
                 field_type=field.field_type,
                 is_required=field.is_required,
@@ -1161,8 +1161,8 @@ class ClinicalNoteTemplateFieldViewSet(TenantViewSetMixin, viewsets.ModelViewSet
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['template', 'field_type', 'is_required', 'is_active']
-    search_fields = ['label', 'field_name', 'help_text']
-    ordering_fields = ['display_order', 'label']
+    search_fields = ['field_label', 'field_name', 'help_text']
+    ordering_fields = ['display_order', 'field_label']
     ordering = ['template', 'display_order']
 
     def get_serializer_class(self):
@@ -1369,7 +1369,7 @@ class ClinicalNoteTemplateFieldResponseViewSet(TenantViewSetMixin, viewsets.Mode
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['response', 'field']
-    search_fields = ['field__label', 'value_text']
+    search_fields = ['field__field_label', 'value_text']
     ordering_fields = ['field__display_order']
     ordering = ['response', 'field__display_order']
 

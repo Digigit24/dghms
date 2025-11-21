@@ -827,7 +827,7 @@ class ClinicalNoteTemplateFieldListSerializer(serializers.ModelSerializer):
     class Meta:
         model = ClinicalNoteTemplateField
         fields = [
-            'id', 'label', 'field_name', 'field_type', 'is_required',
+            'id', 'field_label', 'field_name', 'field_type', 'is_required',
             'option_count', 'display_order', 'is_active'
         ]
 
@@ -851,7 +851,7 @@ class ClinicalNoteTemplateFieldCreateUpdateSerializer(serializers.ModelSerialize
     class Meta:
         model = ClinicalNoteTemplateField
         fields = [
-            'template', 'label', 'field_name', 'field_type', 'is_required',
+            'template', 'field_label', 'field_name', 'field_type', 'is_required',
             'placeholder', 'help_text', 'default_value', 'validation_rules',
             'display_order', 'is_active', 'options'
         ]
@@ -1056,7 +1056,7 @@ class ClinicalNoteTemplateCreateUpdateSerializer(serializers.ModelSerializer):
 class ClinicalNoteTemplateFieldResponseSerializer(serializers.ModelSerializer):
     """Serializer for template field responses"""
 
-    field_label = serializers.CharField(source='field.label', read_only=True)
+    field_label = serializers.CharField(source='field.field_label', read_only=True)
     field_type = serializers.CharField(source='field.field_type', read_only=True)
     display_value = serializers.SerializerMethodField()
 
