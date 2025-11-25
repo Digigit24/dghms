@@ -720,6 +720,7 @@ class ClinicalNoteTemplateGroupAdmin(TenantModelAdmin):
         'tenant_id',
         'template_count',
     ]
+    exclude = ['tenant_id']  # Exclude from form, will be set automatically
 
     fieldsets = (
         ('Basic Information', {
@@ -732,18 +733,6 @@ class ClinicalNoteTemplateGroupAdmin(TenantModelAdmin):
             'fields': (
                 'display_order',
                 'is_active',
-            )
-        }),
-        ('Statistics', {
-            'fields': (
-                'template_count',
-            )
-        }),
-        ('Timestamps', {
-            'fields': (
-                'tenant_id',
-                'created_at',
-                'updated_at',
             )
         }),
     )
@@ -814,6 +803,7 @@ class ClinicalNoteTemplateFieldAdmin(TenantModelAdmin):
         'updated_at',
         'tenant_id',
     ]
+    exclude = ['tenant_id']  # Exclude from form, will be set automatically
     autocomplete_fields = ['template']
     inlines = [ClinicalNoteTemplateFieldOptionInline]
 
@@ -854,14 +844,38 @@ class ClinicalNoteTemplateFieldAdmin(TenantModelAdmin):
                 'is_active',
             )
         }),
-        ('Timestamps', {
-            'fields': (
-                'tenant_id',
-                'created_at',
-                'updated_at',
-            )
-        }),
     )
+
+    def save_formset(self, request, form, formset, change):
+        """Set tenant_id for inline ClinicalNoteTemplateFieldOption objects"""
+        instances = formset.save(commit=False)
+
+        # Get tenant_id from session
+        tenant_id = None
+        if hasattr(request, 'session'):
+            user_data = request.session.get('user_data', {})
+            tenant_id = user_data.get('tenant_id')
+
+            # Convert to UUID if needed
+            if tenant_id:
+                import uuid
+                if isinstance(tenant_id, str):
+                    try:
+                        tenant_id = uuid.UUID(tenant_id)
+                    except ValueError:
+                        tenant_id = None
+
+        # Set tenant_id for each inline instance
+        for instance in instances:
+            if hasattr(instance, 'tenant_id') and not instance.tenant_id and tenant_id:
+                instance.tenant_id = tenant_id
+            instance.save()
+
+        formset.save_m2m()
+
+        # Delete removed objects
+        for obj in formset.deleted_objects:
+            obj.delete()
 
     def is_required_badge(self, obj):
         """Display required status with badge."""
@@ -931,6 +945,7 @@ class ClinicalNoteTemplateAdmin(TenantModelAdmin):
         'field_count',
         'response_count',
     ]
+    exclude = ['tenant_id']  # Exclude from form, will be set automatically
     autocomplete_fields = ['group']
     inlines = [ClinicalNoteTemplateFieldInline]
 
@@ -949,20 +964,38 @@ class ClinicalNoteTemplateAdmin(TenantModelAdmin):
                 'is_active',
             )
         }),
-        ('Statistics', {
-            'fields': (
-                'field_count',
-                'response_count',
-            )
-        }),
-        ('Timestamps', {
-            'fields': (
-                'tenant_id',
-                'created_at',
-                'updated_at',
-            )
-        }),
     )
+
+    def save_formset(self, request, form, formset, change):
+        """Set tenant_id for inline ClinicalNoteTemplateField objects"""
+        instances = formset.save(commit=False)
+
+        # Get tenant_id from session
+        tenant_id = None
+        if hasattr(request, 'session'):
+            user_data = request.session.get('user_data', {})
+            tenant_id = user_data.get('tenant_id')
+
+            # Convert to UUID if needed
+            if tenant_id:
+                import uuid
+                if isinstance(tenant_id, str):
+                    try:
+                        tenant_id = uuid.UUID(tenant_id)
+                    except ValueError:
+                        tenant_id = None
+
+        # Set tenant_id for each inline instance
+        for instance in instances:
+            if hasattr(instance, 'tenant_id') and not instance.tenant_id and tenant_id:
+                instance.tenant_id = tenant_id
+            instance.save()
+
+        formset.save_m2m()
+
+        # Delete removed objects
+        for obj in formset.deleted_objects:
+            obj.delete()
 
     def field_count(self, obj):
         """Count of fields in this template."""
@@ -1010,6 +1043,7 @@ class ClinicalNoteTemplateFieldOptionAdmin(TenantModelAdmin):
         'tenant_id',
         'field_type',
     ]
+    exclude = ['tenant_id']  # Exclude from form, will be set automatically
     autocomplete_fields = ['field']
 
     fieldsets = (
@@ -1029,12 +1063,6 @@ class ClinicalNoteTemplateFieldOptionAdmin(TenantModelAdmin):
         ('Additional Data', {
             'fields': (
                 'metadata',
-            )
-        }),
-        ('Information', {
-            'fields': (
-                'tenant_id',
-                'field_type',
             )
         }),
     )
@@ -1119,6 +1147,7 @@ class ClinicalNoteTemplateResponseAdmin(TenantModelAdmin):
         'tenant_id',
         'field_response_count',
     ]
+    exclude = ['tenant_id']  # Exclude from form, will be set automatically
     autocomplete_fields = []
     inlines = [ClinicalNoteTemplateFieldResponseInline]
 
@@ -1136,23 +1165,11 @@ class ClinicalNoteTemplateResponseAdmin(TenantModelAdmin):
                 'response_summary',
             )
         }),
-        ('Statistics', {
-            'fields': (
-                'field_response_count',
-            )
-        }),
         ('Audit Trail', {
             'fields': (
                 'filled_by_id',
                 'reviewed_by_id',
                 'reviewed_at',
-            )
-        }),
-        ('Timestamps', {
-            'fields': (
-                'tenant_id',
-                'created_at',
-                'updated_at',
             )
         }),
     )
@@ -1224,6 +1241,7 @@ class ClinicalNoteTemplateFieldResponseAdmin(TenantModelAdmin):
         'updated_at',
         'tenant_id',
     ]
+    exclude = ['tenant_id']  # Exclude from form, will be set automatically
     autocomplete_fields = []
     filter_horizontal = []
 
@@ -1251,13 +1269,6 @@ class ClinicalNoteTemplateFieldResponseAdmin(TenantModelAdmin):
         ('Display Value', {
             'fields': (
                 'value_display',
-            )
-        }),
-        ('Timestamps', {
-            'fields': (
-                'tenant_id',
-                'created_at',
-                'updated_at',
             )
         }),
     )
