@@ -20,25 +20,33 @@ class HMSAdminSite(AdminSite):
         Check if user has permission to access admin site
         Requires either JWT authentication or session-based authentication
         """
+        print(f"\n[ADMIN AUTH] Checking permission for: {request.path}")
+
         # Check if user is authenticated via JWT (request.tenant_id is set by JWT middleware)
         if hasattr(request, 'tenant_id') and request.tenant_id:
+            print(f"[ADMIN AUTH] ✅ JWT auth found: tenant_id={request.tenant_id}")
             return True
 
         # Check if user is authenticated via session (must have user_data with tenant_id)
         if hasattr(request, 'session'):
             user_data = request.session.get('user_data', {})
             if user_data and user_data.get('tenant_id'):
+                print(f"[ADMIN AUTH] ✅ Session auth found in user_data: tenant_id={user_data.get('tenant_id')}")
                 return True
             # Also check direct tenant_id in session
-            if request.session.get('tenant_id'):
+            session_tenant_id = request.session.get('tenant_id')
+            if session_tenant_id:
+                print(f"[ADMIN AUTH] ✅ Session auth found (direct): tenant_id={session_tenant_id}")
                 return True
 
         # Check if user object exists and is authenticated
         if hasattr(request, 'user') and request.user.is_authenticated:
             # Check if user has tenant_id attribute (from TenantUser)
             if hasattr(request.user, 'tenant_id') and request.user.tenant_id:
+                print(f"[ADMIN AUTH] ✅ User object auth found: tenant_id={request.user.tenant_id}")
                 return True
 
+        print(f"[ADMIN AUTH] ❌ No authentication found for {request.path}")
         return False
 
     def each_context(self, request):
@@ -169,17 +177,33 @@ class TenantModelAdmin(admin.ModelAdmin):
         if not change:  # Only for new objects
             tenant_id = None
 
+            # DEBUG: Print diagnostic information
+            print(f"\n[ADMIN DEBUG] Attempting to save {obj.__class__.__name__}")
+            print(f"[ADMIN DEBUG] Has request.tenant_id: {hasattr(request, 'tenant_id')}")
+            if hasattr(request, 'tenant_id'):
+                print(f"[ADMIN DEBUG] request.tenant_id value: {request.tenant_id}")
+            print(f"[ADMIN DEBUG] Has request.session: {hasattr(request, 'session')}")
+            if hasattr(request, 'session'):
+                user_data = request.session.get('user_data', {})
+                print(f"[ADMIN DEBUG] session.user_data: {user_data}")
+                print(f"[ADMIN DEBUG] session.tenant_id: {request.session.get('tenant_id')}")
+
             # First, try to get tenant_id from JWT auth (request.tenant_id)
             if hasattr(request, 'tenant_id'):
                 tenant_id = request.tenant_id
+                print(f"[ADMIN DEBUG] Using JWT tenant_id: {tenant_id}")
 
             # Fallback: Get tenant_id from session (session-based auth)
             elif hasattr(request, 'session'):
                 user_data = request.session.get('user_data', {})
                 tenant_id = user_data.get('tenant_id')
+                print(f"[ADMIN DEBUG] Trying session user_data tenant_id: {tenant_id}")
                 # Also check direct session tenant_id
                 if not tenant_id:
                     tenant_id = request.session.get('tenant_id')
+                    print(f"[ADMIN DEBUG] Trying direct session tenant_id: {tenant_id}")
+
+            print(f"[ADMIN DEBUG] Final tenant_id to use: {tenant_id}")
 
             # If model has tenant_id field and it's not set, set it
             if hasattr(obj, 'tenant_id') and not obj.tenant_id:
@@ -189,13 +213,17 @@ class TenantModelAdmin(admin.ModelAdmin):
                     if isinstance(tenant_id, str):
                         try:
                             tenant_id = uuid.UUID(tenant_id)
-                        except ValueError:
+                            print(f"[ADMIN DEBUG] Converted tenant_id to UUID: {tenant_id}")
+                        except ValueError as e:
                             # If conversion fails, skip setting
+                            print(f"[ADMIN DEBUG] UUID conversion failed: {e}")
                             tenant_id = None
                     if tenant_id:
                         obj.tenant_id = tenant_id
+                        print(f"[ADMIN DEBUG] ✅ Set obj.tenant_id to: {obj.tenant_id}")
                 else:
                     # If tenant_id is still None, raise a validation error
+                    print("[ADMIN DEBUG] ❌ No tenant_id available, raising ValidationError")
                     from django.core.exceptions import ValidationError
                     raise ValidationError(
                         'Cannot create object: tenant_id is required but not available. '
