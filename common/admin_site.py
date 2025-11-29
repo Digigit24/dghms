@@ -18,17 +18,28 @@ class HMSAdminSite(AdminSite):
     def has_permission(self, request):
         """
         Check if user has permission to access admin site
-        Override to work with our custom TenantUser
+        Requires either JWT authentication or session-based authentication
         """
-        # # Check if user is authenticated via session
-        # if hasattr(request, 'session') and request.session.get('user_data'):
-        #     return True
+        # Check if user is authenticated via JWT (request.tenant_id is set by JWT middleware)
+        if hasattr(request, 'tenant_id') and request.tenant_id:
+            return True
 
-        # # Check if user object exists and is staff
-        # if hasattr(request, 'user') and request.user.is_authenticated:
-        #     return getattr(request.user, 'is_staff', False)
+        # Check if user is authenticated via session (must have user_data with tenant_id)
+        if hasattr(request, 'session'):
+            user_data = request.session.get('user_data', {})
+            if user_data and user_data.get('tenant_id'):
+                return True
+            # Also check direct tenant_id in session
+            if request.session.get('tenant_id'):
+                return True
 
-        return True
+        # Check if user object exists and is authenticated
+        if hasattr(request, 'user') and request.user.is_authenticated:
+            # Check if user has tenant_id attribute (from TenantUser)
+            if hasattr(request.user, 'tenant_id') and request.user.tenant_id:
+                return True
+
+        return False
 
     def each_context(self, request):
         """
@@ -166,19 +177,30 @@ class TenantModelAdmin(admin.ModelAdmin):
             elif hasattr(request, 'session'):
                 user_data = request.session.get('user_data', {})
                 tenant_id = user_data.get('tenant_id')
+                # Also check direct session tenant_id
+                if not tenant_id:
+                    tenant_id = request.session.get('tenant_id')
 
             # If model has tenant_id field and it's not set, set it
-            if tenant_id and hasattr(obj, 'tenant_id') and not obj.tenant_id:
-                # Convert string UUID to UUID object if needed
-                import uuid
-                if isinstance(tenant_id, str):
-                    try:
-                        tenant_id = uuid.UUID(tenant_id)
-                    except ValueError:
-                        # If conversion fails, skip setting
-                        tenant_id = None
+            if hasattr(obj, 'tenant_id') and not obj.tenant_id:
                 if tenant_id:
-                    obj.tenant_id = tenant_id
+                    # Convert string UUID to UUID object if needed
+                    import uuid
+                    if isinstance(tenant_id, str):
+                        try:
+                            tenant_id = uuid.UUID(tenant_id)
+                        except ValueError:
+                            # If conversion fails, skip setting
+                            tenant_id = None
+                    if tenant_id:
+                        obj.tenant_id = tenant_id
+                else:
+                    # If tenant_id is still None, raise a validation error
+                    from django.core.exceptions import ValidationError
+                    raise ValidationError(
+                        'Cannot create object: tenant_id is required but not available. '
+                        'Please ensure you are logged in via /api/auth/login/ or using a valid JWT token.'
+                    )
 
         super().save_model(request, obj, form, change)
 
