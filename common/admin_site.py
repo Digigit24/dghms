@@ -33,12 +33,20 @@ class HMSAdminSite(AdminSite):
     def each_context(self, request):
         """
         Add custom context to all admin pages
-        Includes tenant_id and user_id from session
+        Includes tenant_id and user_id from JWT or session
         """
         context = super().each_context(request)
 
-        # Add tenant and user information from session
-        if hasattr(request, 'session'):
+        # First, try to get info from JWT authentication
+        if hasattr(request, 'tenant_id'):
+            context['admin_tenant_id'] = getattr(request, 'tenant_id', 'Not Available')
+            context['admin_tenant_slug'] = getattr(request, 'tenant_slug', 'Not Available')
+            context['admin_user_id'] = getattr(request, 'user_id', 'Not Available')
+            context['admin_user_email'] = getattr(request, 'email', 'Not Available')
+            context['admin_user_type'] = getattr(request, 'user_type', 'staff')
+
+        # Fallback: Add tenant and user information from session
+        elif hasattr(request, 'session'):
             user_data = request.session.get('user_data', {})
             context['admin_tenant_id'] = user_data.get('tenant_id', 'Not Available')
             context['admin_tenant_slug'] = user_data.get('tenant_slug', 'Not Available')
@@ -50,12 +58,19 @@ class HMSAdminSite(AdminSite):
 
     def index(self, request, extra_context=None):
         """
-        Custom admin index page with tenant information
+        Custom admin index page with tenant information from JWT or session
         """
         extra_context = extra_context or {}
 
-        # Add tenant information from session
-        if hasattr(request, 'session'):
+        # First, try to get info from JWT authentication
+        if hasattr(request, 'tenant_id'):
+            extra_context['tenant_id'] = getattr(request, 'tenant_id')
+            extra_context['tenant_slug'] = getattr(request, 'tenant_slug', None)
+            extra_context['user_email'] = getattr(request, 'email', None)
+            extra_context['user_type'] = getattr(request, 'user_type', 'staff')
+
+        # Fallback: Add tenant information from session
+        elif hasattr(request, 'session'):
             user_data = request.session.get('user_data', {})
             extra_context['tenant_id'] = user_data.get('tenant_id')
             extra_context['tenant_slug'] = user_data.get('tenant_slug')
@@ -111,48 +126,59 @@ class TenantModelAdmin(admin.ModelAdmin):
     """
 
     def get_queryset(self, request):
-        """Filter queryset by tenant_id from session"""
+        """Filter queryset by tenant_id from JWT or session"""
         qs = super().get_queryset(request)
+        tenant_id = None
 
-        # Get tenant_id from session
-        if hasattr(request, 'session'):
+        # First, try to get tenant_id from JWT auth (request.tenant_id)
+        if hasattr(request, 'tenant_id'):
+            tenant_id = request.tenant_id
+
+        # Fallback: Get tenant_id from session (session-based auth)
+        elif hasattr(request, 'session'):
             user_data = request.session.get('user_data', {})
             tenant_id = user_data.get('tenant_id')
 
-            # If model has tenant_id field, filter by it
-            if tenant_id and hasattr(qs.model, 'tenant_id'):
-                # Convert string UUID to UUID object if needed
-                import uuid
-                if isinstance(tenant_id, str):
-                    try:
-                        tenant_id = uuid.UUID(tenant_id)
-                    except ValueError:
-                        # If conversion fails, skip filtering
-                        pass
-                qs = qs.filter(tenant_id=tenant_id)
+        # If model has tenant_id field, filter by it
+        if tenant_id and hasattr(qs.model, 'tenant_id'):
+            # Convert string UUID to UUID object if needed
+            import uuid
+            if isinstance(tenant_id, str):
+                try:
+                    tenant_id = uuid.UUID(tenant_id)
+                except ValueError:
+                    # If conversion fails, skip filtering
+                    pass
+            qs = qs.filter(tenant_id=tenant_id)
 
         return qs
 
     def save_model(self, request, obj, form, change):
         """Automatically set tenant_id when creating objects"""
         if not change:  # Only for new objects
-            # Get tenant_id from session
-            if hasattr(request, 'session'):
+            tenant_id = None
+
+            # First, try to get tenant_id from JWT auth (request.tenant_id)
+            if hasattr(request, 'tenant_id'):
+                tenant_id = request.tenant_id
+
+            # Fallback: Get tenant_id from session (session-based auth)
+            elif hasattr(request, 'session'):
                 user_data = request.session.get('user_data', {})
                 tenant_id = user_data.get('tenant_id')
 
-                # If model has tenant_id field and it's not set, set it
-                if tenant_id and hasattr(obj, 'tenant_id') and not obj.tenant_id:
-                    # Convert string UUID to UUID object if needed
-                    import uuid
-                    if isinstance(tenant_id, str):
-                        try:
-                            tenant_id = uuid.UUID(tenant_id)
-                        except ValueError:
-                            # If conversion fails, skip setting
-                            tenant_id = None
-                    if tenant_id:
-                        obj.tenant_id = tenant_id
+            # If model has tenant_id field and it's not set, set it
+            if tenant_id and hasattr(obj, 'tenant_id') and not obj.tenant_id:
+                # Convert string UUID to UUID object if needed
+                import uuid
+                if isinstance(tenant_id, str):
+                    try:
+                        tenant_id = uuid.UUID(tenant_id)
+                    except ValueError:
+                        # If conversion fails, skip setting
+                        tenant_id = None
+                if tenant_id:
+                    obj.tenant_id = tenant_id
 
         super().save_model(request, obj, form, change)
 
