@@ -5,9 +5,32 @@ from apps.doctors.serializers import DoctorProfileListSerializer
 
 class AppointmentTypeSerializer(serializers.ModelSerializer):
     """Serializer for AppointmentType"""
+    # Make tenant_id optional - it will be auto-populated from request headers
+    tenant_id = serializers.UUIDField(required=False)
+
     class Meta:
         model = AppointmentType
         fields = '__all__'
+
+    def create(self, validated_data):
+        """Custom create method to set tenant_id"""
+        request = self.context.get('request')
+
+        # Add tenant_id from request context if not already in validated_data
+        if 'tenant_id' not in validated_data:
+            if request and hasattr(request, 'tenant_id'):
+                validated_data['tenant_id'] = request.tenant_id
+            else:
+                raise serializers.ValidationError({
+                    'tenant_id': 'Tenant ID is required. Please ensure you are authenticated.'
+                })
+
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        """Custom update method"""
+        validated_data.pop('tenant_id', None)  # Don't allow tenant_id change
+        return super().update(instance, validated_data)
 
 
 
@@ -96,11 +119,13 @@ class AppointmentCreateUpdateSerializer(serializers.ModelSerializer):
     doctor_id = serializers.IntegerField(write_only=True)
     appointment_type_id = serializers.IntegerField(write_only=True)
     original_appointment_id = serializers.IntegerField(
-        write_only=True, 
-        required=False, 
+        write_only=True,
+        required=False,
         allow_null=True
     )
-    
+    # Make tenant_id optional - it will be auto-populated from request headers
+    tenant_id = serializers.UUIDField(required=False)
+
     class Meta:
         model = Appointment
         exclude = [
@@ -151,27 +176,37 @@ class AppointmentCreateUpdateSerializer(serializers.ModelSerializer):
         return attrs
     
     def create(self, validated_data):
-        """Custom create method to set creator"""
+        """Custom create method to set creator and tenant_id"""
         request = self.context.get('request')
-        
+
+        # Add tenant_id from request context if not already in validated_data
+        if 'tenant_id' not in validated_data:
+            if request and hasattr(request, 'tenant_id'):
+                validated_data['tenant_id'] = request.tenant_id
+            else:
+                raise serializers.ValidationError({
+                    'tenant_id': 'Tenant ID is required. Please ensure you are authenticated.'
+                })
+
         # Remove write-only fields
         validated_data.pop('patient_id', None)
         validated_data.pop('doctor_id', None)
         validated_data.pop('appointment_type_id', None)
         validated_data.pop('original_appointment_id', None)
-        
-        # Set creator
-        if request and hasattr(request, 'user') and hasattr(request.user, 'id'):
-            validated_data['created_by_id'] = request.user.id
-        
+
+        # Set creator (user_id from JWT)
+        if request and hasattr(request, 'user_id'):
+            validated_data['created_by_id'] = request.user_id
+
         return super().create(validated_data)
     
     def update(self, instance, validated_data):
         """Custom update method"""
-        # Remove write-only fields
+        # Remove write-only fields and prevent tenant_id change
         validated_data.pop('patient_id', None)
         validated_data.pop('doctor_id', None)
         validated_data.pop('appointment_type_id', None)
         validated_data.pop('original_appointment_id', None)
-        
+        validated_data.pop('tenant_id', None)  # Don't allow tenant_id change
+
         return super().update(instance, validated_data)
