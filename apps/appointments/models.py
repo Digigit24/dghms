@@ -69,9 +69,12 @@ class Appointment(models.Model):
         related_name='appointments'
     )
     appointment_type = models.ForeignKey(
-        AppointmentType, 
+        AppointmentType,
         on_delete=models.PROTECT,
-        related_name='appointments'
+        related_name='appointments',
+        null=True,
+        blank=True,
+        help_text="Type of appointment (optional)"
     )
 
     # Appointment Details

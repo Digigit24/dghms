@@ -117,7 +117,12 @@ class AppointmentCreateUpdateSerializer(serializers.ModelSerializer):
     """Create/Update serializer for appointments"""
     patient_id = serializers.IntegerField(write_only=True)
     doctor_id = serializers.IntegerField(write_only=True)
-    appointment_type_id = serializers.IntegerField(write_only=True)
+    appointment_type_id = serializers.IntegerField(
+        write_only=True,
+        required=False,
+        allow_null=True,
+        help_text="Type of appointment (optional)"
+    )
     original_appointment_id = serializers.IntegerField(
         write_only=True,
         required=False,
@@ -152,12 +157,16 @@ class AppointmentCreateUpdateSerializer(serializers.ModelSerializer):
         except DoctorProfile.DoesNotExist:
             raise serializers.ValidationError({'doctor_id': 'Invalid doctor ID'})
         
-        # Validate appointment type
-        try:
-            appointment_type = AppointmentType.objects.get(id=attrs['appointment_type_id'])
-            attrs['appointment_type'] = appointment_type
-        except AppointmentType.DoesNotExist:
-            raise serializers.ValidationError({'appointment_type_id': 'Invalid appointment type ID'})
+        # Validate appointment type (optional)
+        appointment_type_id = attrs.get('appointment_type_id')
+        if appointment_type_id:
+            try:
+                appointment_type = AppointmentType.objects.get(id=appointment_type_id)
+                attrs['appointment_type'] = appointment_type
+            except AppointmentType.DoesNotExist:
+                raise serializers.ValidationError({'appointment_type_id': 'Invalid appointment type ID'})
+        else:
+            attrs['appointment_type'] = None
         
         # Validate original appointment if follow-up
         if attrs.get('is_follow_up'):
