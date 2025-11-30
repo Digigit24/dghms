@@ -13,18 +13,8 @@ class AppointmentTypeSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
     def create(self, validated_data):
-        """Custom create method to set tenant_id"""
-        request = self.context.get('request')
-
-        # Add tenant_id from request context if not already in validated_data
-        if 'tenant_id' not in validated_data:
-            if request and hasattr(request, 'tenant_id'):
-                validated_data['tenant_id'] = request.tenant_id
-            else:
-                raise serializers.ValidationError({
-                    'tenant_id': 'Tenant ID is required. Please ensure you are authenticated.'
-                })
-
+        """Custom create method - tenant_id is set by TenantViewSetMixin"""
+        # Note: tenant_id is automatically set by TenantViewSetMixin.perform_create()
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
@@ -185,17 +175,8 @@ class AppointmentCreateUpdateSerializer(serializers.ModelSerializer):
         return attrs
     
     def create(self, validated_data):
-        """Custom create method to set creator and tenant_id"""
+        """Custom create method to set creator"""
         request = self.context.get('request')
-
-        # Add tenant_id from request context if not already in validated_data
-        if 'tenant_id' not in validated_data:
-            if request and hasattr(request, 'tenant_id'):
-                validated_data['tenant_id'] = request.tenant_id
-            else:
-                raise serializers.ValidationError({
-                    'tenant_id': 'Tenant ID is required. Please ensure you are authenticated.'
-                })
 
         # Remove write-only fields
         validated_data.pop('patient_id', None)
@@ -207,6 +188,7 @@ class AppointmentCreateUpdateSerializer(serializers.ModelSerializer):
         if request and hasattr(request, 'user_id'):
             validated_data['created_by_id'] = request.user_id
 
+        # Note: tenant_id is automatically set by TenantViewSetMixin.perform_create()
         return super().create(validated_data)
     
     def update(self, instance, validated_data):
