@@ -225,24 +225,72 @@ This document provides a comprehensive list of all available API endpoints in th
 
 **Base URL:** `/api/payments/`
 
-### Payments
+### Payment Categories
 
 | Method | Endpoint | Description | Auth Required |
 |--------|----------|-------------|---------------|
-| GET | `/api/payments/` | List payments | Yes |
-| POST | `/api/payments/` | Create payment | Yes |
-| GET | `/api/payments/{id}/` | Get payment details | Yes |
-| PUT | `/api/payments/{id}/` | Update payment (full) | Yes |
-| PATCH | `/api/payments/{id}/` | Update payment (partial) | Yes |
+| GET | `/api/payments/categories/` | List payment categories | Yes |
+| POST | `/api/payments/categories/` | Create payment category (Admin) | Yes |
+| GET | `/api/payments/categories/{id}/` | Get category details | Yes |
+| PUT | `/api/payments/categories/{id}/` | Update category (full) | Yes |
+| PATCH | `/api/payments/categories/{id}/` | Update category (partial) | Yes |
+| DELETE | `/api/payments/categories/{id}/` | Delete category | Yes |
 
-### Payment Custom Actions
+**Query Parameters for List:**
+- `category_type`: Filter by category type (income, expense, refund, adjustment)
+- `search`: Search by name, description
+
+### Transactions
 
 | Method | Endpoint | Description | Auth Required |
 |--------|----------|-------------|---------------|
-| GET | `/api/payments/statistics/` | Get payment statistics | Yes |
-| POST | `/api/payments/{id}/mark_paid/` | Mark payment as paid | Yes |
-| POST | `/api/payments/{id}/mark_failed/` | Mark payment as failed | Yes |
-| POST | `/api/payments/{id}/refund/` | Process refund | Yes |
+| GET | `/api/payments/transactions/` | List financial transactions | Yes |
+| POST | `/api/payments/transactions/` | Create transaction | Yes |
+| GET | `/api/payments/transactions/{id}/` | Get transaction details | Yes |
+| PUT | `/api/payments/transactions/{id}/` | Update transaction (full) | Yes |
+| PATCH | `/api/payments/transactions/{id}/` | Update transaction (partial) | Yes |
+| DELETE | `/api/payments/transactions/{id}/` | Delete transaction | Yes |
+
+**Query Parameters for List:**
+- `transaction_type`: Filter by type (payment, refund, expense, adjustment)
+- `payment_method`: Filter by payment method (cash, card, upi, etc.)
+- `category`: Filter by payment category ID
+- `date_from`: Transactions from date (YYYY-MM-DD)
+- `date_to`: Transactions to date (YYYY-MM-DD)
+- `min_amount`: Minimum transaction amount
+- `max_amount`: Maximum transaction amount
+- `is_reconciled`: Filter by reconciliation status
+
+### Transaction Custom Actions
+
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| GET | `/api/payments/transactions/statistics/` | Get transaction statistics (Admin) | Yes |
+| POST | `/api/payments/transactions/{id}/reconcile/` | Mark transaction as reconciled (Admin) | Yes |
+
+### Accounting Periods
+
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| GET | `/api/payments/accounting-periods/` | List accounting periods | Yes |
+| POST | `/api/payments/accounting-periods/` | Create accounting period (Admin) | Yes |
+| GET | `/api/payments/accounting-periods/{id}/` | Get period details | Yes |
+| PUT | `/api/payments/accounting-periods/{id}/` | Update period (full) | Yes |
+| PATCH | `/api/payments/accounting-periods/{id}/` | Update period (partial) | Yes |
+| DELETE | `/api/payments/accounting-periods/{id}/` | Delete period | Yes |
+
+**Query Parameters for List:**
+- `period_type`: Filter by period type (monthly, quarterly, annual)
+- `is_closed`: Filter by closed status
+- `date_from`: Periods starting from (YYYY-MM-DD)
+- `date_to`: Periods ending by (YYYY-MM-DD)
+
+### Accounting Period Custom Actions
+
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| POST | `/api/payments/accounting-periods/{id}/recalculate/` | Recalculate financial summary (Admin) | Yes |
+| POST | `/api/payments/accounting-periods/{id}/close/` | Close accounting period (Admin) | Yes |
 
 ---
 

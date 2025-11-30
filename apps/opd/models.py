@@ -413,21 +413,73 @@ class OPDBill(models.Model):
             self.payment_status = 'partial'
         else:
             self.payment_status = 'unpaid'
-    
-    def record_payment(self, amount, mode='cash', details=None):
-        """Record a payment for this bill."""
-        self.received_amount += Decimal(str(amount))
+
+    def record_payment(self, amount, mode='cash', details=None, user_id=None):
+        """
+        Record a payment for this bill and create a financial transaction.
+
+        Args:
+            amount: Payment amount
+            mode: Payment method (cash, card, upi, etc.)
+            details: Additional payment details (dict)
+            user_id: User ID who processed the payment
+        """
+        from apps.payments.models import Transaction, PaymentCategory
+        from django.contrib.contenttypes.models import ContentType
+
+        payment_amount = Decimal(str(amount))
+        self.received_amount += payment_amount
         self.payment_mode = mode
-        
+
         if details:
             self.payment_details = details
-        
+
         self.calculate_totals()
         self.save()
-        
+
         # Update visit payment status
-        self.visit.paid_amount += Decimal(str(amount))
+        self.visit.paid_amount += payment_amount
         self.visit.update_payment_status()
+
+        # Create financial transaction record
+        try:
+            # Get or create "OPD Consultation" category
+            category, _ = PaymentCategory.objects.get_or_create(
+                name='OPD Consultation',
+                tenant_id=self.tenant_id,
+                defaults={
+                    'category_type': 'income',
+                    'description': 'Revenue from OPD consultation fees'
+                }
+            )
+
+            # Map payment mode to transaction payment method
+            payment_method_mapping = {
+                'cash': 'cash',
+                'card': 'card',
+                'upi': 'upi',
+                'bank': 'net_banking',
+                'multiple': 'other',
+            }
+            transaction_payment_method = payment_method_mapping.get(mode, 'cash')
+
+            # Create transaction
+            Transaction.objects.create(
+                tenant_id=self.tenant_id,
+                amount=payment_amount,
+                category=category,
+                transaction_type='payment',
+                payment_method=transaction_payment_method,
+                content_type=ContentType.objects.get_for_model(OPDBill),
+                object_id=self.id,
+                user_id=user_id,
+                description=f'OPD Bill payment - {self.bill_number} (Visit: {self.visit.visit_number})'
+            )
+        except Exception as e:
+            # Log error but don't fail the payment recording
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f'Failed to create transaction for OPD bill {self.bill_number}: {str(e)}')
 
 
 class ProcedureMaster(models.Model):
@@ -763,21 +815,73 @@ class ProcedureBill(models.Model):
             self.payment_status = 'partial'
         else:
             self.payment_status = 'unpaid'
-    
-    def record_payment(self, amount, mode='cash', details=None):
-        """Record a payment for this bill."""
-        self.received_amount += Decimal(str(amount))
+
+    def record_payment(self, amount, mode='cash', details=None, user_id=None):
+        """
+        Record a payment for this procedure bill and create a financial transaction.
+
+        Args:
+            amount: Payment amount
+            mode: Payment method (cash, card, upi, etc.)
+            details: Additional payment details (dict)
+            user_id: User ID who processed the payment
+        """
+        from apps.payments.models import Transaction, PaymentCategory
+        from django.contrib.contenttypes.models import ContentType
+
+        payment_amount = Decimal(str(amount))
+        self.received_amount += payment_amount
         self.payment_mode = mode
-        
+
         if details:
             self.payment_details = details
-        
+
         self.calculate_totals()
         self.save()
-        
+
         # Update visit payment status
-        self.visit.paid_amount += Decimal(str(amount))
+        self.visit.paid_amount += payment_amount
         self.visit.update_payment_status()
+
+        # Create financial transaction record
+        try:
+            # Get or create "Procedure/Test Fees" category
+            category, _ = PaymentCategory.objects.get_or_create(
+                name='Procedure & Test Fees',
+                tenant_id=self.tenant_id,
+                defaults={
+                    'category_type': 'income',
+                    'description': 'Revenue from procedures, tests and investigations'
+                }
+            )
+
+            # Map payment mode to transaction payment method
+            payment_method_mapping = {
+                'cash': 'cash',
+                'card': 'card',
+                'upi': 'upi',
+                'bank': 'net_banking',
+                'multiple': 'other',
+            }
+            transaction_payment_method = payment_method_mapping.get(mode, 'cash')
+
+            # Create transaction
+            Transaction.objects.create(
+                tenant_id=self.tenant_id,
+                amount=payment_amount,
+                category=category,
+                transaction_type='payment',
+                payment_method=transaction_payment_method,
+                content_type=ContentType.objects.get_for_model(ProcedureBill),
+                object_id=self.id,
+                user_id=user_id,
+                description=f'Procedure Bill payment - {self.bill_number} (Visit: {self.visit.visit_number})'
+            )
+        except Exception as e:
+            # Log error but don't fail the payment recording
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f'Failed to create transaction for Procedure bill {self.bill_number}: {str(e)}')
 
 
 class ProcedureBillItem(models.Model):

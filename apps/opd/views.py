@@ -405,24 +405,25 @@ class OPDBillViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     def record_payment(self, request, pk=None):
         """Record payment for a bill"""
         bill = self.get_object()
-        
+
         amount = request.data.get('amount')
         payment_mode = request.data.get('payment_mode', 'cash')
         payment_details = request.data.get('payment_details', {})
-        
+
         if not amount:
             return Response(
                 {'success': False, 'error': 'Amount is required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        # Record payment
-        bill.record_payment(amount, payment_mode, payment_details)
-        
+
+        # Record payment with user_id from JWT token
+        user_id = getattr(request, 'user_id', None)
+        bill.record_payment(amount, payment_mode, payment_details, user_id=user_id)
+
         serializer = OPDBillDetailSerializer(bill)
         return Response({
             'success': True,
-            'message': 'Payment recorded',
+            'message': 'Payment recorded successfully. Transaction created.',
             'data': serializer.data
         })
 
@@ -692,24 +693,25 @@ class ProcedureBillViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     def record_payment(self, request, pk=None):
         """Record payment for a procedure bill"""
         bill = self.get_object()
-        
+
         amount = request.data.get('amount')
         payment_mode = request.data.get('payment_mode', 'cash')
         payment_details = request.data.get('payment_details', {})
-        
+
         if not amount:
             return Response(
                 {'success': False, 'error': 'Amount is required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        # Record payment
-        bill.record_payment(amount, payment_mode, payment_details)
-        
+
+        # Record payment with user_id from JWT token
+        user_id = getattr(request, 'user_id', None)
+        bill.record_payment(amount, payment_mode, payment_details, user_id=user_id)
+
         serializer = ProcedureBillDetailSerializer(bill)
         return Response({
             'success': True,
-            'message': 'Payment recorded',
+            'message': 'Payment recorded successfully. Transaction created.',
             'data': serializer.data
         })
 
