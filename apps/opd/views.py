@@ -131,6 +131,7 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         'today': 'view_visits',
         'queue': 'manage_queue',
         'stats': 'view_visits',
+        'template_responses': 'view_visits',  # GET/POST template responses
     }
     
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -300,7 +301,7 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         """Get visit statistics"""
         period = request.query_params.get('period', 'day')
         today = date.today()
-        
+
         if period == 'day':
             start_date = today
         elif period == 'week':
@@ -309,9 +310,9 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             start_date = today - timedelta(days=30)
         else:
             start_date = today
-        
+
         visits = self.get_queryset().filter(visit_date__gte=start_date)
-        
+
         stats = {
             'total_visits': visits.count(),
             'by_status': visits.values('status').annotate(count=Count('id')),
@@ -320,12 +321,64 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             'paid_revenue': visits.filter(payment_status='paid').aggregate(Sum('paid_amount'))['paid_amount__sum'] or 0,
             'pending_amount': visits.aggregate(Sum('balance_amount'))['balance_amount__sum'] or 0,
         }
-        
+
         return Response({
             'success': True,
             'period': period,
             'data': stats
         })
+
+    @extend_schema(
+        summary="Get/Create Template Responses for Visit",
+        description="GET: List all template responses for this visit. POST: Create a new template response for this visit.",
+        request=ClinicalNoteTemplateResponseCreateUpdateSerializer,
+        responses={
+            200: ClinicalNoteTemplateResponseListSerializer(many=True),
+            201: ClinicalNoteTemplateResponseDetailSerializer,
+        },
+        tags=['OPD - Visits', 'OPD - Clinical Templates']
+    )
+    @action(detail=True, methods=['get', 'post'])
+    def template_responses(self, request, pk=None):
+        """
+        GET: List all template responses for this visit
+        POST: Create a new template response for this visit
+        """
+        visit = self.get_object()
+
+        if request.method == 'GET':
+            # List all template responses for this visit
+            responses = visit.template_responses.select_related('template').all()
+            serializer = ClinicalNoteTemplateResponseListSerializer(responses, many=True)
+            return Response({
+                'success': True,
+                'count': responses.count(),
+                'data': serializer.data
+            })
+
+        elif request.method == 'POST':
+            # Create a new template response for this visit
+            # Ensure visit is set to current visit
+            data = request.data.copy()
+            data['visit'] = visit.id
+
+            serializer = ClinicalNoteTemplateResponseCreateUpdateSerializer(
+                data=data,
+                context=self.get_serializer_context()
+            )
+
+            if serializer.is_valid():
+                serializer.save()
+                return Response({
+                    'success': True,
+                    'message': 'Template response created successfully',
+                    'data': serializer.data
+                }, status=status.HTTP_201_CREATED)
+
+            return Response({
+                'success': False,
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
 
 
 # ============================================================================
