@@ -1771,5 +1771,24 @@ class ClinicalNoteTemplateFieldResponse(models.Model):
             self.value_json = value if isinstance(value, dict) else {}
         elif field_type in ['image', 'file']:
             self.value_file = value
+        elif field_type in ['select', 'radio']:
+            # For single select, save first then set selected option
+            self.save()
+            if value:
+                # value should be a single option ID
+                option_id = value if isinstance(value, (int, str)) else value[0] if isinstance(value, list) else None
+                if option_id:
+                    self.selected_options.set([option_id])
+            return
+        elif field_type in ['multiselect', 'checkbox']:
+            # For multiple select, save first then set selected options
+            self.save()
+            if value:
+                # value should be a list of option IDs
+                option_ids = value if isinstance(value, list) else [value]
+                self.selected_options.set(option_ids)
+            else:
+                self.selected_options.clear()
+            return
 
         self.save()
