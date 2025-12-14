@@ -3,6 +3,7 @@ from django.db.models import Q, Count, Sum, Avg, F
 from django.utils import timezone
 from django.db import transaction
 from datetime import date, timedelta
+from decimal import Decimal
 
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
@@ -389,6 +390,14 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     list=extend_schema(
         summary="List OPD Bills",
         description="Get paginated list of OPD bills with filtering",
+        parameters=[
+            OpenApiParameter(name='visit', type=int, description='Filter by visit ID'),
+            OpenApiParameter(name='doctor', type=int, description='Filter by doctor ID'),
+            OpenApiParameter(name='payment_status', type=str, description='Filter by payment status (paid, partial, unpaid)'),
+            OpenApiParameter(name='opd_type', type=str, description='Filter by OPD type (consultation, follow_up, emergency)'),
+            OpenApiParameter(name='charge_type', type=str, description='Filter by charge type (first_visit, revisit, emergency)'),
+            OpenApiParameter(name='search', type=str, description='Search by bill number, visit number, or patient name'),
+        ],
         tags=['OPD - Bills']
     ),
     retrieve=extend_schema(
@@ -426,7 +435,7 @@ class OPDBillViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     }
     
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['doctor', 'payment_status', 'opd_type', 'charge_type']
+    filterset_fields = ['visit', 'doctor', 'payment_status', 'opd_type', 'charge_type']
     search_fields = ['bill_number', 'visit__visit_number', 'visit__patient__first_name']
     ordering_fields = ['bill_date', 'total_amount', 'payment_status']
     ordering = ['-bill_date']
@@ -687,6 +696,13 @@ class ProcedurePackageViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     list=extend_schema(
         summary="List Procedure Bills",
         description="Get list of procedure/investigation bills",
+        parameters=[
+            OpenApiParameter(name='visit', type=int, description='Filter by visit ID'),
+            OpenApiParameter(name='doctor', type=int, description='Filter by doctor ID'),
+            OpenApiParameter(name='payment_status', type=str, description='Filter by payment status (paid, partial, unpaid)'),
+            OpenApiParameter(name='bill_type', type=str, description='Filter by bill type (procedure, investigation)'),
+            OpenApiParameter(name='search', type=str, description='Search by bill number or visit number'),
+        ],
         tags=['OPD - Bills']
     ),
     retrieve=extend_schema(
@@ -723,7 +739,7 @@ class ProcedureBillViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     }
     
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['doctor', 'payment_status', 'bill_type']
+    filterset_fields = ['visit', 'doctor', 'payment_status', 'bill_type']
     search_fields = ['bill_number', 'visit__visit_number']
     ordering_fields = ['bill_date', 'total_amount']
     ordering = ['-bill_date']

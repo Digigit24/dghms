@@ -27,6 +27,7 @@ class PatientProfileAdmin(TenantModelAdmin):
         'blood_group', 'city', 'status', 'total_visits',
         'registration_date'
     ]
+    
     list_filter = [
         'status', 'gender', 'blood_group', 'marital_status',
         'city', 'state', 'registration_date'

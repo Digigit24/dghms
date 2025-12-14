@@ -147,7 +147,7 @@ class Transaction(models.Model):
         """Generate unique transaction number"""
         if not self.transaction_number:
             # Generate transaction number: TRX2025XXXX
-            year = datetime.datetime.now().year
+            year = datetime.now().year
             last_transaction = Transaction.objects.filter(
                 transaction_number__startswith=f'TRX{year}'
             ).order_by('-created_at').first()

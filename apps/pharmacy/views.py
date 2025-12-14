@@ -234,22 +234,13 @@ class CartViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     }
 
     def get_queryset(self):
-        """Only access current user's cart"""
-        return self.queryset.filter(user=self.request.user)
-
-    def list(self, request):
-        """Get or create user's cart"""
-        cart, created = Cart.objects.get_or_create(user=request.user)
-        serializer = self.get_serializer(cart)
-        return Response({
-            'success': True,
-            'data': serializer.data
-        })
+        """Returns all carts for admin view"""
+        return self.queryset.all()
 
     @action(detail=False, methods=['post'])
     def add_item(self, request):
         """Add item to cart"""
-        cart, _ = Cart.objects.get_or_create(user=request.user)
+        cart, _ = Cart.objects.get_or_create(user_id=request.user.id)
         product_id = request.data.get('product_id')
         quantity = int(request.data.get('quantity', 1))
 
@@ -315,7 +306,7 @@ class CartViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def update_item(self, request):
         """Update cart item quantity"""
-        cart = Cart.objects.get(user=request.user)
+        cart = Cart.objects.get(user_id=request.user.id)
         cart_item_id = request.data.get('cart_item_id')
         quantity = int(request.data.get('quantity', 1))
 
@@ -353,7 +344,7 @@ class CartViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def remove_item(self, request):
         """Remove item from cart"""
-        cart = Cart.objects.get(user=request.user)
+        cart = Cart.objects.get(user_id=request.user.id)
         cart_item_id = request.data.get('cart_item_id')
 
         try:
@@ -375,7 +366,7 @@ class CartViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def clear(self, request):
         """Clear all items from cart"""
-        cart, _ = Cart.objects.get_or_create(user=request.user)
+        cart, _ = Cart.objects.get_or_create(user_id=request.user.id)
         cart.cart_items.all().delete()
 
         serializer = CartSerializer(cart)
@@ -415,13 +406,13 @@ class PharmacyOrderViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     ordering = ['-created_at']
 
     def get_queryset(self):
-        """Only access current user's orders"""
-        return self.queryset.filter(user=self.request.user)
+        """Returns all orders for admin view"""
+        return self.queryset.all()
 
     def create(self, request):
         """Create order from cart"""
         try:
-            cart = Cart.objects.get(user=request.user)
+            cart = Cart.objects.get(user_id=request.user.id)
         except Cart.DoesNotExist:
             return Response({
                 'success': False,
@@ -468,7 +459,7 @@ class PharmacyOrderViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
         # Create order
         order = PharmacyOrder.objects.create(
-            user=request.user,
+            user_id=request.user.id,
             total_amount=cart.total_amount,
             shipping_address=shipping_address,
             billing_address=billing_address
