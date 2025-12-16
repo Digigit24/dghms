@@ -56,6 +56,12 @@ LOGGING = {
             "level": "DEBUG",  # Show all debug info for auth issues
             "propagate": False,
         },
+        # Nuvi API logger
+        "nuviapi": {
+            "handlers": ["console", "file"],
+            "level": "DEBUG",  # Show all debug info for nuvi form submissions
+            "propagate": False,
+        },
     },
 
     "root": {  # catches all logs
@@ -295,6 +301,6 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 # --- Meta (Facebook) Conversions API & Google Sheets ---
 META_PIXEL_ID = config('META_PIXEL_ID', default='876692741374254')
 META_ACCESS_TOKEN = config('META_ACCESS_TOKEN', default='EAAMS6cNGH0YBQKKZBtCHGUzvTMoublHaxJrLZCoQuM1FC7PdWoZCE4e2FV5wO5wAga0C6wI7fEwa8uQ03mniEnT5HglyIZBVEfuVwcC2HZCJbQqqcuu6aMKMMRYa9PA2BlkNmqhT7rE75UQMn7XLkLYjjSGtVeiZAZCeWw3JYzD4rezv3jxubXd1yZCIgZBX1aAZDZD')
-GOOGLE_SHEETS_API_URL = config('https://script.google.com/macros/s/AKfycby2ILM2o0y1jqZbjdOY5CQdhgmFjVMI61fZ_JrxJIEu5oQB-By7qwW4uoVE3QYPZrBQ/exec', default='')
+GOOGLE_SHEETS_API_URL = config('GOOGLE_SHEETS_API_URL', default='https://script.google.com/macros/s/AKfycby2ILM2o0y1jqZbjdOY5CQdhgmFjVMI61fZ_JrxJIEu5oQB-By7qwW4uoVE3QYPZrBQ/exec')
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

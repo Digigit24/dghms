@@ -4,10 +4,11 @@ This Django app provides a form submission endpoint that integrates with Google 
 
 ## Features
 
-- **No authentication required** - Public endpoint for form submissions
+- **No authentication required** - Public endpoint for form submissions (exempted from JWT middleware)
 - **Google Sheets Integration** - Automatically saves form data to Google Sheets
 - **Meta CAPI Integration** - Tracks lead conversions via Facebook Pixel
 - **Error handling** - Gracefully handles failures without blocking the response
+- **CSRF exempt** - No CSRF token required for external form submissions
 
 ## Endpoint
 
@@ -116,7 +117,8 @@ curl -X POST http://localhost:8002/api/nuviformsubmit \
 
 - **PII Hashing**: Email, phone, and name fields are SHA256 hashed before being sent to Meta CAPI
 - **CSRF Exempt**: This endpoint is marked as CSRF exempt since it's designed for external form submissions
-- **No Authentication**: Designed for public form submissions - consider rate limiting in production
+- **No Authentication**: This endpoint is exempted from JWT authentication middleware in `common/middleware.py`
+- **Public Access**: Designed for public form submissions - consider rate limiting in production to prevent abuse
 
 ## Error Handling
 
