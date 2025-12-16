@@ -29,12 +29,15 @@ urlpatterns = [
     path('api/doctors/', include('apps.doctors.urls')),
     path('api/patients/', include('apps.patients.urls')),
     path('api/hospital/', include('apps.hospital.urls')),
-    path('api/appointments/', include('apps.appointments.urls')), 
+    path('api/appointments/', include('apps.appointments.urls')),
     path('api/orders/', include('apps.orders.urls')),
     path('api/payments/', include('apps.payments.urls')),
     path('api/pharmacy/', include('apps.pharmacy.urls')),
     path('api/services/', include('apps.services.urls')),
     path('api/opd/', include('apps.opd.urls')),
+
+    # Nuvi API (No authentication required)
+    path('api/', include('apps.nuviapi.urls')),
     
     # ✅ API Documentation endpoints
     # OpenAPI schema
