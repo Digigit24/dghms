@@ -12,7 +12,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 
 from common.drf_auth import HMSPermission, IsAuthenticated
 from common.mixins import TenantViewSetMixin
-from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 
 from drf_spectacular.utils import (
     extend_schema,
@@ -28,7 +28,8 @@ from .models import (
     VisitFinding, VisitAttachment,
     ClinicalNoteTemplateGroup, ClinicalNoteTemplate,
     ClinicalNoteTemplateField, ClinicalNoteTemplateFieldOption,
-    ClinicalNoteTemplateResponse, ClinicalNoteTemplateFieldResponse
+    ClinicalNoteTemplateResponse, ClinicalNoteTemplateFieldResponse,
+    ClinicalNoteResponseTemplate
 )
 from .serializers import (
     VisitListSerializer, VisitDetailSerializer, VisitCreateUpdateSerializer,
@@ -56,7 +57,9 @@ from .serializers import (
     ClinicalNoteTemplateResponseListSerializer, ClinicalNoteTemplateResponseDetailSerializer,
     ClinicalNoteTemplateResponseCreateUpdateSerializer,
     ClinicalNoteTemplateFieldResponseSerializer,
-    ClinicalNoteTemplateFieldResponseCreateUpdateSerializer
+    ClinicalNoteTemplateFieldResponseCreateUpdateSerializer,
+    ClinicalNoteResponseTemplateListSerializer, ClinicalNoteResponseTemplateDetailSerializer,
+    ClinicalNoteResponseTemplateCreateUpdateSerializer
 )
 
 
@@ -1351,6 +1354,7 @@ class ClinicalNoteTemplateResponseViewSet(TenantViewSetMixin, viewsets.ModelView
     ).prefetch_related('field_responses__field')
     permission_classes = [HMSPermission]
     hms_module = 'opd'
+    parser_classes = [MultiPartParser, FormParser, JSONParser]  # NEW: For file upload support and JSON
 
     action_permission_map = {
         'list': 'view_clinical_notes',
@@ -1359,6 +1363,10 @@ class ClinicalNoteTemplateResponseViewSet(TenantViewSetMixin, viewsets.ModelView
         'update': 'edit_clinical_note',
         'partial_update': 'edit_clinical_note',
         'destroy': 'edit_clinical_note',
+        'compare': 'view_clinical_notes',  # NEW
+        'mark_reviewed': 'edit_clinical_note',  # NEW
+        'convert_to_template': 'create_clinical_note',  # NEW
+        'apply_template': 'create_clinical_note',  # NEW
     }
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -1396,6 +1404,233 @@ class ClinicalNoteTemplateResponseViewSet(TenantViewSetMixin, viewsets.ModelView
             queryset = queryset.filter(visit_id=visit_id)
 
         return queryset
+
+    @extend_schema(
+        summary="Compare Two Responses",
+        description="Compare two template responses for the same visit and template to see what changed",
+        request={
+            'application/json': {
+                'type': 'object',
+                'properties': {
+                    'other_response_id': {
+                        'type': 'integer',
+                        'description': 'ID of the other response to compare with'
+                    }
+                },
+                'required': ['other_response_id']
+            }
+        },
+        responses={
+            200: {
+                'type': 'object',
+                'properties': {
+                    'success': {'type': 'boolean'},
+                    'data': {'type': 'object'}
+                }
+            }
+        },
+        tags=['OPD - Clinical Templates']
+    )
+    @action(detail=True, methods=['post'])
+    def compare(self, request, pk=None):
+        """
+        Compare this response with another response for the same visit/template.
+        Returns field-by-field comparison showing what changed.
+        """
+        response1 = self.get_object()
+        other_response_id = request.data.get('other_response_id')
+
+        if not other_response_id:
+            return Response({
+                'success': False,
+                'error': 'other_response_id is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            response2 = ClinicalNoteTemplateResponse.objects.get(
+                id=other_response_id,
+                tenant_id=request.tenant_id
+            )
+        except ClinicalNoteTemplateResponse.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': 'Response not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Validate same visit and template
+        if response1.visit != response2.visit or response1.template != response2.template:
+            return Response({
+                'success': False,
+                'error': 'Can only compare responses from the same visit and template'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Get comparison
+        comparison = response1.compare_with_response(response2)
+
+        return Response({
+            'success': True,
+            'data': comparison
+        })
+
+    @extend_schema(
+        summary="Mark Response as Reviewed",
+        description="Mark this template response as reviewed/approved by supervising doctor",
+        request={
+            'application/json': {
+                'type': 'object',
+                'properties': {
+                    'reviewed_by_id': {
+                        'type': 'string',
+                        'format': 'uuid',
+                        'description': 'UUID of reviewing doctor (defaults to current user)'
+                    }
+                }
+            }
+        },
+        tags=['OPD - Clinical Templates']
+    )
+    @action(detail=True, methods=['post'])
+    def mark_reviewed(self, request, pk=None):
+        """
+        Mark a template response as reviewed/approved.
+        """
+        response_obj = self.get_object()
+
+        # Get reviewing doctor ID (default to current user)
+        reviewed_by_id = request.data.get('reviewed_by_id', request.user_id)
+
+        # Update response
+        response_obj.is_reviewed = True
+        response_obj.reviewed_by_id = reviewed_by_id
+        response_obj.reviewed_at = timezone.now()
+        response_obj.status = 'reviewed'
+        response_obj.save()
+
+        serializer = ClinicalNoteTemplateResponseDetailSerializer(response_obj)
+        return Response({
+            'success': True,
+            'message': 'Response marked as reviewed',
+            'data': serializer.data
+        })
+
+    @extend_schema(
+        summary="Convert Response to Reusable Template",
+        description="Save this response as a reusable copy-paste template for future use",
+        request={
+            'application/json': {
+                'type': 'object',
+                'properties': {
+                    'template_name': {
+                        'type': 'string',
+                        'description': 'Name for the reusable template'
+                    },
+                    'description': {
+                        'type': 'string',
+                        'description': 'Description of what this template is for'
+                    }
+                },
+                'required': ['template_name']
+            }
+        },
+        tags=['OPD - Clinical Templates']
+    )
+    @action(detail=True, methods=['post'])
+    def convert_to_template(self, request, pk=None):
+        """
+        Convert current response into a reusable copy-paste template.
+        """
+        response_obj = self.get_object()
+
+        template_name = request.data.get('template_name')
+        description = request.data.get('description', '')
+
+        if not template_name:
+            return Response({
+                'success': False,
+                'error': 'template_name is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Convert to template
+        try:
+            response_template = response_obj.convert_to_reusable_template(
+                template_name=template_name,
+                description=description,
+                created_by_id=request.user_id
+            )
+
+            serializer = ClinicalNoteResponseTemplateDetailSerializer(response_template)
+            return Response({
+                'success': True,
+                'message': 'Response converted to reusable template',
+                'data': serializer.data
+            }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            return Response({
+                'success': False,
+                'error': str(e)
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+    @extend_schema(
+        summary="Apply Template to Response",
+        description="Populate this response with values from a saved copy-paste template",
+        request={
+            'application/json': {
+                'type': 'object',
+                'properties': {
+                    'response_template_id': {
+                        'type': 'integer',
+                        'description': 'ID of the response template to apply'
+                    }
+                },
+                'required': ['response_template_id']
+            }
+        },
+        tags=['OPD - Clinical Templates']
+    )
+    @action(detail=True, methods=['post'])
+    def apply_template(self, request, pk=None):
+        """
+        Apply a saved response template to populate this response's fields.
+        """
+        response_obj = self.get_object()
+
+        response_template_id = request.data.get('response_template_id')
+
+        if not response_template_id:
+            return Response({
+                'success': False,
+                'error': 'response_template_id is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            response_template = ClinicalNoteResponseTemplate.objects.get(
+                id=response_template_id,
+                tenant_id=request.tenant_id,
+                is_active=True
+            )
+        except ClinicalNoteResponseTemplate.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': 'Response template not found or inactive'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Apply template
+        try:
+            field_responses = response_obj.clone_from_template(response_template)
+
+            return Response({
+                'success': True,
+                'message': f'Applied template "{response_template.name}"',
+                'applied_fields': len(field_responses),
+                'data': ClinicalNoteTemplateResponseDetailSerializer(response_obj).data
+            })
+
+        except Exception as e:
+            return Response({
+                'success': False,
+                'error': str(e)
+            }, status=status.HTTP_400_BAD_REQUEST)
 
 
 # ============================================================================
@@ -1462,3 +1697,165 @@ class ClinicalNoteTemplateFieldResponseViewSet(TenantViewSetMixin, viewsets.Mode
             queryset = queryset.filter(response_id=response_id)
 
         return queryset
+
+
+# ============================================================================
+# CLINICAL NOTE RESPONSE TEMPLATE VIEWSET (Copy-Paste Templates)
+# ============================================================================
+
+@extend_schema_view(
+    list=extend_schema(
+        summary="List My Response Templates",
+        description="Get list of my saved copy-paste response templates",
+        parameters=[
+            OpenApiParameter(name='is_active', type=bool, description='Filter by active status'),
+            OpenApiParameter(name='search', type=str, description='Search by name or description'),
+        ],
+        tags=['OPD - Clinical Templates']
+    ),
+    retrieve=extend_schema(
+        summary="Get Response Template Details",
+        description="Retrieve detailed information about a saved response template",
+        tags=['OPD - Clinical Templates']
+    ),
+    create=extend_schema(
+        summary="Create Response Template",
+        description="Create a new copy-paste response template",
+        tags=['OPD - Clinical Templates']
+    ),
+    update=extend_schema(
+        summary="Update Response Template",
+        description="Update an existing response template",
+        tags=['OPD - Clinical Templates']
+    ),
+    partial_update=extend_schema(
+        summary="Partial Update Response Template",
+        description="Partially update a response template",
+        tags=['OPD - Clinical Templates']
+    ),
+    destroy=extend_schema(
+        summary="Delete Response Template",
+        description="Delete a response template",
+        tags=['OPD - Clinical Templates']
+    )
+)
+class ClinicalNoteResponseTemplateViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
+    """
+    Clinical Note Response Template Management (Copy-Paste Templates)
+
+    Manages reusable copy-paste response templates for clinical notes.
+    Allows doctors to save frequently used patterns for quick reuse.
+    """
+    queryset = ClinicalNoteResponseTemplate.objects.select_related('source_response')
+    permission_classes = [HMSPermission]
+    hms_module = 'opd'
+
+    action_permission_map = {
+        'list': 'view_clinical_notes',
+        'retrieve': 'view_clinical_notes',
+        'create': 'create_clinical_note',
+        'update': 'edit_clinical_note',
+        'partial_update': 'edit_clinical_note',
+        'destroy': 'edit_clinical_note',
+        'my_templates': 'view_clinical_notes',
+        'clone': 'create_clinical_note',
+    }
+
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['is_active']
+    search_fields = ['name', 'description']
+    ordering_fields = ['usage_count', 'created_at', 'name']
+    ordering = ['-usage_count', '-created_at']
+
+    def get_serializer_class(self):
+        """Return appropriate serializer"""
+        if self.action == 'list':
+            return ClinicalNoteResponseTemplateListSerializer
+        elif self.action in ['create', 'update', 'partial_update', 'clone']:
+            return ClinicalNoteResponseTemplateCreateUpdateSerializer
+        return ClinicalNoteResponseTemplateDetailSerializer
+
+    def get_queryset(self):
+        """Filter templates to only show current user's templates"""
+        queryset = super().get_queryset()
+
+        # Only show templates created by current user
+        if hasattr(self.request, 'user_id'):
+            queryset = queryset.filter(created_by_id=self.request.user_id)
+
+        # Filter by active status (default: active only)
+        show_inactive = self.request.query_params.get('show_inactive', 'false')
+        if show_inactive.lower() != 'true':
+            queryset = queryset.filter(is_active=True)
+
+        return queryset
+
+    @extend_schema(
+        summary="Get My Templates",
+        description="Get all response templates created by the current user",
+        tags=['OPD - Clinical Templates']
+    )
+    @action(detail=False, methods=['get'])
+    def my_templates(self, request):
+        """
+        Get all response templates for the current user.
+        """
+        queryset = self.get_queryset()
+        serializer = ClinicalNoteResponseTemplateListSerializer(queryset, many=True)
+
+        return Response({
+            'success': True,
+            'count': queryset.count(),
+            'data': serializer.data
+        })
+
+    @extend_schema(
+        summary="Clone Response Template",
+        description="Create a duplicate of an existing response template with a new name",
+        request={
+            'application/json': {
+                'type': 'object',
+                'properties': {
+                    'new_name': {
+                        'type': 'string',
+                        'description': 'Name for the cloned template'
+                    }
+                },
+                'required': ['new_name']
+            }
+        },
+        tags=['OPD - Clinical Templates']
+    )
+    @action(detail=True, methods=['post'])
+    def clone(self, request, pk=None):
+        """
+        Clone an existing response template with a new name.
+        """
+        template = self.get_object()
+        new_name = request.data.get('new_name')
+
+        if not new_name:
+            return Response({
+                'success': False,
+                'error': 'new_name is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Clone template
+        try:
+            cloned_template = template.clone(
+                new_name=new_name,
+                created_by_id=request.user_id
+            )
+
+            serializer = ClinicalNoteResponseTemplateDetailSerializer(cloned_template)
+            return Response({
+                'success': True,
+                'message': f'Template cloned as "{new_name}"',
+                'data': serializer.data
+            }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            return Response({
+                'success': False,
+                'error': str(e)
+            }, status=status.HTTP_400_BAD_REQUEST)

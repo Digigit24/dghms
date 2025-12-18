@@ -10,7 +10,8 @@ from .models import (
     VisitFinding, VisitAttachment,
     ClinicalNoteTemplateGroup, ClinicalNoteTemplate,
     ClinicalNoteTemplateField, ClinicalNoteTemplateFieldOption,
-    ClinicalNoteTemplateResponse, ClinicalNoteTemplateFieldResponse
+    ClinicalNoteTemplateResponse, ClinicalNoteTemplateFieldResponse,
+    ClinicalNoteResponseTemplate
 )
 from apps.patients.models import PatientProfile
 from apps.doctors.models import DoctorProfile
@@ -1053,6 +1054,7 @@ class ClinicalNoteTemplateFieldResponseSerializer(serializers.ModelSerializer):
             'id', 'field', 'field_label', 'field_type',
             'value_text', 'value_number', 'value_boolean',
             'value_date', 'value_datetime', 'value_time', 'value_json',
+            'full_canvas_json', 'canvas_thumbnail', 'canvas_version_history',
             'display_value'
         ]
 
@@ -1069,24 +1071,8 @@ class ClinicalNoteTemplateFieldResponseCreateUpdateSerializer(serializers.ModelS
         fields = [
             'field', 'value_text', 'value_number',
             'value_boolean', 'value_date', 'value_datetime', 'value_time',
-            'value_json'
+            'value_json', 'full_canvas_json'
         ]
-
-    def validate(self, data):
-        """Validate that at least one value field is provided"""
-        value_fields = [
-            'value_text', 'value_number', 'value_boolean',
-            'value_date', 'value_datetime', 'value_time', 'value_json'
-        ]
-
-        has_value = any(data.get(field) is not None for field in value_fields)
-
-        if not has_value:
-            raise serializers.ValidationError(
-                "At least one value field must be provided"
-            )
-
-        return data
 
 
 # ============================================================================
@@ -1109,9 +1095,12 @@ class ClinicalNoteTemplateResponseListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'visit', 'visit_number', 'patient_name',
             'template', 'template_name', 'response_date',
-            'field_response_count', 'status'
+            'field_response_count', 'status',
+            'response_sequence', 'is_reviewed', 'original_assigned_doctor_id',  # NEW
+            'doctor_switched_reason', 'canvas_data',  # NEW
+            'filled_by_id', 'reviewed_by_id', 'reviewed_at'
         ]
-        read_only_fields = ['response_date']
+        read_only_fields = ['response_date', 'response_sequence']
 
 
 class ClinicalNoteTemplateResponseDetailSerializer(serializers.ModelSerializer):
@@ -1126,7 +1115,10 @@ class ClinicalNoteTemplateResponseDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = ClinicalNoteTemplateResponse
         fields = '__all__'
-        read_only_fields = ['response_date', 'created_at', 'updated_at']
+        read_only_fields = [
+            'response_date', 'created_at', 'updated_at', 'response_sequence',
+            'filled_by_id', 'reviewed_by_id', 'reviewed_at'
+        ]
 
     def get_summary(self, obj):
         """Get generated summary"""
@@ -1136,28 +1128,25 @@ class ClinicalNoteTemplateResponseDetailSerializer(serializers.ModelSerializer):
 class ClinicalNoteTemplateResponseCreateUpdateSerializer(serializers.ModelSerializer):
     """Serializer for creating/updating template responses"""
 
-    field_responses = ClinicalNoteTemplateFieldResponseCreateUpdateSerializer(many=True)
+    field_responses = ClinicalNoteTemplateFieldResponseCreateUpdateSerializer(many=True, required=False)
 
     class Meta:
         model = ClinicalNoteTemplateResponse
         fields = [
-            'visit', 'template', 'status', 'field_responses'
+            'visit', 'template', 'status', 'field_responses',
+            'original_assigned_doctor_id', 'doctor_switched_reason',  # NEW: Multiple doctor support
+            'canvas_data',  # NEW: Canvas support
         ]
 
-    def validate_visit(self, value):
-        """Validate that visit-template combination is unique"""
-        if self.instance is None:  # Only for creation
-            template = self.initial_data.get('template')
-            if template:
-                exists = ClinicalNoteTemplateResponse.objects.filter(
-                    visit=value,
-                    template_id=template
-                ).exists()
-                if exists:
-                    raise serializers.ValidationError(
-                        "A response for this template already exists for this visit"
-                    )
-        return value
+    def validate(self, data):
+        """Validate response data"""
+        # If doctor_switched_reason is provided, original_assigned_doctor_id should also be provided
+        if data.get('doctor_switched_reason') and not data.get('original_assigned_doctor_id'):
+            raise serializers.ValidationError({
+                'original_assigned_doctor_id': 'Required when doctor_switched_reason is provided'
+            })
+
+        return data
 
     @transaction.atomic
     def create(self, validated_data):
@@ -1204,10 +1193,100 @@ class ClinicalNoteTemplateResponseCreateUpdateSerializer(serializers.ModelSerial
 
             # Create new field responses
             for field_response_data in field_responses_data:
-                ClinicalNoteTemplateFieldResponse.objects.create(
-                    response=instance,
-                    tenant_id=instance.tenant_id,
-                    **field_response_data
-                )
+                # Check if there is any value data before creating
+                value_fields = [
+                    'value_text', 'value_number', 'value_boolean',
+                    'value_date', 'value_datetime', 'value_time', 'value_json', 'full_canvas_json'
+                ]
+                has_value = any(field in field_response_data and field_response_data[field] is not None for field in value_fields)
+
+                if has_value:
+                    ClinicalNoteTemplateFieldResponse.objects.create(
+                        response=instance,
+                        tenant_id=instance.tenant_id,
+                        **field_response_data
+                    )
 
         return instance
+
+
+# ============================================================================
+# CLINICAL NOTE RESPONSE TEMPLATE SERIALIZERS (Copy-Paste Templates)
+# ============================================================================
+
+class ClinicalNoteResponseTemplateListSerializer(serializers.ModelSerializer):
+    """Serializer for listing copy-paste response templates"""
+
+    class Meta:
+        model = ClinicalNoteResponseTemplate
+        fields = [
+            'id', 'name', 'description', 'usage_count',
+            'is_active', 'created_by_id', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['usage_count', 'created_at', 'updated_at']
+
+
+class ClinicalNoteResponseTemplateDetailSerializer(serializers.ModelSerializer):
+    """Detailed copy-paste response template serializer"""
+
+    source_response_details = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ClinicalNoteResponseTemplate
+        fields = '__all__'
+        read_only_fields = ['usage_count', 'created_at', 'updated_at', 'created_by_id']
+
+    def get_source_response_details(self, obj):
+        """Get details of the source response"""
+        if obj.source_response:
+            return {
+                'id': obj.source_response.id,
+                'visit_id': obj.source_response.visit_id,
+                'visit_number': obj.source_response.visit.visit_number,
+                'template_id': obj.source_response.template_id,
+                'template_name': obj.source_response.template.name,
+                'response_date': obj.source_response.response_date,
+            }
+        return None
+
+
+class ClinicalNoteResponseTemplateCreateUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for creating/updating copy-paste response templates"""
+
+    class Meta:
+        model = ClinicalNoteResponseTemplate
+        fields = [
+            'name', 'description', 'source_response',
+            'template_field_values', 'is_active'
+        ]
+
+    def validate_name(self, value):
+        """Validate that template name is unique for this user"""
+        request = self.context.get('request')
+        if request and hasattr(request, 'user_id') and hasattr(request, 'tenant_id'):
+            queryset = ClinicalNoteResponseTemplate.objects.filter(
+                tenant_id=request.tenant_id,
+                created_by_id=request.user_id,
+                name=value
+            )
+            if self.instance:
+                queryset = queryset.exclude(id=self.instance.id)
+            if queryset.exists():
+                raise serializers.ValidationError(
+                    "You already have a template with this name"
+                )
+        return value
+
+    def create(self, validated_data):
+        """Create response template with tenant_id and created_by_id"""
+        request = self.context.get('request')
+
+        # Add tenant_id from request context
+        if request and hasattr(request, 'tenant_id'):
+            validated_data['tenant_id'] = request.tenant_id
+
+        # Add created_by_id from request context
+        if request and hasattr(request, 'user_id'):
+            validated_data['created_by_id'] = request.user_id
+
+        return super().create(validated_data)

@@ -1546,6 +1546,7 @@ class ClinicalNoteTemplateResponse(models.Model):
     Template Response Model - Actual filled form data.
 
     Links a completed template to a visit with all field responses.
+    Supports multiple doctors filling same template on same visit via response_sequence.
     """
 
     STATUS_CHOICES = [
@@ -1574,12 +1575,42 @@ class ClinicalNoteTemplateResponse(models.Model):
         related_name='responses'
     )
 
+    # Multiple Doctor Support
+    response_sequence = models.IntegerField(
+        default=1,
+        help_text="Sequence number for multiple responses (1st, 2nd, 3rd fill of same template on same visit)"
+    )
+    original_assigned_doctor_id = models.UUIDField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="User ID of originally assigned doctor (tracks who was first assigned)"
+    )
+    doctor_switched_reason = models.TextField(
+        blank=True,
+        help_text="Reason for doctor change (absence, handover, specialty consultation, etc.)"
+    )
+
     # Response Metadata
     response_date = models.DateTimeField(auto_now_add=True)
     status = models.CharField(
         max_length=20,
         choices=STATUS_CHOICES,
         default='draft'
+    )
+
+    # Review Workflow
+    is_reviewed = models.BooleanField(
+        default=False,
+        help_text="Has this response been reviewed/approved by supervising doctor"
+    )
+
+    # Canvas Integration for Stylus Input
+    canvas_data = models.FileField(
+        upload_to='clinical_notes/canvas/%Y/%m/',
+        null=True,
+        blank=True,
+        help_text="Canvas image if doctor used stylus instead of structured input"
     )
 
     # Summary (computed from field responses)
@@ -1611,17 +1642,31 @@ class ClinicalNoteTemplateResponse(models.Model):
         ordering = ['-response_date']
         verbose_name = 'Clinical Note Template Response'
         verbose_name_plural = 'Clinical Note Template Responses'
-        unique_together = [['visit', 'template']]
+        unique_together = [['visit', 'template', 'response_sequence']]
         indexes = [
             models.Index(fields=['tenant_id']),
             models.Index(fields=['visit']),
             models.Index(fields=['template']),
             models.Index(fields=['status']),
             models.Index(fields=['-response_date']),
+            models.Index(fields=['visit', 'template', 'response_sequence']),
+            models.Index(fields=['original_assigned_doctor_id']),
+            models.Index(fields=['is_reviewed']),
         ]
 
     def __str__(self):
-        return f"{self.visit.visit_number} - {self.template.name}"
+        return f"{self.visit.visit_number} - {self.template.name} (Seq: {self.response_sequence})"
+
+    def save(self, *args, **kwargs):
+        """Auto-calculate response_sequence if not set."""
+        if not self.response_sequence:
+            # Get max sequence for this visit + template combination
+            max_seq = ClinicalNoteTemplateResponse.objects.filter(
+                visit=self.visit,
+                template=self.template
+            ).aggregate(models.Max('response_sequence'))['response_sequence__max']
+            self.response_sequence = (max_seq or 0) + 1
+        super().save(*args, **kwargs)
 
     def generate_summary(self):
         """Generate a summary of all field responses."""
@@ -1636,12 +1681,195 @@ class ClinicalNoteTemplateResponse(models.Model):
         self.save()
         return summary
 
+    @classmethod
+    def create_with_doctor_switch(cls, visit, template, current_doctor_id, original_doctor_id=None, switch_reason='', **kwargs):
+        """
+        Create a new response with doctor switch tracking.
+
+        Args:
+            visit: Visit instance
+            template: ClinicalNoteTemplate instance
+            current_doctor_id: UUID of current doctor filling this
+            original_doctor_id: UUID of originally assigned doctor (optional)
+            switch_reason: Reason for doctor change
+            **kwargs: Additional fields for the response
+
+        Returns:
+            ClinicalNoteTemplateResponse instance
+        """
+        response = cls(
+            visit=visit,
+            template=template,
+            filled_by_id=current_doctor_id,
+            original_assigned_doctor_id=original_doctor_id or current_doctor_id,
+            doctor_switched_reason=switch_reason,
+            tenant_id=visit.tenant_id,
+            **kwargs
+        )
+        response.save()
+        return response
+
+    def clone_from_template(self, response_template):
+        """
+        Clone field values from a saved ResponseTemplate (copy-paste template).
+
+        Args:
+            response_template: ClinicalNoteResponseTemplate instance
+
+        Returns:
+            List of created ClinicalNoteTemplateFieldResponse instances
+        """
+        from decimal import Decimal
+        from django.utils import timezone
+
+        field_responses = []
+        template_values = response_template.template_field_values or {}
+
+        for field_name, field_data in template_values.items():
+            try:
+                # Find the field in current template
+                field = self.template.fields.get(field_name=field_name)
+
+                # Create field response
+                field_response = ClinicalNoteTemplateFieldResponse(
+                    response=self,
+                    field=field,
+                    tenant_id=self.tenant_id
+                )
+
+                # Set value based on type
+                field_type = field_data.get('type')
+                value = field_data.get('value')
+
+                if field_type in ['text', 'textarea']:
+                    field_response.value_text = value or ''
+                elif field_type in ['number', 'decimal']:
+                    field_response.value_number = Decimal(str(value)) if value else None
+                elif field_type == 'boolean':
+                    field_response.value_boolean = bool(value) if value is not None else None
+                elif field_type == 'date':
+                    field_response.value_date = value
+                elif field_type == 'datetime':
+                    field_response.value_datetime = value
+                elif field_type == 'time':
+                    field_response.value_time = value
+                elif field_type == 'json':
+                    field_response.value_json = value if isinstance(value, dict) else {}
+
+                field_response.save()
+
+                # Handle multiselect options
+                if field_type in ['select', 'radio', 'multiselect', 'checkbox'] and value:
+                    option_ids = value if isinstance(value, list) else [value]
+                    field_response.selected_options.set(option_ids)
+
+                field_responses.append(field_response)
+
+            except ClinicalNoteTemplateField.DoesNotExist:
+                continue  # Skip if field no longer exists in template
+
+        # Regenerate summary
+        self.generate_summary()
+
+        return field_responses
+
+    def convert_to_reusable_template(self, template_name, description='', created_by_id=None):
+        """
+        Convert current response into a reusable template for copy-paste.
+
+        Args:
+            template_name: Name for the reusable template
+            description: Description of what this template is for
+            created_by_id: UUID of user creating this template
+
+        Returns:
+            ClinicalNoteResponseTemplate instance
+        """
+        # Collect all field values
+        template_field_values = {}
+        for field_response in self.field_responses.all():
+            field_name = field_response.field.field_name
+            template_field_values[field_name] = {
+                'label': field_response.field.field_label,
+                'type': field_response.field.field_type,
+                'value': field_response.get_value()
+            }
+
+        # Create reusable template
+        response_template = ClinicalNoteResponseTemplate(
+            name=template_name,
+            description=description,
+            source_response=self,
+            template_field_values=template_field_values,
+            created_by_id=created_by_id or self.filled_by_id,
+            tenant_id=self.tenant_id
+        )
+        response_template.save()
+
+        return response_template
+
+    def compare_with_response(self, other_response):
+        """
+        Compare this response with another response for the same visit/template.
+
+        Args:
+            other_response: Another ClinicalNoteTemplateResponse instance
+
+        Returns:
+            dict: Comparison showing what changed between responses
+        """
+        if self.visit != other_response.visit or self.template != other_response.template:
+            raise ValueError("Can only compare responses from same visit and template")
+
+        comparison = {
+            'metadata': {
+                'response_1': {
+                    'sequence': self.response_sequence,
+                    'filled_by_id': str(self.filled_by_id),
+                    'filled_at': self.response_date.isoformat() if self.response_date else None,
+                    'status': self.status,
+                },
+                'response_2': {
+                    'sequence': other_response.response_sequence,
+                    'filled_by_id': str(other_response.filled_by_id),
+                    'filled_at': other_response.response_date.isoformat() if other_response.response_date else None,
+                    'status': other_response.status,
+                }
+            },
+            'field_changes': []
+        }
+
+        # Compare field responses
+        self_fields = {fr.field.field_name: fr for fr in self.field_responses.all()}
+        other_fields = {fr.field.field_name: fr for fr in other_response.field_responses.all()}
+
+        all_field_names = set(self_fields.keys()) | set(other_fields.keys())
+
+        for field_name in all_field_names:
+            self_fr = self_fields.get(field_name)
+            other_fr = other_fields.get(field_name)
+
+            self_value = self_fr.get_display_value() if self_fr else None
+            other_value = other_fr.get_display_value() if other_fr else None
+
+            if self_value != other_value:
+                comparison['field_changes'].append({
+                    'field_name': field_name,
+                    'field_label': (self_fr or other_fr).field.field_label,
+                    'response_1_value': self_value,
+                    'response_2_value': other_value,
+                    'changed': True
+                })
+
+        return comparison
+
 
 class ClinicalNoteTemplateFieldResponse(models.Model):
     """
     Field Response Model - Individual field answers.
 
     Stores the actual value for each field in a template response.
+    Supports both keyboard input and stylus/canvas input.
     """
 
     id = models.AutoField(primary_key=True)
@@ -1682,6 +1910,26 @@ class ClinicalNoteTemplateFieldResponse(models.Model):
         blank=True
     )
 
+    # Canvas/Stylus Input Support
+    full_canvas_json = models.JSONField(
+        default=dict,
+        blank=True,
+        null=True,
+        help_text="Full Excalidraw JSON data for the canvas."
+    )
+    canvas_thumbnail = models.ImageField(
+        upload_to='canvas_thumbnails/%Y/%m/',
+        null=True,
+        blank=True,
+        help_text="Auto-generated thumbnail of the canvas."
+    )
+    canvas_version_history = models.JSONField(
+        default=list,
+        blank=True,
+        null=True,
+        help_text="History of previous canvas JSON states."
+    )
+
     # For multiselect - store selected option IDs
     selected_options = models.ManyToManyField(
         ClinicalNoteTemplateFieldOption,
@@ -1707,9 +1955,40 @@ class ClinicalNoteTemplateFieldResponse(models.Model):
     def __str__(self):
         return f"{self.response.visit.visit_number} - {self.field.field_label}"
 
+    def save(self, *args, **kwargs):
+        # Track changes to full_canvas_json for version history
+        if self.pk is not None:
+            try:
+                orig = ClinicalNoteTemplateFieldResponse.objects.get(pk=self.pk)
+                if orig.full_canvas_json != self.full_canvas_json and orig.full_canvas_json:
+                    if self.canvas_version_history is None:
+                        self.canvas_version_history = []
+                    self.canvas_version_history.append(orig.full_canvas_json)
+            except ClinicalNoteTemplateFieldResponse.DoesNotExist:
+                pass
+
+        # TODO: Implement thumbnail generation from full_canvas_json.
+        # This requires a library to convert Excalidraw JSON to an image (e.g., SVG or PNG).
+        # For example, using a Node.js script with @excalidraw/excalidraw-node
+        # or a Python library if one becomes available.
+        #
+        # from django.core.files.base import ContentFile
+        # if self.full_canvas_json and 'elements' in self.full_canvas_json:
+        #     try:
+        #         image_data = generate_thumbnail_from_json(self.full_canvas_json)
+        #         self.canvas_thumbnail.save(f'{self.id}_thumbnail.png', ContentFile(image_data), save=False)
+        #     except Exception as e:
+        #         # Handle thumbnail generation failure
+        #         print(f"Could not generate thumbnail for {self.id}: {e}")
+
+        super().save(*args, **kwargs)
+
     def get_value(self):
         """Get the value based on field type."""
         field_type = self.field.field_type
+
+        if self.full_canvas_json:
+            return self.full_canvas_json
 
         if field_type in ['text', 'textarea']:
             return self.value_text
@@ -1740,6 +2019,9 @@ class ClinicalNoteTemplateFieldResponse(models.Model):
     def get_display_value(self):
         """Get human-readable display value."""
         field_type = self.field.field_type
+
+        if self.full_canvas_json:
+            return f"Canvas Data (Thumbnail: {self.canvas_thumbnail.url if self.canvas_thumbnail else 'Not generated'})"
 
         if field_type in ['select', 'radio']:
             option = self.selected_options.first()
@@ -1792,3 +2074,151 @@ class ClinicalNoteTemplateFieldResponse(models.Model):
             return
 
         self.save()
+
+
+class ClinicalNoteResponseTemplate(models.Model):
+    """
+    Clinical Note Response Template Model - Reusable copy-paste templates.
+
+    Allows doctors to save frequently used clinical note patterns as templates
+    for quick reuse. For example, a doctor can save a "Standard Follow-up Pattern"
+    template with common field values and reuse it for similar cases.
+
+    This is different from ClinicalNoteTemplate which defines the structure/fields,
+    while this model stores pre-filled values for quick copy-paste.
+    """
+
+    id = models.AutoField(primary_key=True)
+
+    # Tenant Information
+    tenant_id = models.UUIDField(
+        db_index=True,
+        help_text="Tenant identifier for multi-tenancy"
+    )
+
+    # Template Information
+    name = models.CharField(
+        max_length=200,
+        help_text="User-defined template name (e.g., 'Standard Follow-up', 'Initial Diabetes Consultation')"
+    )
+    description = models.TextField(
+        blank=True,
+        help_text="What this response template is for (e.g., 'Standard pattern for diabetes follow-ups')"
+    )
+
+    # Source Response
+    source_response = models.ForeignKey(
+        ClinicalNoteTemplateResponse,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='derived_templates',
+        help_text="Original response this template was created from"
+    )
+
+    # Template Data
+    template_field_values = models.JSONField(
+        default=dict,
+        help_text="Stores cloned field responses for quick reuse. Format: {field_name: {label, type, value}}"
+    )
+
+    # Metadata
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Can be archived/deactivated"
+    )
+    usage_count = models.IntegerField(
+        default=0,
+        help_text="Number of times this template has been used"
+    )
+
+    # Audit
+    created_by_id = models.UUIDField(
+        db_index=True,
+        help_text="User ID of doctor who created this reusable template"
+    )
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'clinical_note_response_templates'
+        ordering = ['-usage_count', '-created_at']
+        verbose_name = 'Clinical Note Response Template'
+        verbose_name_plural = 'Clinical Note Response Templates'
+        unique_together = [['tenant_id', 'name', 'created_by_id']]
+        indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'is_active']),
+            models.Index(fields=['created_by_id']),
+            models.Index(fields=['-usage_count']),
+        ]
+
+    def __str__(self):
+        return f"{self.name} (by User: {self.created_by_id})"
+
+    def apply_to_response(self, clinical_response):
+        """
+        Apply this template's values to a ClinicalNoteTemplateResponse.
+
+        This is a convenience method that calls clone_from_template on the response.
+
+        Args:
+            clinical_response: ClinicalNoteTemplateResponse instance to populate
+
+        Returns:
+            List of created ClinicalNoteTemplateFieldResponse instances
+        """
+        field_responses = clinical_response.clone_from_template(self)
+
+        # Increment usage count
+        self.usage_count += 1
+        self.save(update_fields=['usage_count', 'updated_at'])
+
+        return field_responses
+
+    def update_field_values(self, field_values_dict):
+        """
+        Update the template field values.
+
+        Args:
+            field_values_dict: Dictionary of field values to update
+                Format: {field_name: {label, type, value}}
+        """
+        self.template_field_values.update(field_values_dict)
+        self.save(update_fields=['template_field_values', 'updated_at'])
+
+    def get_field_value(self, field_name):
+        """
+        Get a specific field value from the template.
+
+        Args:
+            field_name: Name of the field
+
+        Returns:
+            Field value dict or None if not found
+        """
+        return self.template_field_values.get(field_name)
+
+    def clone(self, new_name, created_by_id=None):
+        """
+        Clone this template with a new name.
+
+        Args:
+            new_name: Name for the cloned template
+            created_by_id: UUID of user creating the clone (defaults to original creator)
+
+        Returns:
+            New ClinicalNoteResponseTemplate instance
+        """
+        cloned_template = ClinicalNoteResponseTemplate(
+            tenant_id=self.tenant_id,
+            name=new_name,
+            description=f"Cloned from: {self.name}",
+            source_response=self.source_response,
+            template_field_values=self.template_field_values.copy(),
+            created_by_id=created_by_id or self.created_by_id
+        )
+        cloned_template.save()
+        return cloned_template

@@ -8,7 +8,8 @@ from .models import (
     VisitFinding, VisitAttachment,
     ClinicalNoteTemplateGroup, ClinicalNoteTemplate,
     ClinicalNoteTemplateField, ClinicalNoteTemplateFieldOption,
-    ClinicalNoteTemplateResponse, ClinicalNoteTemplateFieldResponse
+    ClinicalNoteTemplateResponse, ClinicalNoteTemplateFieldResponse,
+    ClinicalNoteResponseTemplate
 )
 
 
@@ -1088,7 +1089,9 @@ class ClinicalNoteTemplateResponseAdmin(TenantModelAdmin):
     list_display = [
         'visit',
         'template',
+        'response_sequence',  # NEW
         'status_badge',
+        'is_reviewed_badge',  # NEW
         'response_date',
         'filled_by_id',
         'reviewed_by_id',
@@ -1096,14 +1099,17 @@ class ClinicalNoteTemplateResponseAdmin(TenantModelAdmin):
     ]
     list_filter = [
         'status',
+        'is_reviewed',  # NEW
         'response_date',
         'template',
+        'response_sequence',  # NEW
     ]
     search_fields = [
         'visit__visit_number',
         'template__name',
         'template__code',
         'filled_by_id',
+        'doctor_switched_reason',  # NEW
     ]
     readonly_fields = [
         'visit',
@@ -1118,6 +1124,11 @@ class ClinicalNoteTemplateResponseAdmin(TenantModelAdmin):
         'updated_at',
         'tenant_id',
         'field_response_count',
+        'response_sequence',  # NEW
+        'is_reviewed',  # NEW
+        'original_assigned_doctor_id',  # NEW
+        'doctor_switched_reason',  # NEW
+        'canvas_data',  # NEW
     ]
     autocomplete_fields = []
     inlines = [ClinicalNoteTemplateFieldResponseInline]
@@ -1127,9 +1138,24 @@ class ClinicalNoteTemplateResponseAdmin(TenantModelAdmin):
             'fields': (
                 'visit',
                 'template',
+                'response_sequence',  # NEW
                 'response_date',
                 'status',
+                'is_reviewed',  # NEW
             )
+        }),
+        ('Multiple Doctor Support', {  # NEW
+            'fields': (
+                'original_assigned_doctor_id',
+                'doctor_switched_reason',
+            ),
+            'classes': ('collapse',)
+        }),
+        ('Canvas Data', {  # NEW
+            'fields': (
+                'canvas_data',
+            ),
+            'classes': ('collapse',)
         }),
         ('Response Data', {
             'fields': (
@@ -1177,6 +1203,15 @@ class ClinicalNoteTemplateResponseAdmin(TenantModelAdmin):
         )
     status_badge.short_description = 'Status'
 
+    def is_reviewed_badge(self, obj):
+        """Display reviewed status with badge."""
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 3px 10px; border-radius: 3px;">{}</span>',
+            'blue' if obj.is_reviewed else 'gray',
+            'Reviewed' if obj.is_reviewed else 'Pending'
+        )
+    is_reviewed_badge.short_description = 'Review Status'
+
     def has_add_permission(self, request):
         """Disable adding responses through admin."""
         return False
@@ -1219,6 +1254,9 @@ class ClinicalNoteTemplateFieldResponseAdmin(TenantModelAdmin):
         'value_time',
         'value_json',
         'value_file',
+        'full_canvas_json',
+        'canvas_thumbnail',
+        'canvas_version_history',
         'value_display',
         'created_at',
         'updated_at',
@@ -1247,6 +1285,14 @@ class ClinicalNoteTemplateFieldResponseAdmin(TenantModelAdmin):
                 'value_file',
                 'selected_options',
             )
+        }),
+        ('Canvas Input', {
+            'fields': (
+                'full_canvas_json',
+                'canvas_thumbnail',
+                'canvas_version_history',
+            ),
+            'classes': ('collapse',)
         }),
         ('Display Value', {
             'fields': (
@@ -1281,6 +1327,92 @@ class ClinicalNoteTemplateFieldResponseAdmin(TenantModelAdmin):
         return False
 
 
+# ============================================================================
+# CLINICAL NOTE RESPONSE TEMPLATE ADMIN (Copy-Paste Templates)
+# ============================================================================
+
+class ClinicalNoteResponseTemplateAdmin(TenantModelAdmin):
+    """Admin interface for ClinicalNoteResponseTemplate model."""
+
+    list_display = [
+        'name',
+        'description_short',
+        'usage_count',
+        'is_active_badge',
+        'created_by_id',
+        'created_at',
+    ]
+    list_filter = [
+        'is_active',
+        'created_at',
+        'updated_at',
+    ]
+    search_fields = [
+        'name',
+        'description',
+        'created_by_id',
+    ]
+    readonly_fields = [
+        'usage_count',
+        'created_by_id',
+        'source_response',
+        'created_at',
+        'updated_at',
+        'tenant_id',
+    ]
+
+    fieldsets = (
+        ('Template Information', {
+            'fields': (
+                'name',
+                'description',
+                'is_active',
+            )
+        }),
+        ('Source', {
+            'fields': (
+                'source_response',
+            ),
+            'classes': ('collapse',)
+        }),
+        ('Template Data', {
+            'fields': (
+                'template_field_values',
+            )
+        }),
+        ('Statistics', {
+            'fields': (
+                'usage_count',
+            )
+        }),
+        ('Audit', {
+            'fields': (
+                'created_by_id',
+                'tenant_id',
+                'created_at',
+                'updated_at',
+            ),
+            'classes': ('collapse',)
+        }),
+    )
+
+    def description_short(self, obj):
+        """Display truncated description."""
+        if obj.description:
+            return obj.description[:50] + ('...' if len(obj.description) > 50 else '')
+        return '-'
+    description_short.short_description = 'Description'
+
+    def is_active_badge(self, obj):
+        """Display active status with badge."""
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 3px 10px; border-radius: 3px;">{}</span>',
+            'green' if obj.is_active else 'red',
+            'Active' if obj.is_active else 'Inactive'
+        )
+    is_active_badge.short_description = 'Status'
+
+
 # Enable autocomplete for Patient and Doctor models in other apps
 # Add these to patients/admin.py and doctors/admin.py respectively
 
@@ -1311,3 +1443,4 @@ hms_admin_site.register(ClinicalNoteTemplateField, ClinicalNoteTemplateFieldAdmi
 hms_admin_site.register(ClinicalNoteTemplateFieldOption, ClinicalNoteTemplateFieldOptionAdmin)
 hms_admin_site.register(ClinicalNoteTemplateResponse, ClinicalNoteTemplateResponseAdmin)
 hms_admin_site.register(ClinicalNoteTemplateFieldResponse, ClinicalNoteTemplateFieldResponseAdmin)
+hms_admin_site.register(ClinicalNoteResponseTemplate, ClinicalNoteResponseTemplateAdmin)

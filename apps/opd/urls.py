@@ -16,7 +16,8 @@ from .views import (
     ClinicalNoteTemplateFieldViewSet,
     ClinicalNoteTemplateFieldOptionViewSet,
     ClinicalNoteTemplateResponseViewSet,
-    ClinicalNoteTemplateFieldResponseViewSet
+    ClinicalNoteTemplateFieldResponseViewSet,
+    ClinicalNoteResponseTemplateViewSet
 )
 
 app_name = 'opd'
@@ -39,6 +40,7 @@ router.register(r'template-fields', ClinicalNoteTemplateFieldViewSet, basename='
 router.register(r'template-field-options', ClinicalNoteTemplateFieldOptionViewSet, basename='template-field-option')
 router.register(r'template-responses', ClinicalNoteTemplateResponseViewSet, basename='template-response')
 router.register(r'template-field-responses', ClinicalNoteTemplateFieldResponseViewSet, basename='template-field-response')
+router.register(r'response-templates', ClinicalNoteResponseTemplateViewSet, basename='response-template')
 
 urlpatterns = [
     path('', include(router.urls)),
