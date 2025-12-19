@@ -150,7 +150,8 @@ class PatientProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
     # ----- queryset scoping -----
     def get_queryset(self):
-        qs = PatientProfile.objects.prefetch_related('vitals', 'allergies')
+        # Get tenant-filtered queryset from TenantViewSetMixin
+        qs = super().get_queryset().prefetch_related('vitals', 'allergies')
         user = self.request.user
 
         # Patients can only see their own profile
@@ -516,25 +517,30 @@ class PatientProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         if not (is_superadmin or is_administrator):
             return Response({'success': False, 'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
 
-        total = PatientProfile.objects.count()
-        active = PatientProfile.objects.filter(status='active').count()
-        inactive = PatientProfile.objects.filter(status='inactive').count()
-        deceased = PatientProfile.objects.filter(status='deceased').count()
+        # Get base queryset filtered by tenant
+        base_qs = PatientProfile.objects.all()
+        if hasattr(request, 'tenant_id'):
+            base_qs = base_qs.filter(tenant_id=request.tenant_id)
+
+        total = base_qs.count()
+        active = base_qs.filter(status='active').count()
+        inactive = base_qs.filter(status='inactive').count()
+        deceased = base_qs.filter(status='deceased').count()
 
         import datetime
-        patients_with_insurance = PatientProfile.objects.filter(
+        patients_with_insurance = base_qs.filter(
             insurance_provider__isnull=False,
             insurance_expiry_date__gte=datetime.date.today()
         ).count()
-        avg_age = PatientProfile.objects.aggregate(avg=Avg('age'))['avg'] or 0
-        total_visits = PatientProfile.objects.aggregate(total=Sum('total_visits'))['total'] or 0
+        avg_age = base_qs.aggregate(avg=Avg('age'))['avg'] or 0
+        total_visits = base_qs.aggregate(total=Sum('total_visits'))['total'] or 0
 
-        gender_dist = {label: PatientProfile.objects.filter(gender=code).count()
+        gender_dist = {label: base_qs.filter(gender=code).count()
                        for code, label in getattr(PatientProfile, 'GENDER_CHOICES', [])}
 
         blood_dist = {}
         for bg_code, _bg_label in getattr(PatientProfile, 'BLOOD_GROUP_CHOICES', []):
-            c = PatientProfile.objects.filter(blood_group=bg_code).count()
+            c = base_qs.filter(blood_group=bg_code).count()
             if c > 0:
                 blood_dist[bg_code] = c
 
