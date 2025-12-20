@@ -1,6 +1,8 @@
 # opd/models.py
 from django.db import models
 from django.contrib.auth import get_user_model
+from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
+from django.contrib.contenttypes.models import ContentType
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.core.exceptions import ValidationError
 from django.utils import timezone
@@ -136,11 +138,19 @@ class Visit(models.Model):
         default=Decimal('0.00'),
         validators=[MinValueValidator(Decimal('0.00'))]
     )
-    
+
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
+    # Generic Relation for ClinicalNoteTemplateResponse
+    template_responses = GenericRelation(
+        'opd.ClinicalNoteTemplateResponse',
+        content_type_field='content_type',
+        object_id_field='object_id',
+        related_query_name='visit'
+    )
+
     class Meta:
         db_table = 'opd_visits'
         ordering = ['-visit_date', '-entry_time']
@@ -1545,8 +1555,8 @@ class ClinicalNoteTemplateResponse(models.Model):
     """
     Template Response Model - Actual filled form data.
 
-    Links a completed template to a visit with all field responses.
-    Supports multiple doctors filling same template on same visit via response_sequence.
+    Links a completed template to an encounter (OPD Visit or IPD Admission) with all field responses.
+    Supports multiple doctors filling same template on same encounter via response_sequence.
     """
 
     STATUS_CHOICES = [
@@ -1564,11 +1574,17 @@ class ClinicalNoteTemplateResponse(models.Model):
         help_text="Tenant identifier for multi-tenancy"
     )
 
-    visit = models.ForeignKey(
-        Visit,
+    # Encounter Integration (using GenericForeignKey)
+    content_type = models.ForeignKey(
+        ContentType,
         on_delete=models.CASCADE,
-        related_name='template_responses'
+        help_text="Type of encounter (OPD Visit or IPD Admission)"
     )
+    object_id = models.PositiveIntegerField(
+        help_text="ID of the encounter record"
+    )
+    encounter = GenericForeignKey('content_type', 'object_id')
+
     template = models.ForeignKey(
         ClinicalNoteTemplate,
         on_delete=models.PROTECT,
@@ -1642,27 +1658,41 @@ class ClinicalNoteTemplateResponse(models.Model):
         ordering = ['-response_date']
         verbose_name = 'Clinical Note Template Response'
         verbose_name_plural = 'Clinical Note Template Responses'
-        unique_together = [['visit', 'template', 'response_sequence']]
+        # UniqueConstraint for preventing duplicate template responses on same encounter
+        constraints = [
+            models.UniqueConstraint(
+                fields=['content_type', 'object_id', 'template', 'response_sequence'],
+                name='unique_response_per_encounter_template'
+            )
+        ]
         indexes = [
             models.Index(fields=['tenant_id']),
-            models.Index(fields=['visit']),
+            models.Index(fields=['content_type', 'object_id']),
             models.Index(fields=['template']),
             models.Index(fields=['status']),
             models.Index(fields=['-response_date']),
-            models.Index(fields=['visit', 'template', 'response_sequence']),
+            models.Index(fields=['content_type', 'object_id', 'template', 'response_sequence']),
             models.Index(fields=['original_assigned_doctor_id']),
             models.Index(fields=['is_reviewed']),
         ]
 
     def __str__(self):
-        return f"{self.visit.visit_number} - {self.template.name} (Seq: {self.response_sequence})"
+        """String representation with encounter information."""
+        encounter_display = "Unknown Encounter"
+        if self.encounter:
+            if hasattr(self.encounter, 'visit_number'):
+                encounter_display = f"OPD {self.encounter.visit_number}"
+            elif hasattr(self.encounter, 'admission_id'):
+                encounter_display = f"IPD {self.encounter.admission_id}"
+        return f"{encounter_display} - {self.template.name} (Seq: {self.response_sequence})"
 
     def save(self, *args, **kwargs):
         """Auto-calculate response_sequence if not set."""
         if not self.response_sequence:
-            # Get max sequence for this visit + template combination
+            # Get max sequence for this encounter + template combination
             max_seq = ClinicalNoteTemplateResponse.objects.filter(
-                visit=self.visit,
+                content_type=self.content_type,
+                object_id=self.object_id,
                 template=self.template
             ).aggregate(models.Max('response_sequence'))['response_sequence__max']
             self.response_sequence = (max_seq or 0) + 1
@@ -1682,12 +1712,12 @@ class ClinicalNoteTemplateResponse(models.Model):
         return summary
 
     @classmethod
-    def create_with_doctor_switch(cls, visit, template, current_doctor_id, original_doctor_id=None, switch_reason='', **kwargs):
+    def create_with_doctor_switch(cls, encounter, template, current_doctor_id, original_doctor_id=None, switch_reason='', **kwargs):
         """
         Create a new response with doctor switch tracking.
 
         Args:
-            visit: Visit instance
+            encounter: Encounter instance (OPD Visit or IPD Admission)
             template: ClinicalNoteTemplate instance
             current_doctor_id: UUID of current doctor filling this
             original_doctor_id: UUID of originally assigned doctor (optional)
@@ -1697,13 +1727,16 @@ class ClinicalNoteTemplateResponse(models.Model):
         Returns:
             ClinicalNoteTemplateResponse instance
         """
+        from django.contrib.contenttypes.models import ContentType
+
         response = cls(
-            visit=visit,
+            content_type=ContentType.objects.get_for_model(encounter),
+            object_id=encounter.pk,
             template=template,
             filled_by_id=current_doctor_id,
             original_assigned_doctor_id=original_doctor_id or current_doctor_id,
             doctor_switched_reason=switch_reason,
-            tenant_id=visit.tenant_id,
+            tenant_id=encounter.tenant_id,
             **kwargs
         )
         response.save()
@@ -1810,7 +1843,7 @@ class ClinicalNoteTemplateResponse(models.Model):
 
     def compare_with_response(self, other_response):
         """
-        Compare this response with another response for the same visit/template.
+        Compare this response with another response for the same encounter/template.
 
         Args:
             other_response: Another ClinicalNoteTemplateResponse instance
@@ -1818,8 +1851,10 @@ class ClinicalNoteTemplateResponse(models.Model):
         Returns:
             dict: Comparison showing what changed between responses
         """
-        if self.visit != other_response.visit or self.template != other_response.template:
-            raise ValueError("Can only compare responses from same visit and template")
+        if (self.content_type != other_response.content_type or
+            self.object_id != other_response.object_id or
+            self.template != other_response.template):
+            raise ValueError("Can only compare responses from same encounter and template")
 
         comparison = {
             'metadata': {
@@ -1953,7 +1988,14 @@ class ClinicalNoteTemplateFieldResponse(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.response.visit.visit_number} - {self.field.field_label}"
+        """String representation with encounter information."""
+        encounter_display = "Unknown"
+        if self.response.encounter:
+            if hasattr(self.response.encounter, 'visit_number'):
+                encounter_display = self.response.encounter.visit_number
+            elif hasattr(self.response.encounter, 'admission_id'):
+                encounter_display = self.response.encounter.admission_id
+        return f"{encounter_display} - {self.field.field_label}"
 
     def save(self, *args, **kwargs):
         # Track changes to full_canvas_json for version history

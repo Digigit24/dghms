@@ -361,10 +361,11 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             })
 
         elif request.method == 'POST':
-            # Create a new template response for this visit
-            # Ensure visit is set to current visit
+            # Create a new template response for this visit (OPD encounter)
+            # Set encounter fields to current visit
             data = request.data.copy()
-            data['visit'] = visit.id
+            data['encounter_type_name'] = 'opd'
+            data['encounter_id'] = visit.id
 
             serializer = ClinicalNoteTemplateResponseCreateUpdateSerializer(
                 data=data,
@@ -1346,15 +1347,15 @@ class ClinicalNoteTemplateResponseViewSet(TenantViewSetMixin, viewsets.ModelView
     """
     Clinical Note Template Response Management
 
-    Manages filled-out clinical note templates.
+    Manages filled-out clinical note templates for both OPD and IPD encounters.
     Uses Django model permissions for access control.
     """
     queryset = ClinicalNoteTemplateResponse.objects.select_related(
-        'visit__patient', 'template'
+        'template', 'content_type'
     ).prefetch_related('field_responses__field')
     permission_classes = [HMSPermission]
     hms_module = 'opd'
-    parser_classes = [MultiPartParser, FormParser, JSONParser]  # NEW: For file upload support and JSON
+    parser_classes = [MultiPartParser, FormParser, JSONParser]  # For file upload support and JSON
 
     action_permission_map = {
         'list': 'view_clinical_notes',
@@ -1363,15 +1364,15 @@ class ClinicalNoteTemplateResponseViewSet(TenantViewSetMixin, viewsets.ModelView
         'update': 'edit_clinical_note',
         'partial_update': 'edit_clinical_note',
         'destroy': 'edit_clinical_note',
-        'compare': 'view_clinical_notes',  # NEW
-        'mark_reviewed': 'edit_clinical_note',  # NEW
-        'convert_to_template': 'create_clinical_note',  # NEW
-        'apply_template': 'create_clinical_note',  # NEW
+        'compare': 'view_clinical_notes',
+        'mark_reviewed': 'edit_clinical_note',
+        'convert_to_template': 'create_clinical_note',
+        'apply_template': 'create_clinical_note',
     }
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['visit', 'template', 'status']
-    search_fields = ['visit__visit_number', 'visit__patient__first_name', 'template__name']
+    filterset_fields = ['template', 'status', 'content_type', 'object_id']
+    search_fields = ['template__name', 'template__code']
     ordering_fields = ['response_date', 'created_at']
     ordering = ['-response_date']
 
@@ -1384,30 +1385,35 @@ class ClinicalNoteTemplateResponseViewSet(TenantViewSetMixin, viewsets.ModelView
         return ClinicalNoteTemplateResponseDetailSerializer
 
     def get_queryset(self):
-        """Filter by visit or patient if provided"""
+        """Filter by encounter if provided"""
         queryset = super().get_queryset()
-        user = self.request.user
 
-        # Doctors can only see their own visit responses
-        if user.groups.filter(name='Doctor').exists():
-            if hasattr(user, 'doctor_profile'):
-                queryset = queryset.filter(visit__doctor=user.doctor_profile)
+        # Filter by encounter type and ID if provided
+        encounter_type = self.request.query_params.get('encounter_type')
+        encounter_id = self.request.query_params.get('encounter_id')
 
-        # Patients can see their own responses
-        elif user.groups.filter(name='Patient').exists():
-            if hasattr(user, 'patient_profile'):
-                queryset = queryset.filter(visit__patient=user.patient_profile)
+        if encounter_type and encounter_id:
+            from django.contrib.contenttypes.models import ContentType
 
-        # Filter by visit if provided
-        visit_id = self.request.query_params.get('visit_id')
-        if visit_id:
-            queryset = queryset.filter(visit_id=visit_id)
+            # Map encounter type to content type
+            if encounter_type.lower() == 'opd':
+                content_type = ContentType.objects.get(app_label='opd', model='visit')
+            elif encounter_type.lower() == 'ipd':
+                content_type = ContentType.objects.get(app_label='ipd', model='admission')
+            else:
+                # Invalid encounter type, return empty queryset
+                return queryset.none()
+
+            queryset = queryset.filter(
+                content_type=content_type,
+                object_id=encounter_id
+            )
 
         return queryset
 
     @extend_schema(
         summary="Compare Two Responses",
-        description="Compare two template responses for the same visit and template to see what changed",
+        description="Compare two template responses for the same encounter and template to see what changed",
         request={
             'application/json': {
                 'type': 'object',
@@ -1457,11 +1463,13 @@ class ClinicalNoteTemplateResponseViewSet(TenantViewSetMixin, viewsets.ModelView
                 'error': 'Response not found'
             }, status=status.HTTP_404_NOT_FOUND)
 
-        # Validate same visit and template
-        if response1.visit != response2.visit or response1.template != response2.template:
+        # Validate same encounter and template
+        if (response1.content_type != response2.content_type or
+            response1.object_id != response2.object_id or
+            response1.template != response2.template):
             return Response({
                 'success': False,
-                'error': 'Can only compare responses from the same visit and template'
+                'error': 'Can only compare responses from the same encounter and template'
             }, status=status.HTTP_400_BAD_REQUEST)
 
         # Get comparison

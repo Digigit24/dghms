@@ -1,5 +1,55 @@
 from rest_framework import serializers
+from django.db import models
+from django.contrib.contenttypes.fields import GenericForeignKey
+from django.contrib.contenttypes.models import ContentType
 
+
+# ===== MODEL MIXINS =====
+
+class TenantModelMixin(models.Model):
+    """
+    Abstract model mixin for multi-tenancy support.
+
+    Adds a tenant_id field to any model that inherits from it.
+    This ensures proper data isolation across different tenants.
+    """
+    tenant_id = models.UUIDField(
+        db_index=True,
+        help_text="Tenant identifier for multi-tenancy"
+    )
+
+    class Meta:
+        abstract = True
+
+
+class EncounterMixin(models.Model):
+    """
+    Abstract model mixin for linking to encounters (OPD Visits or IPD Admissions).
+
+    Uses Django's contenttypes framework to create a generic foreign key
+    that can point to either an OPD Visit or an IPD Admission.
+
+    This allows models like lab orders, prescriptions, and clinical notes
+    to be associated with any type of encounter.
+    """
+    content_type = models.ForeignKey(
+        ContentType,
+        on_delete=models.CASCADE,
+        help_text="Type of encounter (OPD Visit or IPD Admission)"
+    )
+    object_id = models.PositiveIntegerField(
+        help_text="ID of the encounter record"
+    )
+    encounter = GenericForeignKey('content_type', 'object_id')
+
+    class Meta:
+        abstract = True
+        indexes = [
+            models.Index(fields=['content_type', 'object_id']),
+        ]
+
+
+# ===== SERIALIZER MIXINS =====
 
 class TenantMixin(serializers.ModelSerializer):
     """

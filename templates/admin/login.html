@@ -215,6 +215,16 @@
                     >
                 </div>
 
+                <div class="form-group">
+                    <label for="tenant_id">Tenant ID (Optional)</label>
+                    <input
+                        type="text"
+                        id="tenant_id"
+                        name="tenant_id"
+                        placeholder="Enter tenant ID if you have multiple tenants"
+                    >
+                </div>
+
                 <button type="submit" class="btn-login" id="loginBtn">
                     Sign In
                 </button>
@@ -241,6 +251,7 @@
 
             const email = document.getElementById('email').value;
             const password = document.getElementById('password').value;
+            const tenant_id = document.getElementById('tenant_id').value;
             const loginBtn = document.getElementById('loginBtn');
             const loading = document.getElementById('loading');
             const errorMessage = document.getElementById('errorMessage');
@@ -256,12 +267,18 @@
             loading.classList.add('active');
 
             try {
+                // Build request body
+                const requestBody = { email, password };
+                if (tenant_id && tenant_id.trim() !== '') {
+                    requestBody.tenant_id = tenant_id.trim();
+                }
+
                 const response = await fetch('/auth/proxy-login/', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ email, password })
+                    body: JSON.stringify(requestBody)
                 });
 
                 const data = await response.json();

@@ -35,6 +35,9 @@ urlpatterns = [
     path('api/pharmacy/', include('apps.pharmacy.urls')),
     path('api/services/', include('apps.services.urls')),
     path('api/opd/', include('apps.opd.urls')),
+    path('api/ipd/', include('apps.ipd.urls')),
+    path('api/diagnostics/', include('apps.diagnostics.urls')),
+    path('api/panchakarma/', include('apps.panchakarma.urls')),
 
     # Nuvi API (No authentication required)
     path('api/', include('apps.nuviapi.urls')),

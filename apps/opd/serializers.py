@@ -1,6 +1,6 @@
 # opd/serializers.py
 from rest_framework import serializers
-from django.db import transaction
+from django.db import transaction, models
 from django.utils import timezone
 from decimal import Decimal
 
@@ -1083,8 +1083,8 @@ class ClinicalNoteTemplateResponseListSerializer(serializers.ModelSerializer):
     """Serializer for listing template responses"""
 
     template_name = serializers.CharField(source='template.name', read_only=True)
-    visit_number = serializers.CharField(source='visit.visit_number', read_only=True)
-    patient_name = serializers.CharField(source='visit.patient.full_name', read_only=True)
+    encounter_display = serializers.SerializerMethodField()
+    encounter_type = serializers.SerializerMethodField()
     field_response_count = serializers.IntegerField(
         source='field_responses.count',
         read_only=True
@@ -1093,22 +1093,37 @@ class ClinicalNoteTemplateResponseListSerializer(serializers.ModelSerializer):
     class Meta:
         model = ClinicalNoteTemplateResponse
         fields = [
-            'id', 'visit', 'visit_number', 'patient_name',
+            'id', 'content_type', 'object_id', 'encounter_type', 'encounter_display',
             'template', 'template_name', 'response_date',
             'field_response_count', 'status',
-            'response_sequence', 'is_reviewed', 'original_assigned_doctor_id',  # NEW
-            'doctor_switched_reason', 'canvas_data',  # NEW
+            'response_sequence', 'is_reviewed', 'original_assigned_doctor_id',
+            'doctor_switched_reason', 'canvas_data',
             'filled_by_id', 'reviewed_by_id', 'reviewed_at'
         ]
-        read_only_fields = ['response_date', 'response_sequence']
+        read_only_fields = ['response_date', 'response_sequence', 'content_type', 'object_id']
+
+    def get_encounter_display(self, obj):
+        """Get display string for the encounter."""
+        if obj.encounter:
+            if hasattr(obj.encounter, 'visit_number'):
+                return f"OPD Visit: {obj.encounter.visit_number}"
+            elif hasattr(obj.encounter, 'admission_id'):
+                return f"IPD Admission: {obj.encounter.admission_id}"
+        return "No Encounter"
+
+    def get_encounter_type(self, obj):
+        """Get the type of encounter."""
+        if obj.content_type:
+            return obj.content_type.model
+        return None
 
 
 class ClinicalNoteTemplateResponseDetailSerializer(serializers.ModelSerializer):
     """Detailed template response serializer with field responses"""
 
     template_name = serializers.CharField(source='template.name', read_only=True)
-    visit_number = serializers.CharField(source='visit.visit_number', read_only=True)
-    patient_name = serializers.CharField(source='visit.patient.full_name', read_only=True)
+    encounter_display = serializers.SerializerMethodField()
+    encounter_type = serializers.SerializerMethodField()
     field_responses = ClinicalNoteTemplateFieldResponseSerializer(many=True, read_only=True)
     summary = serializers.SerializerMethodField()
 
@@ -1117,12 +1132,28 @@ class ClinicalNoteTemplateResponseDetailSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = [
             'response_date', 'created_at', 'updated_at', 'response_sequence',
-            'filled_by_id', 'reviewed_by_id', 'reviewed_at'
+            'filled_by_id', 'reviewed_by_id', 'reviewed_at',
+            'content_type', 'object_id', 'tenant_id'
         ]
 
     def get_summary(self, obj):
         """Get generated summary"""
         return obj.generate_summary()
+
+    def get_encounter_display(self, obj):
+        """Get display string for the encounter."""
+        if obj.encounter:
+            if hasattr(obj.encounter, 'visit_number'):
+                return f"OPD Visit: {obj.encounter.visit_number}"
+            elif hasattr(obj.encounter, 'admission_id'):
+                return f"IPD Admission: {obj.encounter.admission_id}"
+        return "No Encounter"
+
+    def get_encounter_type(self, obj):
+        """Get the type of encounter."""
+        if obj.content_type:
+            return obj.content_type.model
+        return None
 
 
 class ClinicalNoteTemplateResponseCreateUpdateSerializer(serializers.ModelSerializer):
@@ -1130,13 +1161,18 @@ class ClinicalNoteTemplateResponseCreateUpdateSerializer(serializers.ModelSerial
 
     field_responses = ClinicalNoteTemplateFieldResponseCreateUpdateSerializer(many=True, required=False)
 
+    # Fields for setting encounter via encounter_type and encounter_id
+    encounter_type_name = serializers.CharField(write_only=True, required=False)
+    encounter_id = serializers.IntegerField(write_only=True, required=False)
+
     class Meta:
         model = ClinicalNoteTemplateResponse
         fields = [
-            'visit', 'template', 'status', 'field_responses',
-            'original_assigned_doctor_id', 'doctor_switched_reason',  # NEW: Multiple doctor support
-            'canvas_data',  # NEW: Canvas support
+            'encounter_type_name', 'encounter_id', 'template', 'status', 'field_responses',
+            'original_assigned_doctor_id', 'doctor_switched_reason',
+            'canvas_data', 'response_sequence'
         ]
+        read_only_fields = ['response_sequence']
 
     def validate(self, data):
         """Validate response data"""
@@ -1146,12 +1182,26 @@ class ClinicalNoteTemplateResponseCreateUpdateSerializer(serializers.ModelSerial
                 'original_assigned_doctor_id': 'Required when doctor_switched_reason is provided'
             })
 
+        # Validate encounter fields
+        if 'encounter_type_name' in data and 'encounter_id' not in data:
+            raise serializers.ValidationError({
+                'encounter_id': 'Required when encounter_type_name is provided'
+            })
+        if 'encounter_id' in data and 'encounter_type_name' not in data:
+            raise serializers.ValidationError({
+                'encounter_type_name': 'Required when encounter_id is provided'
+            })
+
         return data
 
     @transaction.atomic
     def create(self, validated_data):
-        """Create template response with field responses"""
+        """Create template response with field responses and auto-sequence logic"""
+        from django.contrib.contenttypes.models import ContentType
+
         field_responses_data = validated_data.pop('field_responses', [])
+        encounter_type_name = validated_data.pop('encounter_type_name', None)
+        encounter_id = validated_data.pop('encounter_id', None)
 
         request = self.context.get('request')
 
@@ -1163,7 +1213,31 @@ class ClinicalNoteTemplateResponseCreateUpdateSerializer(serializers.ModelSerial
         if request and hasattr(request, 'user_id'):
             validated_data['filled_by_id'] = request.user_id
 
-        # Create response
+        # Set content_type and object_id from encounter fields
+        if encounter_type_name and encounter_id:
+            if encounter_type_name.lower() == 'opd':
+                content_type = ContentType.objects.get(app_label='opd', model='visit')
+            elif encounter_type_name.lower() == 'ipd':
+                content_type = ContentType.objects.get(app_label='ipd', model='admission')
+            else:
+                raise serializers.ValidationError({
+                    'encounter_type_name': f'Invalid encounter type: {encounter_type_name}. Must be "opd" or "ipd".'
+                })
+
+            validated_data['content_type'] = content_type
+            validated_data['object_id'] = encounter_id
+
+        # Auto-calculate response_sequence if not provided
+        # This is additional logic at serializer level (model also has it)
+        if 'response_sequence' not in validated_data or not validated_data.get('response_sequence'):
+            max_seq = ClinicalNoteTemplateResponse.objects.filter(
+                content_type=validated_data['content_type'],
+                object_id=validated_data['object_id'],
+                template=validated_data['template']
+            ).aggregate(models.Max('response_sequence'))['response_sequence__max']
+            validated_data['response_sequence'] = (max_seq or 0) + 1
+
+        # Create response (model save() will also calculate sequence if needed)
         response = ClinicalNoteTemplateResponse.objects.create(**validated_data)
 
         # Create field responses

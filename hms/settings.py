@@ -106,6 +106,9 @@ INSTALLED_APPS = [
     'apps.pharmacy',
     'apps.services',
     'apps.opd',
+    'apps.ipd',
+    'apps.diagnostics',
+    'apps.panchakarma',
     'apps.nuviapi',
 ]
 

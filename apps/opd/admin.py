@@ -1087,11 +1087,11 @@ class ClinicalNoteTemplateResponseAdmin(TenantModelAdmin):
     """Admin interface for ClinicalNoteTemplateResponse model (Read-Only)."""
 
     list_display = [
-        'visit',
+        'encounter_display_admin',
         'template',
-        'response_sequence',  # NEW
+        'response_sequence',
         'status_badge',
-        'is_reviewed_badge',  # NEW
+        'is_reviewed_badge',
         'response_date',
         'filled_by_id',
         'reviewed_by_id',
@@ -1099,20 +1099,22 @@ class ClinicalNoteTemplateResponseAdmin(TenantModelAdmin):
     ]
     list_filter = [
         'status',
-        'is_reviewed',  # NEW
+        'is_reviewed',
         'response_date',
         'template',
-        'response_sequence',  # NEW
+        'response_sequence',
+        'content_type',
     ]
     search_fields = [
-        'visit__visit_number',
         'template__name',
         'template__code',
         'filled_by_id',
-        'doctor_switched_reason',  # NEW
+        'doctor_switched_reason',
     ]
     readonly_fields = [
-        'visit',
+        'content_type',
+        'object_id',
+        'encounter_display_admin',
         'template',
         'response_date',
         'status',
@@ -1124,24 +1126,40 @@ class ClinicalNoteTemplateResponseAdmin(TenantModelAdmin):
         'updated_at',
         'tenant_id',
         'field_response_count',
-        'response_sequence',  # NEW
-        'is_reviewed',  # NEW
-        'original_assigned_doctor_id',  # NEW
-        'doctor_switched_reason',  # NEW
-        'canvas_data',  # NEW
+        'response_sequence',
+        'is_reviewed',
+        'original_assigned_doctor_id',
+        'doctor_switched_reason',
+        'canvas_data',
     ]
+
+    def encounter_display_admin(self, obj):
+        """Display encounter information in admin."""
+        if obj.encounter:
+            if hasattr(obj.encounter, 'visit_number'):
+                return f"OPD: {obj.encounter.visit_number}"
+            elif hasattr(obj.encounter, 'admission_id'):
+                return f"IPD: {obj.encounter.admission_id}"
+        return "No Encounter"
+    encounter_display_admin.short_description = 'Encounter'
     autocomplete_fields = []
     inlines = [ClinicalNoteTemplateFieldResponseInline]
 
     fieldsets = (
+        ('Encounter Information', {
+            'fields': (
+                'content_type',
+                'object_id',
+                'encounter_display_admin',
+            )
+        }),
         ('Response Information', {
             'fields': (
-                'visit',
                 'template',
-                'response_sequence',  # NEW
+                'response_sequence',
                 'response_date',
                 'status',
-                'is_reviewed',  # NEW
+                'is_reviewed',
             )
         }),
         ('Multiple Doctor Support', {  # NEW

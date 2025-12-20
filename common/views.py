@@ -162,8 +162,9 @@ def superadmin_proxy_login_view(request):
         data = json.loads(request.body)
         email = data.get('email')
         password = data.get('password')
+        tenant_id = data.get('tenant_id')  # Optional tenant_id
 
-        logger.info(f"Login attempt for email: {email}")
+        logger.info(f"Login attempt for email: {email}, tenant_id: {tenant_id or 'not specified'}")
 
         if not email or not password:
             return JsonResponse({
@@ -176,10 +177,18 @@ def superadmin_proxy_login_view(request):
 
         logger.info(f"Calling SuperAdmin API: {login_url}")
 
-        response = requests.post(login_url, json={
+        # Build request payload
+        login_payload = {
             'email': email,
             'password': password
-        }, timeout=10)
+        }
+
+        # Include tenant_id if provided
+        if tenant_id:
+            login_payload['tenant_id'] = tenant_id
+            logger.info(f"Including tenant_id in login request: {tenant_id}")
+
+        response = requests.post(login_url, json=login_payload, timeout=10)
 
         logger.info(f"SuperAdmin API response status: {response.status_code}")
 
