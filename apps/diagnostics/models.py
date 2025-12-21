@@ -1,5 +1,7 @@
 # diagnostics/models.py
 from django.db import models
+from django.contrib.contenttypes.fields import GenericForeignKey
+from django.contrib.contenttypes.models import ContentType
 from django.core.validators import MinValueValidator
 from decimal import Decimal
 from django.utils import timezone
@@ -59,6 +61,13 @@ class Requisition(TenantModelMixin, EncounterMixin):
     Requisition Model - Inherits from EncounterMixin.
     Fields: patient (FK), requesting_doctor_id (UUID), status, priority.
     """
+    REQUISITION_TYPE_CHOICES = [
+        ('investigation', 'Investigation'),
+        ('medicine', 'Medicine'),
+        ('procedure', 'Procedure'),
+        ('package', 'Package'),
+    ]
+
     STATUS_CHOICES = [
         ('ordered', 'Ordered'),
         ('sample_collected', 'Sample Collected'),
@@ -77,6 +86,13 @@ class Requisition(TenantModelMixin, EncounterMixin):
         unique=True,
         blank=True,
         help_text="Unique requisition identifier"
+    )
+
+    requisition_type = models.CharField(
+        max_length=20,
+        choices=REQUISITION_TYPE_CHOICES,
+        default='investigation',
+        help_text="Type of requisition: investigation, medicine, procedure, or package"
     )
 
     patient = models.ForeignKey(
@@ -179,10 +195,25 @@ class DiagnosticOrder(TenantModelMixin):
     )
     
     price = models.DecimalField(
-        max_digits=10, 
-        decimal_places=2, 
+        max_digits=10,
+        decimal_places=2,
         default=Decimal('0.00')
     )
+
+    # GenericForeignKey to link to OPDBillItem or IPDBillItem
+    content_type = models.ForeignKey(
+        ContentType,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text="Type of bill item (OPDBillItem or IPDBillItem)"
+    )
+    object_id = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="ID of the bill item"
+    )
+    content_object = GenericForeignKey('content_type', 'object_id')
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -191,6 +222,9 @@ class DiagnosticOrder(TenantModelMixin):
         db_table = 'diag_orders'
         verbose_name = 'Diagnostic Order'
         verbose_name_plural = 'Diagnostic Orders'
+        indexes = [
+            models.Index(fields=['content_type', 'object_id']),
+        ]
 
     def __str__(self):
         return f"{self.investigation.name} ({self.status})"
@@ -198,6 +232,223 @@ class DiagnosticOrder(TenantModelMixin):
     def save(self, *args, **kwargs):
         if not self.price and self.investigation:
             self.price = self.investigation.base_charge
+        super().save(*args, **kwargs)
+
+class MedicineOrder(TenantModelMixin):
+    """
+    MedicineOrder: Links Requisition to PharmacyProduct.
+    Tracks medicine orders with quantity and price.
+    """
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('dispensed', 'Dispensed'),
+        ('completed', 'Completed'),
+        ('cancelled', 'Cancelled'),
+    ]
+
+    requisition = models.ForeignKey(
+        Requisition,
+        on_delete=models.CASCADE,
+        related_name='medicine_orders'
+    )
+    product = models.ForeignKey(
+        'pharmacy.PharmacyProduct',
+        on_delete=models.PROTECT,
+        related_name='medicine_orders'
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='pending'
+    )
+    quantity = models.PositiveIntegerField(
+        default=1,
+        help_text="Quantity of medicine ordered"
+    )
+
+    price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal('0.00')
+    )
+
+    # GenericForeignKey to link to OPDBillItem or IPDBillItem
+    content_type = models.ForeignKey(
+        ContentType,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text="Type of bill item (OPDBillItem or IPDBillItem)"
+    )
+    object_id = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="ID of the bill item"
+    )
+    content_object = GenericForeignKey('content_type', 'object_id')
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'diag_medicine_orders'
+        verbose_name = 'Medicine Order'
+        verbose_name_plural = 'Medicine Orders'
+        indexes = [
+            models.Index(fields=['content_type', 'object_id']),
+        ]
+
+    def __str__(self):
+        return f"{self.product.product_name} x{self.quantity} ({self.status})"
+
+    def save(self, *args, **kwargs):
+        if not self.price and self.product:
+            self.price = self.product.selling_price or self.product.mrp
+        super().save(*args, **kwargs)
+
+class ProcedureOrder(TenantModelMixin):
+    """
+    ProcedureOrder: Links Requisition to ProcedureMaster.
+    Tracks procedure orders with quantity and price.
+    """
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('scheduled', 'Scheduled'),
+        ('completed', 'Completed'),
+        ('cancelled', 'Cancelled'),
+    ]
+
+    requisition = models.ForeignKey(
+        Requisition,
+        on_delete=models.CASCADE,
+        related_name='procedure_orders'
+    )
+    procedure = models.ForeignKey(
+        'opd.ProcedureMaster',
+        on_delete=models.PROTECT,
+        related_name='procedure_orders'
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='pending'
+    )
+    quantity = models.PositiveIntegerField(
+        default=1,
+        help_text="Number of times procedure is to be performed"
+    )
+
+    price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal('0.00')
+    )
+
+    # GenericForeignKey to link to OPDBillItem or IPDBillItem
+    content_type = models.ForeignKey(
+        ContentType,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text="Type of bill item (OPDBillItem or IPDBillItem)"
+    )
+    object_id = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="ID of the bill item"
+    )
+    content_object = GenericForeignKey('content_type', 'object_id')
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'diag_procedure_orders'
+        verbose_name = 'Procedure Order'
+        verbose_name_plural = 'Procedure Orders'
+        indexes = [
+            models.Index(fields=['content_type', 'object_id']),
+        ]
+
+    def __str__(self):
+        return f"{self.procedure.name} x{self.quantity} ({self.status})"
+
+    def save(self, *args, **kwargs):
+        if not self.price and self.procedure:
+            self.price = self.procedure.default_charge
+        super().save(*args, **kwargs)
+
+class PackageOrder(TenantModelMixin):
+    """
+    PackageOrder: Links Requisition to ProcedurePackage.
+    Tracks package orders with quantity and price.
+    """
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('scheduled', 'Scheduled'),
+        ('in_progress', 'In Progress'),
+        ('completed', 'Completed'),
+        ('cancelled', 'Cancelled'),
+    ]
+
+    requisition = models.ForeignKey(
+        Requisition,
+        on_delete=models.CASCADE,
+        related_name='package_orders'
+    )
+    package = models.ForeignKey(
+        'opd.ProcedurePackage',
+        on_delete=models.PROTECT,
+        related_name='package_orders'
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='pending'
+    )
+    quantity = models.PositiveIntegerField(
+        default=1,
+        help_text="Number of packages ordered"
+    )
+
+    price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal('0.00')
+    )
+
+    # GenericForeignKey to link to OPDBillItem or IPDBillItem
+    content_type = models.ForeignKey(
+        ContentType,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text="Type of bill item (OPDBillItem or IPDBillItem)"
+    )
+    object_id = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="ID of the bill item"
+    )
+    content_object = GenericForeignKey('content_type', 'object_id')
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'diag_package_orders'
+        verbose_name = 'Package Order'
+        verbose_name_plural = 'Package Orders'
+        indexes = [
+            models.Index(fields=['content_type', 'object_id']),
+        ]
+
+    def __str__(self):
+        return f"{self.package.name} x{self.quantity} ({self.status})"
+
+    def save(self, *args, **kwargs):
+        if not self.price and self.package:
+            self.price = self.package.discounted_charge
         super().save(*args, **kwargs)
 
 class LabReport(TenantModelMixin):
