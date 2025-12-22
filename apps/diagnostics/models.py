@@ -162,7 +162,7 @@ class Requisition(TenantModelMixin, EncounterMixin):
 
 class DiagnosticOrder(TenantModelMixin):
     """
-    DiagnosticOrder: Links Requisition to Investigation. 
+    DiagnosticOrder: Links Requisition to Investigation.
     Tracks individual test status and sample_id.
     """
     STATUS_CHOICES = [
@@ -193,7 +193,7 @@ class DiagnosticOrder(TenantModelMixin):
         blank=True,
         help_text="Barcode or ID of the sample"
     )
-    
+
     price = models.DecimalField(
         max_digits=10,
         decimal_places=2,
@@ -201,19 +201,20 @@ class DiagnosticOrder(TenantModelMixin):
     )
 
     # GenericForeignKey to link to OPDBillItem or IPDBillItem
-    content_type = models.ForeignKey(
+    bill_item_content_type = models.ForeignKey(
         ContentType,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        help_text="Type of bill item (OPDBillItem or IPDBillItem)"
+        help_text="Type of bill item (OPDBillItem or IPDBillItem)",
+        related_name='+'
     )
-    object_id = models.PositiveIntegerField(
+    bill_item_object_id = models.PositiveIntegerField(
         null=True,
         blank=True,
         help_text="ID of the bill item"
     )
-    content_object = GenericForeignKey('content_type', 'object_id')
+    bill_item_link = GenericForeignKey('bill_item_content_type', 'bill_item_object_id')
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -223,7 +224,7 @@ class DiagnosticOrder(TenantModelMixin):
         verbose_name = 'Diagnostic Order'
         verbose_name_plural = 'Diagnostic Orders'
         indexes = [
-            models.Index(fields=['content_type', 'object_id']),
+            models.Index(fields=['bill_item_content_type', 'bill_item_object_id']),
         ]
 
     def __str__(self):
@@ -273,19 +274,20 @@ class MedicineOrder(TenantModelMixin):
     )
 
     # GenericForeignKey to link to OPDBillItem or IPDBillItem
-    content_type = models.ForeignKey(
+    bill_item_content_type = models.ForeignKey(
         ContentType,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        help_text="Type of bill item (OPDBillItem or IPDBillItem)"
+        help_text="Type of bill item (OPDBillItem or IPDBillItem)",
+        related_name='+'
     )
-    object_id = models.PositiveIntegerField(
+    bill_item_object_id = models.PositiveIntegerField(
         null=True,
         blank=True,
         help_text="ID of the bill item"
     )
-    content_object = GenericForeignKey('content_type', 'object_id')
+    bill_item_link = GenericForeignKey('bill_item_content_type', 'bill_item_object_id')
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -295,7 +297,7 @@ class MedicineOrder(TenantModelMixin):
         verbose_name = 'Medicine Order'
         verbose_name_plural = 'Medicine Orders'
         indexes = [
-            models.Index(fields=['content_type', 'object_id']),
+            models.Index(fields=['bill_item_content_type', 'bill_item_object_id']),
         ]
 
     def __str__(self):
@@ -345,19 +347,20 @@ class ProcedureOrder(TenantModelMixin):
     )
 
     # GenericForeignKey to link to OPDBillItem or IPDBillItem
-    content_type = models.ForeignKey(
+    bill_item_content_type = models.ForeignKey(
         ContentType,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        help_text="Type of bill item (OPDBillItem or IPDBillItem)"
+        help_text="Type of bill item (OPDBillItem or IPDBillItem)",
+        related_name='+'
     )
-    object_id = models.PositiveIntegerField(
+    bill_item_object_id = models.PositiveIntegerField(
         null=True,
         blank=True,
         help_text="ID of the bill item"
     )
-    content_object = GenericForeignKey('content_type', 'object_id')
+    bill_item_link = GenericForeignKey('bill_item_content_type', 'bill_item_object_id')
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -367,7 +370,7 @@ class ProcedureOrder(TenantModelMixin):
         verbose_name = 'Procedure Order'
         verbose_name_plural = 'Procedure Orders'
         indexes = [
-            models.Index(fields=['content_type', 'object_id']),
+            models.Index(fields=['bill_item_content_type', 'bill_item_object_id']),
         ]
 
     def __str__(self):
@@ -418,19 +421,20 @@ class PackageOrder(TenantModelMixin):
     )
 
     # GenericForeignKey to link to OPDBillItem or IPDBillItem
-    content_type = models.ForeignKey(
+    bill_item_content_type = models.ForeignKey(
         ContentType,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        help_text="Type of bill item (OPDBillItem or IPDBillItem)"
+        help_text="Type of bill item (OPDBillItem or IPDBillItem)",
+        related_name='+'
     )
-    object_id = models.PositiveIntegerField(
+    bill_item_object_id = models.PositiveIntegerField(
         null=True,
         blank=True,
         help_text="ID of the bill item"
     )
-    content_object = GenericForeignKey('content_type', 'object_id')
+    bill_item_link = GenericForeignKey('bill_item_content_type', 'bill_item_object_id')
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -440,7 +444,7 @@ class PackageOrder(TenantModelMixin):
         verbose_name = 'Package Order'
         verbose_name_plural = 'Package Orders'
         indexes = [
-            models.Index(fields=['content_type', 'object_id']),
+            models.Index(fields=['bill_item_content_type', 'bill_item_object_id']),
         ]
 
     def __str__(self):

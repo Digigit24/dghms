@@ -12,6 +12,8 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.AlterField(
+
+            
             model_name='appointment',
             name='appointment_type',
             field=models.ForeignKey(

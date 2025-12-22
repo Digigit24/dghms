@@ -9,6 +9,7 @@ from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
+import django_filters
 
 from common.drf_auth import HMSPermission, IsAuthenticated
 from common.mixins import TenantViewSetMixin
@@ -23,9 +24,8 @@ from drf_spectacular.utils import (
 )
 
 from .models import (
-    Visit, OPDBill, ProcedureMaster, ProcedurePackage,
-    ProcedureBill, ProcedureBillItem, ClinicalNote,
-    VisitFinding, VisitAttachment,
+    ClinicalNote, Visit, OPDBill, ProcedureMaster, ProcedurePackage,
+    VisitFinding, VisitAttachment, OPDBillItem,
     ClinicalNoteTemplateGroup, ClinicalNoteTemplate,
     ClinicalNoteTemplateField, ClinicalNoteTemplateFieldOption,
     ClinicalNoteTemplateResponse, ClinicalNoteTemplateFieldResponse,
@@ -33,13 +33,12 @@ from .models import (
 )
 from .serializers import (
     VisitListSerializer, VisitDetailSerializer, VisitCreateUpdateSerializer,
-    OPDBillListSerializer, OPDBillDetailSerializer, OPDBillCreateUpdateSerializer,
+    OPDBillListSerializer, OPDBillDetailSerializer, OPDBillCreateUpdateSerializer, OPDBillItemSerializer,
     ProcedureMasterListSerializer, ProcedureMasterDetailSerializer,
     ProcedureMasterCreateUpdateSerializer,
     ProcedurePackageListSerializer, ProcedurePackageDetailSerializer,
     ProcedurePackageCreateUpdateSerializer,
-    ProcedureBillListSerializer, ProcedureBillDetailSerializer,
-    ProcedureBillCreateUpdateSerializer,
+  
     ClinicalNoteListSerializer, ClinicalNoteDetailSerializer,
     ClinicalNoteCreateUpdateSerializer,
     VisitFindingListSerializer, VisitFindingDetailSerializer,
@@ -119,7 +118,7 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     queryset = Visit.objects.select_related(
         'patient', 'doctor', 'appointment', 'referred_by'
     ).prefetch_related(
-        'procedure_bills', 'findings', 'attachments'
+         'findings', 'attachments'
     )
     permission_classes = [HMSPermission]
     hms_module = 'opd'  # Maps to permissions.hms.opd in JWT
@@ -136,14 +135,22 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         'queue': 'manage_queue',
         'stats': 'view_visits',
         'template_responses': 'view_visits',  # GET/POST template responses
+        'unbilled_requisitions': 'view_visits',
+        'sync_clinical_charges': 'edit_visit',
     }
     
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['patient', 'doctor', 'status', 'payment_status', 'visit_type', 'visit_date']
     search_fields = ['visit_number', 'patient__first_name', 'patient__last_name']
     ordering_fields = ['visit_date', 'entry_time', 'queue_position', 'total_amount']
-    ordering = ['-visit_date', '-entry_time']
-    
+    def get_permissions(self):
+        """
+        Instantiates and returns the list of permissions that this view requires.
+        """
+        if self.action == 'sync_clinical_charges':
+            return [IsAuthenticated()]
+        return super().get_permissions()
+
     def get_serializer_class(self):
         """Return appropriate serializer based on action"""
         if self.action == 'list':
@@ -385,10 +392,297 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                 'errors': serializer.errors
             }, status=status.HTTP_400_BAD_REQUEST)
 
+    @extend_schema(
+        summary="Preview Unbilled Requisitions",
+        description="GET: Preview all unbilled clinical orders (diagnostics, medicines, procedures, therapies) for this visit",
+        responses={
+            200: OpenApiResponse(description='List of unbilled requisitions with their orders'),
+        },
+        tags=['OPD - Visits', 'OPD - Billing']
+    )
+    @action(detail=True, methods=['get'])
+    def unbilled_requisitions(self, request, pk=None):
+        """
+        Preview all unbilled orders for this visit.
+
+        Returns requisitions and orders that haven't been linked to bill items yet.
+        Useful for showing what will be imported when sync_clinical_charges is called.
+        """
+        from django.contrib.contenttypes.models import ContentType
+        from apps.diagnostics.models import (
+            Requisition, DiagnosticOrder, MedicineOrder,
+            ProcedureOrder, PackageOrder
+        )
+        from apps.panchakarma.models import PanchakarmaOrder
+
+        visit = self.get_object()
+        visit_ct = ContentType.objects.get_for_model(visit)
+
+        # Get requisitions for this visit
+        requisitions = Requisition.objects.filter(
+            tenant_id=request.tenant_id,
+            content_type=visit_ct,
+            object_id=visit.pk
+        ).prefetch_related(
+            'orders', 'medicine_orders', 'procedure_orders', 'package_orders'
+        )
+
+        unbilled_items = []
+
+        # Process each requisition
+        for req in requisitions:
+            req_data = {
+                'requisition_id': req.id,
+                'requisition_number': req.requisition_number,
+                'requisition_type': req.requisition_type,
+                'status': req.status,
+                'order_date': req.order_date,
+                'unbilled_orders': []
+            }
+
+            # DiagnosticOrders
+            for order in req.orders.filter(bill_item_content_type__isnull=True).select_related('investigation'):
+                req_data['unbilled_orders'].append({
+                    'type': 'diagnostic',
+                    'id': order.id,
+                    'name': order.investigation.name,
+                    'category': order.investigation.category,
+                    'price': str(order.price),
+                    'status': order.status
+                })
+
+            # MedicineOrders
+            for order in req.medicine_orders.filter(bill_item_content_type__isnull=True).select_related('product'):
+                req_data['unbilled_orders'].append({
+                    'type': 'medicine',
+                    'id': order.id,
+                    'name': order.product.product_name,
+                    'quantity': order.quantity,
+                    'price': str(order.price),
+                    'total': str(order.price * order.quantity),
+                    'status': order.status
+                })
+
+            # ProcedureOrders
+            for order in req.procedure_orders.filter(bill_item_content_type__isnull=True).select_related('procedure'):
+                req_data['unbilled_orders'].append({
+                    'type': 'procedure',
+                    'id': order.id,
+                    'name': order.procedure.name,
+                    'quantity': order.quantity,
+                    'price': str(order.price),
+                    'total': str(order.price * order.quantity),
+                    'status': order.status
+                })
+
+            # PackageOrders
+            for order in req.package_orders.filter(bill_item_content_type__isnull=True).select_related('package'):
+                req_data['unbilled_orders'].append({
+                    'type': 'package',
+                    'id': order.id,
+                    'name': order.package.name,
+                    'quantity': order.quantity,
+                    'price': str(order.price),
+                    'total': str(order.price * order.quantity),
+                    'status': order.status
+                })
+
+            if req_data['unbilled_orders']:
+                unbilled_items.append(req_data)
+
+        # Also check for PanchakarmaOrders directly linked to this visit
+        panchakarma_orders = PanchakarmaOrder.objects.filter(
+            tenant_id=request.tenant_id,
+            content_type=visit_ct,
+            object_id=visit.pk,
+            bill_item_content_type__isnull=True
+        ).select_related('therapy')
+
+        if panchakarma_orders.exists():
+            therapy_data = {
+                'requisition_id': None,
+                'requisition_number': 'Direct Therapy Orders',
+                'requisition_type': 'therapy',
+                'status': 'ordered',
+                'unbilled_orders': []
+            }
+
+            for order in panchakarma_orders:
+                therapy_data['unbilled_orders'].append({
+                    'type': 'therapy',
+                    'id': order.id,
+                    'name': order.therapy.name,
+                    'price': str(order.therapy.base_charge),
+                    'status': order.status
+                })
+
+            unbilled_items.append(therapy_data)
+
+        # Calculate totals
+        total_unbilled = sum(len(req['unbilled_orders']) for req in unbilled_items)
+        estimated_amount = sum(
+            float(order.get('total', order.get('price', 0)))
+            for req in unbilled_items
+            for order in req['unbilled_orders']
+        )
+
+        return Response({
+            'success': True,
+            'visit_id': visit.id,
+            'visit_number': visit.visit_number,
+            'total_unbilled_items': total_unbilled,
+            'estimated_amount': estimated_amount,
+            'requisitions': unbilled_items
+        })
+
+    @extend_schema(
+        summary="Sync Clinical Charges to Billing",
+        description="POST: Import all unbilled clinical orders to OPD bill items. Creates OPDBillItem entries and links them to source orders.",
+        responses={
+            200: OpenApiResponse(description='Successfully synced charges'),
+        },
+        tags=['OPD - Visits', 'OPD - Billing']
+    )
+    @action(detail=True, methods=['post'])
+    def sync_clinical_charges(self, request, pk=None):
+        """
+        Sync all clinical charges (orders) to OPD billing items.
+        This action:
+        1. Finds or creates a master OPDBill for the visit.
+        2. Identifies all unbilled items (where bill_item_link is null).
+        3. Creates OPDBillItem entries for them, linked to the master bill.
+        4. Updates the source Orders to link them to these new Bill Items.
+        5. Bill totals are updated automatically by signals.
+        """
+        from django.contrib.contenttypes.models import ContentType
+        from apps.diagnostics.models import (
+            Requisition, DiagnosticOrder, MedicineOrder,
+            ProcedureOrder, PackageOrder
+        )
+        from apps.panchakarma.models import PanchakarmaOrder
+        from .models import OPDBill, OPDBillItem
+        from .serializers import OPDBillItemSerializer
+
+        visit = self.get_object()
+
+        if str(visit.tenant_id) != str(request.tenant_id):
+            return Response(
+                {'success': False, 'error': 'Access denied'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        created_items_count = 0
+        updated_orders_count = 0
+
+        with transaction.atomic():
+            # Get or create the single OPDBill for this visit
+            # Try to find an existing unpaid or partially paid OPDBill for this visit.
+            # If multiple exist, pick the most recent one.
+            opd_bill_qs = OPDBill.objects.filter(
+                visit=visit,
+                tenant_id=request.tenant_id,
+                payment_status__in=['unpaid', 'partial']
+            ).order_by('-created_at') # Most recent first
+
+            opd_bill = opd_bill_qs.first()
+
+            if not opd_bill:
+                # If no suitable bill found, create a new one.
+                # Ensure doctor is assigned only if available from visit
+                doctor_to_assign = visit.doctor if visit.doctor else None
+                opd_bill = OPDBill.objects.create(
+                    visit=visit,
+                    tenant_id=request.tenant_id,
+                    doctor=doctor_to_assign, # Assign doctor from visit or None
+                    billed_by_id=request.user.id,
+                    # Other fields will be set by _calculate_derived_totals or have defaults
+                )
+
+            # Get ContentType for OPDBillItem
+            bill_item_ct = ContentType.objects.get_for_model(OPDBillItem)
+            visit_ct = ContentType.objects.get_for_model(visit)
+
+            # Get all requisitions for this visit
+            requisitions = Requisition.objects.filter(
+                tenant_id=request.tenant_id,
+                content_type=visit_ct,
+                object_id=visit.pk
+            )
+
+            # Process DiagnosticOrders
+            diagnostic_orders = DiagnosticOrder.objects.filter(
+                tenant_id=request.tenant_id,
+                requisition__in=requisitions,
+                bill_item_content_type__isnull=True
+            ).select_related('investigation')
+
+            for order in diagnostic_orders:
+                item = OPDBillItem.objects.create(
+                    bill=opd_bill,
+                    tenant_id=request.tenant_id,
+                    item_name=order.investigation.name,
+                    source='Lab' if order.investigation.category == 'laboratory' else 'Radiology',
+                    quantity=1,
+                    unit_price=order.price,
+                    system_calculated_price=order.price,
+                    origin_content_type=ContentType.objects.get_for_model(order),
+                    origin_object_id=order.pk,
+                    notes=f"Test: {order.investigation.code}"
+                )
+                order.bill_item_link = item
+                order.save(update_fields=['bill_item_content_type', 'bill_item_object_id'])
+                created_items_count += 1
+                updated_orders_count += 1
+            
+            # Process other order types similarly...
+            # (MedicineOrder, ProcedureOrder, PackageOrder, PanchakarmaOrder)
+            # Example for MedicineOrder:
+            medicine_orders = MedicineOrder.objects.filter(
+                tenant_id=request.tenant_id,
+                requisition__in=requisitions,
+                bill_item_content_type__isnull=True
+            ).select_related('product')
+
+            for order in medicine_orders:
+                item = OPDBillItem.objects.create(
+                    bill=opd_bill,
+                    tenant_id=request.tenant_id,
+                    item_name=order.product.product_name,
+                    source='Pharmacy',
+                    quantity=order.quantity,
+                    unit_price=order.price,
+                    system_calculated_price=order.price,
+                    origin_content_type=ContentType.objects.get_for_model(order),
+                    origin_object_id=order.pk,
+                    notes=f"Medicine - Qty: {order.quantity}"
+                )
+                order.bill_item_link = item
+                order.save(update_fields=['bill_item_content_type', 'bill_item_object_id'])
+                created_items_count += 1
+                updated_orders_count += 1
+
+            # Final bill calculation is handled by signals
+
+        return Response({
+            'success': True,
+            'message': f'Synced {created_items_count} clinical charges to bill {opd_bill.bill_number}',
+            'created_items': created_items_count,
+            'updated_orders': updated_orders_count,
+            'bill_id': opd_bill.id
+        })
+
 
 # ============================================================================
 # OPD BILL VIEWSET
 # ============================================================================
+
+class OPDBillFilter(django_filters.FilterSet):
+    patient = django_filters.NumberFilter(field_name='visit__patient_id')
+
+    class Meta:
+        model = OPDBill
+        fields = ['patient', 'visit', 'doctor', 'payment_status', 'opd_type', 'charge_type']
+
 
 @extend_schema_view(
     list=extend_schema(
@@ -424,7 +718,7 @@ class OPDBillViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """
     queryset = OPDBill.objects.select_related(
         'visit__patient', 'doctor'
-    )
+    ).prefetch_related('items')
     permission_classes = [HMSPermission]
     hms_module = 'opd'
 
@@ -439,7 +733,7 @@ class OPDBillViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     }
     
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['visit', 'doctor', 'payment_status', 'opd_type', 'charge_type']
+    filterset_class = OPDBillFilter
     search_fields = ['bill_number', 'visit__visit_number', 'visit__patient__first_name']
     ordering_fields = ['bill_date', 'total_amount', 'payment_status']
     ordering = ['-bill_date']
@@ -570,6 +864,119 @@ class OPDBillViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
 
 # ============================================================================
+# OPD BILL ITEM VIEWSET
+# ============================================================================
+
+@extend_schema_view(
+    list=extend_schema(
+        summary="List OPD Bill Items",
+        description="Get paginated list of OPD bill items with filtering",
+        parameters=[
+            OpenApiParameter(name='bill', type=int, description='Filter by OPDBill ID'),
+            OpenApiParameter(name='source', type=str, description='Filter by source (e.g., Pharmacy, Lab, Other)'),
+            OpenApiParameter(name='search', type=str, description='Search by item name'),
+        ],
+        tags=['OPD - Bills']
+    ),
+    retrieve=extend_schema(
+        summary="Get OPD Bill Item Details",
+        description="Retrieve detailed OPD bill item information",
+        tags=['OPD - Bills']
+    ),
+    create=extend_schema(
+        summary="Create OPD Bill Item",
+        description="Create a new OPD bill item (e.g., for miscellaneous charges). This manually adds an item to an existing OPDBill.",
+        tags=['OPD - Bills']
+    ),
+    update=extend_schema(
+        summary="Update OPD Bill Item",
+        description="Update an existing OPD bill item",
+        tags=['OPD - Bills']
+    ),
+    partial_update=extend_schema(
+        summary="Partial Update OPD Bill Item",
+        description="Partially update an existing OPD bill item",
+        tags=['OPD - Bills']
+    ),
+    destroy=extend_schema(
+        summary="Delete OPD Bill Item",
+        description="Delete an OPD bill item",
+        tags=['OPD - Bills']
+    )
+)
+class OPDBillItemViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
+    """
+    OPD Bill Item Management
+
+    Handles individual line items within OPD bills.
+    Allows for manual creation of items for miscellaneous charges.
+    Uses Django model permissions for access control.
+    """
+    queryset = OPDBillItem.objects.all()
+    permission_classes = [HMSPermission]
+    hms_module = 'opd'
+
+    action_permission_map = {
+        'list': 'view_bills',
+        'retrieve': 'view_bills',
+        'create': 'create_bill',
+        'update': 'edit_bill',
+        'partial_update': 'edit_bill',
+        'destroy': 'edit_bill',
+    }
+    
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['bill', 'source']
+    search_fields = ['item_name', 'notes']
+    ordering_fields = ['id', 'bill', 'source', 'item_name']
+    ordering = ['bill', 'id']
+
+    def get_serializer_class(self):
+        """Return appropriate serializer"""
+        return OPDBillItemSerializer
+
+    def perform_create(self, serializer):
+        """
+        Custom create to add tenant_id and ensure bill recalculation.
+        When a new item is created, the parent bill's total needs to be recalculated.
+        """
+        request = self.request
+        if hasattr(request, 'tenant_id'):
+            serializer.validated_data['tenant_id'] = request.tenant_id
+        
+        # Ensure system_calculated_price is set if not provided for manual items
+        if 'system_calculated_price' not in serializer.validated_data or serializer.validated_data['system_calculated_price'] is None:
+            serializer.validated_data['system_calculated_price'] = serializer.validated_data.get('unit_price', Decimal('0.00'))
+
+        opd_bill_item = serializer.save()
+        
+        # Recalculate parent bill totals after item is created
+        if opd_bill_item.bill:
+            opd_bill_item.bill._calculate_derived_totals()
+            opd_bill_item.bill.save(update_fields=['total_amount', 'discount_amount', 'payable_amount', 'balance_amount', 'payment_status'])
+
+    def perform_update(self, serializer):
+        """
+        Custom update to ensure bill recalculation.
+        When an item is updated, the parent bill's total needs to be recalculated.
+        """
+        opd_bill_item = serializer.save()
+        if opd_bill_item.bill:
+            opd_bill_item.bill._calculate_derived_totals()
+            opd_bill_item.bill.save(update_fields=['total_amount', 'discount_amount', 'payable_amount', 'balance_amount', 'payment_status'])
+
+    def perform_destroy(self, instance):
+        """
+        Custom destroy to ensure bill recalculation.
+        When an item is deleted, the parent bill's total needs to be recalculated.
+        """
+        bill = instance.bill
+        instance.delete()
+        if bill:
+            bill._calculate_derived_totals()
+            bill.save(update_fields=['total_amount', 'discount_amount', 'payable_amount', 'balance_amount', 'payment_status'])
+
+# ============================================================================
 # PROCEDURE MASTER VIEWSET
 # ============================================================================
 
@@ -693,98 +1100,98 @@ class ProcedurePackageViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
 
 # ============================================================================
-# PROCEDURE BILL VIEWSET
+# PROCEDURE BILL VIEWSET (DEPRECATED)
 # ============================================================================
 
-@extend_schema_view(
-    list=extend_schema(
-        summary="List Procedure Bills",
-        description="Get list of procedure/investigation bills",
-        parameters=[
-            OpenApiParameter(name='visit', type=int, description='Filter by visit ID'),
-            OpenApiParameter(name='doctor', type=int, description='Filter by doctor ID'),
-            OpenApiParameter(name='payment_status', type=str, description='Filter by payment status (paid, partial, unpaid)'),
-            OpenApiParameter(name='bill_type', type=str, description='Filter by bill type (procedure, investigation)'),
-            OpenApiParameter(name='search', type=str, description='Search by bill number or visit number'),
-        ],
-        tags=['OPD - Bills']
-    ),
-    retrieve=extend_schema(
-        summary="Get Procedure Bill Details",
-        description="Retrieve procedure bill with line items",
-        tags=['OPD - Bills']
-    ),
-    create=extend_schema(
-        summary="Create Procedure Bill",
-        description="Create a new procedure bill with items",
-        tags=['OPD - Bills']
-    )
-)
-class ProcedureBillViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
-    """
-    Procedure Bill Management
+# @extend_schema_view(
+#     list=extend_schema(
+#         summary="List Procedure Bills",
+#         description="Get list of procedure/investigation bills",
+#         parameters=[
+#             OpenApiParameter(name='visit', type=int, description='Filter by visit ID'),
+#             OpenApiParameter(name='doctor', type=int, description='Filter by doctor ID'),
+#             OpenApiParameter(name='payment_status', type=str, description='Filter by payment status (paid, partial, unpaid)'),
+#             OpenApiParameter(name='bill_type', type=str, description='Filter by bill type (procedure, investigation)'),
+#             OpenApiParameter(name='search', type=str, description='Search by bill number or visit number'),
+#         ],
+#         tags=['OPD - Bills']
+#     ),
+#     retrieve=extend_schema(
+#         summary="Get Procedure Bill Details",
+#         description="Retrieve procedure bill with line items",
+#         tags=['OPD - Bills']
+#     ),
+#     create=extend_schema(
+#         summary="Create Procedure Bill",
+#         description="Create a new procedure bill with items",
+#         tags=['OPD - Bills']
+#     )
+# )
+# class ProcedureBillViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
+#     """
+#     Procedure Bill Management
     
-    Handles billing for procedures and investigations.
-    Uses Django model permissions for access control.
-    """
-    queryset = ProcedureBill.objects.select_related(
-        'visit__patient', 'doctor'
-    ).prefetch_related('items__procedure')
-    permission_classes = [HMSPermission]
-    hms_module = 'opd'
+#     Handles billing for procedures and investigations.
+#     Uses Django model permissions for access control.
+#     """
+#     queryset = ProcedureBill.objects.select_related(
+#         'visit__patient', 'doctor'
+#     ).prefetch_related('items__procedure')
+#     permission_classes = [HMSPermission]
+#     hms_module = 'opd'
 
-    action_permission_map = {
-        'list': 'view_procedure_bills',
-        'retrieve': 'view_procedure_bills',
-        'create': 'create_procedure_bill',
-        'update': 'edit_visit',
-        'partial_update': 'edit_visit',
-        'destroy': 'edit_visit',
-    }
+#     action_permission_map = {
+#         'list': 'view_procedure_bills',
+#         'retrieve': 'view_procedure_bills',
+#         'create': 'create_procedure_bill',
+#         'update': 'edit_visit',
+#         'partial_update': 'edit_visit',
+#         'destroy': 'edit_visit',
+#     }
     
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['visit', 'doctor', 'payment_status', 'bill_type']
-    search_fields = ['bill_number', 'visit__visit_number']
-    ordering_fields = ['bill_date', 'total_amount']
-    ordering = ['-bill_date']
+#     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+#     filterset_fields = ['visit', 'doctor', 'payment_status', 'bill_type']
+#     search_fields = ['bill_number', 'visit__visit_number']
+#     ordering_fields = ['bill_date', 'total_amount']
+#     ordering = ['-bill_date']
     
-    def get_serializer_class(self):
-        """Return appropriate serializer"""
-        if self.action == 'list':
-            return ProcedureBillListSerializer
-        elif self.action in ['create', 'update', 'partial_update']:
-            return ProcedureBillCreateUpdateSerializer
-        return ProcedureBillDetailSerializer
+#     def get_serializer_class(self):
+#         """Return appropriate serializer"""
+#         if self.action == 'list':
+#             return ProcedureBillListSerializer
+#         elif self.action in ['create', 'update', 'partial_update']:
+#             return ProcedureBillCreateUpdateSerializer
+#         return ProcedureBillDetailSerializer
     
-    @extend_schema(
-        summary="Record Payment",
-        description="Record a payment for a procedure bill",
-        tags=['OPD - Bills']
-    )
-    @action(detail=True, methods=['post'])
-    def record_payment(self, request, pk=None):
-        """Record payment for a procedure bill"""
-        bill = self.get_object()
+#     @extend_schema(
+#         summary="Record Payment",
+#         description="Record a payment for a procedure bill",
+#         tags=['OPD - Bills']
+#     )
+#     @action(detail=True, methods=['post'])
+#     def record_payment(self, request, pk=None):
+#         """Record payment for a procedure bill"""
+#         bill = self.get_object()
         
-        amount = request.data.get('amount')
-        payment_mode = request.data.get('payment_mode', 'cash')
-        payment_details = request.data.get('payment_details', {})
+#         amount = request.data.get('amount')
+#         payment_mode = request.data.get('payment_mode', 'cash')
+#         payment_details = request.data.get('payment_details', {})
         
-        if not amount:
-            return Response(
-                {'success': False, 'error': 'Amount is required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+#         if not amount:
+#             return Response(
+#                 {'success': False, 'error': 'Amount is required'},
+#                 status=status.HTTP_400_BAD_REQUEST
+#             )
         
-        # Record payment
-        bill.record_payment(amount, payment_mode, payment_details)
+#         # Record payment
+#         bill.record_payment(amount, payment_mode, payment_details)
         
-        serializer = ProcedureBillDetailSerializer(bill)
-        return Response({
-            'success': True,
-            'message': 'Payment recorded',
-            'data': serializer.data
-        })
+#         serializer = ProcedureBillDetailSerializer(bill)
+#         return Response({
+#             'success': True,
+#             'message': 'Payment recorded',
+#             'data': serializer.data
+#         })
 
 
 # ============================================================================

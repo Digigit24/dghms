@@ -5,8 +5,8 @@ from django.utils import timezone
 from decimal import Decimal
 
 from .models import (
-    Visit, OPDBill, ProcedureMaster, ProcedurePackage,
-    ProcedureBill, ProcedureBillItem, ClinicalNote,
+    Visit, OPDBill, OPDBillItem, ProcedureMaster, ProcedurePackage,
+  ClinicalNote,
     VisitFinding, VisitAttachment,
     ClinicalNoteTemplateGroup, ClinicalNoteTemplate,
     ClinicalNoteTemplateField, ClinicalNoteTemplateFieldOption,
@@ -140,12 +140,29 @@ class VisitCreateUpdateSerializer(serializers.ModelSerializer):
 # OPD BILL SERIALIZERS
 # ============================================================================
 
+class OPDBillItemSerializer(serializers.ModelSerializer):
+    """Serializer for OPD Bill Items."""
+
+    class Meta:
+        model = OPDBillItem
+        fields = [
+            'id', 'bill', 'item_name', 'source',
+            'quantity', 'system_calculated_price', 'unit_price',
+            'total_price', 'is_price_overridden', 'notes',
+            'origin_content_type', 'origin_object_id'
+        ]
+        read_only_fields = [
+            'total_price', 'system_calculated_price', 'is_price_overridden'
+        ]
+
+
 class OPDBillListSerializer(serializers.ModelSerializer):
     """Serializer for listing OPD bills"""
     
     patient_name = serializers.CharField(source='visit.patient.full_name', read_only=True)
     doctor_name = serializers.CharField(source='doctor.full_name', read_only=True)
     visit_number = serializers.CharField(source='visit.visit_number', read_only=True)
+    items = OPDBillItemSerializer(many=True, read_only=True)
     
     class Meta:
         model = OPDBill
@@ -153,7 +170,7 @@ class OPDBillListSerializer(serializers.ModelSerializer):
             'id', 'bill_number', 'visit', 'visit_number', 'patient_name',
             'doctor', 'doctor_name', 'bill_date', 'opd_type', 'charge_type',
             'total_amount', 'payable_amount', 'received_amount',
-            'balance_amount', 'payment_status'
+            'balance_amount', 'payment_status', 'items'
         ]
         read_only_fields = ['bill_number', 'bill_date']
 
@@ -164,6 +181,7 @@ class OPDBillDetailSerializer(serializers.ModelSerializer):
     patient_name = serializers.CharField(source='visit.patient.full_name', read_only=True)
     doctor_name = serializers.CharField(source='doctor.full_name', read_only=True)
     visit_number = serializers.CharField(source='visit.visit_number', read_only=True)
+    items = OPDBillItemSerializer(many=True, read_only=True)
 
     class Meta:
         model = OPDBill
@@ -221,12 +239,8 @@ class OPDBillCreateUpdateSerializer(serializers.ModelSerializer):
 
         return super().create(validated_data)
 
-
-# ============================================================================
-# PROCEDURE MASTER SERIALIZERS
-# ============================================================================
-
 class ProcedureMasterListSerializer(serializers.ModelSerializer):
+
     """Serializer for listing procedure masters"""
     
     class Meta:
@@ -237,6 +251,7 @@ class ProcedureMasterListSerializer(serializers.ModelSerializer):
 
 
 class ProcedureMasterDetailSerializer(serializers.ModelSerializer):
+
     """Detailed procedure master serializer"""
     
     class Meta:
@@ -354,144 +369,187 @@ class ProcedurePackageCreateUpdateSerializer(serializers.ModelSerializer):
 
 
 # ============================================================================
-# PROCEDURE BILL ITEM SERIALIZERS
+# PROCEDURE BILL ITEM SERIALIZERS (DEPRECATED)
 # ============================================================================
 
-class ProcedureBillItemSerializer(serializers.ModelSerializer):
-    """Serializer for procedure bill items"""
+# class ProcedureBillItemSerializer(serializers.ModelSerializer):
+#     """Serializer for procedure bill items"""
     
-    procedure_name = serializers.CharField(source='procedure.name', read_only=True)
+#     procedure_name = serializers.CharField(source='procedure.name', read_only=True)
     
-    class Meta:
-        model = ProcedureBillItem
-        fields = [
-            'id', 'procedure', 'procedure_name', 'particular_name',
-            'note', 'quantity', 'unit_charge', 'amount', 'item_order'
-        ]
-        read_only_fields = ['amount']
+#     class Meta:
+#         model = ProcedureBillItem
+#         fields = [
+#             'id', 'procedure', 'procedure_name', 'particular_name',
+#             'note', 'quantity', 'unit_charge', 'amount', 'item_order'
+#         ]
+#         read_only_fields = ['amount']
     
-    def validate(self, data):
-        """Ensure particular_name is set"""
-        if 'procedure' in data and not data.get('particular_name'):
-            data['particular_name'] = data['procedure'].name
-        return data
+#     def validate(self, data):
+#         """Ensure particular_name is set"""
+#         if 'procedure' in data and not data.get('particular_name'):
+#             data['particular_name'] = data['procedure'].name
+#         return data
 
 
 # ============================================================================
-# PROCEDURE BILL SERIALIZERS
+# OPD BILL ITEM SERIALIZERS (Unified Billing)
 # ============================================================================
 
-class ProcedureBillListSerializer(serializers.ModelSerializer):
-    """Serializer for listing procedure bills"""
+# This is the old OPDBillItemSerializer, replaced by the one at the top
+# class OPDBillItemSerializer(serializers.ModelSerializer):
+#     """Serializer for OPD Bill Items with manual price override support."""
+
+#     # Computed field showing if price matches system calculation
+#     actual_price = serializers.DecimalField(
+#         source='unit_price',
+#         max_digits=10,
+#         decimal_places=2,
+#         read_only=True,
+#         help_text="The actual price (same as unit_price, for frontend clarity)"
+#     )
+
+#     class Meta:
+#         model = OPDBillItem
+#         fields = [
+#             'id', 'tenant_id', 'visit', 'item_name', 'source',
+#             'quantity', 'system_calculated_price', 'unit_price', 'actual_price',
+#             'total_price', 'is_price_overridden', 'notes',
+#             'origin_content_type', 'origin_object_id',
+#             'created_at', 'updated_at'
+#         ]
+#         read_only_fields = [
+#             'tenant_id', 'total_price', 'system_calculated_price',
+#             'is_price_overridden', 'created_at', 'updated_at'
+#         ]
+
+#     def validate(self, attrs):
+#         """Validate bill item data."""
+#         # If unit_price is being set manually and differs from system price
+#         if 'unit_price' in attrs and 'system_calculated_price' in self.initial_data:
+#             system_price = attrs.get('system_calculated_price')
+#             unit_price = attrs.get('unit_price')
+#             if system_price and unit_price != system_price:
+#                 attrs['is_price_overridden'] = True
+
+#         return attrs
+
+
+# ============================================================================
+# PROCEDURE BILL SERIALIZERS (DEPRECATED)
+# ============================================================================
+
+# class ProcedureBillListSerializer(serializers.ModelSerializer):
+#     """Serializer for listing procedure bills"""
     
-    patient_name = serializers.CharField(source='visit.patient.full_name', read_only=True)
-    doctor_name = serializers.CharField(source='doctor.full_name', read_only=True)
-    visit_number = serializers.CharField(source='visit.visit_number', read_only=True)
-    item_count = serializers.IntegerField(source='items.count', read_only=True)
+#     patient_name = serializers.CharField(source='visit.patient.full_name', read_only=True)
+#     doctor_name = serializers.CharField(source='doctor.full_name', read_only=True)
+#     visit_number = serializers.CharField(source='visit.visit_number', read_only=True)
+#     item_count = serializers.IntegerField(source='items.count', read_only=True)
     
-    class Meta:
-        model = ProcedureBill
-        fields = [
-            'id', 'bill_number', 'visit', 'visit_number', 'patient_name',
-            'doctor', 'doctor_name', 'bill_date', 'bill_type',
-            'item_count', 'total_amount', 'payable_amount',
-            'payment_status'
-        ]
-        read_only_fields = ['bill_number', 'bill_date']
+#     class Meta:
+#         model = ProcedureBill
+#         fields = [
+#             'id', 'bill_number', 'visit', 'visit_number', 'patient_name',
+#             'doctor', 'doctor_name', 'bill_date', 'bill_type',
+#             'item_count', 'total_amount', 'payable_amount',
+#             'payment_status'
+#         ]
+#         read_only_fields = ['bill_number', 'bill_date']
 
 
-class ProcedureBillDetailSerializer(serializers.ModelSerializer):
-    """Detailed procedure bill serializer with items"""
+# class ProcedureBillDetailSerializer(serializers.ModelSerializer):
+#     """Detailed procedure bill serializer with items"""
     
-    patient_name = serializers.CharField(source='visit.patient.full_name', read_only=True)
-    doctor_name = serializers.CharField(source='doctor.full_name', read_only=True)
-    visit_number = serializers.CharField(source='visit.visit_number', read_only=True)
-    items = ProcedureBillItemSerializer(many=True, read_only=True)
+#     patient_name = serializers.CharField(source='visit.patient.full_name', read_only=True)
+#     doctor_name = serializers.CharField(source='doctor.full_name', read_only=True)
+#     visit_number = serializers.CharField(source='visit.visit_number', read_only=True)
+#     items = ProcedureBillItemSerializer(many=True, read_only=True)
 
-    class Meta:
-        model = ProcedureBill
-        fields = '__all__'
-        read_only_fields = [
-            'bill_number', 'bill_date', 'total_amount', 'payable_amount',
-            'balance_amount', 'payment_status', 'created_at', 'updated_at'
-        ]
+#     class Meta:
+#         model = ProcedureBill
+#         fields = '__all__'
+#         read_only_fields = [
+#             'bill_number', 'bill_date', 'total_amount', 'payable_amount',
+#             'balance_amount', 'payment_status', 'created_at', 'updated_at'
+#         ]
 
 
-class ProcedureBillCreateUpdateSerializer(serializers.ModelSerializer):
-    """Serializer for creating/updating procedure bills with items"""
+# class ProcedureBillCreateUpdateSerializer(serializers.ModelSerializer):
+#     """Serializer for creating/updating procedure bills with items"""
     
-    items = ProcedureBillItemSerializer(many=True)
+#     items = ProcedureBillItemSerializer(many=True)
     
-    class Meta:
-        model = ProcedureBill
-        fields = [
-            'visit', 'doctor', 'bill_type', 'category',
-            'discount_percent', 'payment_mode', 'payment_details',
-            'received_amount', 'items'
-        ]
+#     class Meta:
+#         model = ProcedureBill
+#         fields = [
+#             'visit', 'doctor', 'bill_type', 'category',
+#             'discount_percent', 'payment_mode', 'payment_details',
+#             'received_amount', 'items'
+#         ]
     
-    @transaction.atomic
-    def create(self, validated_data):
-        """Create procedure bill with items"""
-        items_data = validated_data.pop('items', [])
+#     @transaction.atomic
+#     def create(self, validated_data):
+#         """Create procedure bill with items"""
+#         items_data = validated_data.pop('items', [])
 
-        request = self.context.get('request')
+#         request = self.context.get('request')
 
-        # Add tenant_id from request context
-        if request and hasattr(request, 'tenant_id'):
-            validated_data['tenant_id'] = request.tenant_id
+#         # Add tenant_id from request context
+#         if request and hasattr(request, 'tenant_id'):
+#             validated_data['tenant_id'] = request.tenant_id
 
-        # Add billed_by_id from request context
-        if request and hasattr(request, 'user_id'):
-            validated_data['billed_by_id'] = request.user_id
+#         # Add billed_by_id from request context
+#         if request and hasattr(request, 'user_id'):
+#             validated_data['billed_by_id'] = request.user_id
 
-        validated_data['total_amount'] = Decimal('0.00')
-        validated_data['payable_amount'] = Decimal('0.00')
+#         validated_data['total_amount'] = Decimal('0.00')
+#         validated_data['payable_amount'] = Decimal('0.00')
 
-        # Create bill first
-        bill = ProcedureBill.objects.create(**validated_data)
+#         # Create bill first
+#         bill = ProcedureBill.objects.create(**validated_data)
 
-        # Create items
-        for item_data in items_data:
-            # Add tenant_id to each item
-            item_data['tenant_id'] = validated_data['tenant_id']
-            ProcedureBillItem.objects.create(
-                procedure_bill=bill,
-                **item_data
-            )
+#         # Create items
+#         for item_data in items_data:
+#             # Add tenant_id to each item
+#             item_data['tenant_id'] = validated_data['tenant_id']
+#             ProcedureBillItem.objects.create(
+#                 procedure_bill=bill,
+#                 **item_data
+#             )
 
-        # Now recalculate totals after items are created
-        bill.calculate_totals()
-        bill.save()
+#         # Now recalculate totals after items are created
+#         bill.calculate_totals()
+#         bill.save()
 
-        return bill
+#         return bill
     
-    @transaction.atomic
-    def update(self, instance, validated_data):
-        """Update procedure bill and items"""
-        items_data = validated_data.pop('items', None)
+#     @transaction.atomic
+#     def update(self, instance, validated_data):
+#         """Update procedure bill and items"""
+#         items_data = validated_data.pop('items', None)
         
-        # Update bill fields
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
+#         # Update bill fields
+#         for attr, value in validated_data.items():
+#             setattr(instance, attr, value)
         
-        # Update items if provided
-        if items_data is not None:
-            # Delete existing items
-            instance.items.all().delete()
+#         # Update items if provided
+#         if items_data is not None:
+#             # Delete existing items
+#             instance.items.all().delete()
             
-            # Create new items
-            for item_data in items_data:
-                ProcedureBillItem.objects.create(
-                    procedure_bill=instance,
-                    **item_data
-                )
+#             # Create new items
+#             for item_data in items_data:
+#                 ProcedureBillItem.objects.create(
+#                     procedure_bill=instance,
+#                     **item_data
+#                 )
         
-        # Recalculate and save
-        instance.calculate_totals()
-        instance.save()
+#         # Recalculate and save
+#         instance.calculate_totals()
+#         instance.save()
         
-        return instance
+#         return instance
 
 
 # ============================================================================

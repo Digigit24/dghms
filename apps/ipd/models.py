@@ -1,6 +1,7 @@
 # ipd/models.py
 from django.db import models
-from django.contrib.contenttypes.fields import GenericRelation
+from django.contrib.contenttypes.fields import GenericRelation, GenericForeignKey
+from django.contrib.contenttypes.models import ContentType
 from django.core.validators import MinValueValidator, MaxValueValidator
 from decimal import Decimal
 from django.utils import timezone
@@ -587,31 +588,55 @@ class IPDBilling(models.Model):
             self.status = 'pending'
 
     def add_bed_charges(self):
-        """Calculate and add bed charges based on length of stay."""
+        """
+        Calculate and add bed charges based on length of stay.
+
+        Automatically creates/updates IPDBillItem with:
+        - Proper calculation: (discharge_date or current_date) - admission_date
+        - Minimum 1 day charge
+        - Links to Admission via origin_order GFK
+        - Sets system_calculated_price for manual override tracking
+        """
         if not self.admission.bed:
             return
 
-        length_of_stay = self.admission.calculate_length_of_stay()
-        if length_of_stay <= 0:
-            length_of_stay = 1  # Minimum 1 day charge
+        # Calculate length of stay
+        if self.admission.discharge_date:
+            delta = self.admission.discharge_date - self.admission.admission_date
+        else:
+            delta = timezone.now() - self.admission.admission_date
+
+        # Minimum 1 day, otherwise round up to next day
+        length_of_stay = max(1, delta.days if delta.days > 0 else 1)
 
         bed_charge_per_day = self.admission.bed.daily_charge
         total_bed_charge = bed_charge_per_day * length_of_stay
 
-        # Create or update bed charge item
-        IPDBillItem.objects.update_or_create(
+        # Get ContentType for Admission
+        from django.contrib.contenttypes.models import ContentType
+        admission_ct = ContentType.objects.get_for_model(self.admission)
+
+        # Create or update bed charge item with origin tracking
+        bed_item, created = IPDBillItem.objects.update_or_create(
             billing=self,
             source='Bed',
-            item_name=f"{self.admission.bed} - {length_of_stay} day(s)",
+            origin_content_type=admission_ct,
+            origin_object_id=self.admission.pk,
             defaults={
+                'tenant_id': self.tenant_id,
+                'item_name': f"{self.admission.bed} - {length_of_stay} day(s)",
                 'quantity': length_of_stay,
                 'unit_price': bed_charge_per_day,
+                'system_calculated_price': bed_charge_per_day,
                 'total_price': total_bed_charge,
+                'notes': f"Bed charges from {self.admission.admission_date.date()} to {(self.admission.discharge_date or timezone.now()).date()}"
             }
         )
 
         self.calculate_totals()
         self.save()
+
+        return bed_item
 
 
 class IPDBillItem(models.Model):
@@ -629,6 +654,8 @@ class IPDBillItem(models.Model):
         ('Consultation', 'Consultation'),
         ('Procedure', 'Procedure'),
         ('Surgery', 'Surgery'),
+        ('Therapy', 'Therapy'),
+        ('Package', 'Package'),
         ('Other', 'Other'),
     ]
 
@@ -656,11 +683,19 @@ class IPDBillItem(models.Model):
         validators=[MinValueValidator(1)],
         help_text="Quantity (e.g., days for bed, units for medicine)"
     )
+
+    # Pricing with Manual Override Support
+    system_calculated_price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal('0.00'))],
+        help_text="System-calculated price from master data"
+    )
     unit_price = models.DecimalField(
         max_digits=10,
         decimal_places=2,
         validators=[MinValueValidator(Decimal('0.00'))],
-        help_text="Price per unit"
+        help_text="Actual unit price (can be manually overridden)"
     )
     total_price = models.DecimalField(
         max_digits=10,
@@ -668,6 +703,26 @@ class IPDBillItem(models.Model):
         validators=[MinValueValidator(Decimal('0.00'))],
         help_text="Total price (quantity × unit_price)"
     )
+    is_price_overridden = models.BooleanField(
+        default=False,
+        help_text="Flag indicating if price was manually changed from system default"
+    )
+
+    # Reverse GenericForeignKey for source tracking
+    origin_content_type = models.ForeignKey(
+        ContentType,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text="Type of source order/admission (DiagnosticOrder, MedicineOrder, Admission, etc.)",
+        related_name='+'
+    )
+    origin_object_id = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="ID of the source order/admission"
+    )
+    origin_order = GenericForeignKey('origin_content_type', 'origin_object_id')
 
     # Additional Details
     notes = models.TextField(
@@ -687,16 +742,22 @@ class IPDBillItem(models.Model):
         indexes = [
             models.Index(fields=['tenant_id']),
             models.Index(fields=['billing', 'source']),
+            models.Index(fields=['origin_content_type', 'origin_object_id']),
         ]
 
     def __str__(self):
         return f"{self.item_name} - {self.quantity} × {self.unit_price}"
 
     def save(self, *args, **kwargs):
-        """Calculate total price before saving."""
+        """Calculate total price and track manual overrides."""
+        # Set system_calculated_price on first save if not set
+        if not self.pk and not self.system_calculated_price:
+            self.system_calculated_price = self.unit_price
+
+        # Check if price was manually overridden
+        if self.unit_price != self.system_calculated_price:
+            self.is_price_overridden = True
+
+        # Calculate total price
         self.total_price = Decimal(str(self.quantity)) * self.unit_price
         super().save(*args, **kwargs)
-
-        # Recalculate billing totals
-        self.billing.calculate_totals()
-        self.billing.save()

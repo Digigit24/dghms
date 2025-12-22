@@ -259,10 +259,10 @@ class OPDBill(models.Model):
     # Primary Fields
     id = models.AutoField(primary_key=True)
     tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
-    visit = models.OneToOneField(
+    visit = models.ForeignKey(
         Visit,
         on_delete=models.CASCADE,
-        related_name='opd_bill'
+        related_name='opd_bills'
     )
     bill_number = models.CharField(
         max_length=50,
@@ -275,7 +275,9 @@ class OPDBill(models.Model):
     doctor = models.ForeignKey(
         'doctors.DoctorProfile',
         on_delete=models.PROTECT,
-        related_name='opd_bills'
+        related_name='opd_bills',
+        null=True,
+        blank=True
     )
     
     # Bill Classification
@@ -324,6 +326,7 @@ class OPDBill(models.Model):
     payable_amount = models.DecimalField(
         max_digits=10,
         decimal_places=2,
+        default=Decimal('0.00'), # Added default value
         validators=[MinValueValidator(Decimal('0.00'))]
     )
     
@@ -381,12 +384,38 @@ class OPDBill(models.Model):
         return self.bill_number
     
     def save(self, *args, **kwargs):
-        """Auto-generate bill number and calculate amounts."""
+        is_new_instance = self.pk is None
+        
         if not self.bill_number:
             self.bill_number = self.generate_bill_number()
-        self.calculate_totals()
+
+        # 1. Save initially to get a PK for new instances
+        if is_new_instance:
+            super().save(*args, **kwargs) # Save initially to get a PK
+            # Clear kwargs to prevent double-saving issues if args/kwargs contain things
+            # specific to the first save. We'll manually specify update_fields for the second save.
+            kwargs.pop('force_insert', None)
+            kwargs.pop('force_update', None)
+            kwargs.pop('using', None)
+            kwargs.pop('update_fields', None)
+
+        # 2. Now that self.pk is guaranteed to be available (for new instances) or already exists,
+        # calculate derived totals
+        self._calculate_derived_totals() # Call the helper method
+
+        # 3. Save again with updated calculated fields, using update_fields to prevent recursion
+        # and only updating the fields that _calculate_derived_totals modifies.
+        # For existing instances, this will be a normal save or update relevant fields.
+        update_fields_list = ['total_amount', 'discount_amount', 'payable_amount', 'balance_amount', 'payment_status']
+        # If specific update_fields were passed to the original save call, merge them.
+        if 'update_fields' in kwargs:
+            update_fields_list = list(set(update_fields_list) | set(kwargs['update_fields']))
+            kwargs['update_fields'] = update_fields_list
+        else:
+            kwargs['update_fields'] = update_fields_list
+
         super().save(*args, **kwargs)
-    
+
     @staticmethod
     def generate_bill_number():
         """Generate unique bill number: OPD-BILL/YYYYMMDD/###"""
@@ -400,16 +429,32 @@ class OPDBill(models.Model):
         ).count() + 1
         
         return f"OPD-BILL/{date_str}/{today_count:03d}"
-    
-    def calculate_totals(self):
-        """Calculate payable amount after discount."""
-        # Calculate discount amount
-        if self.discount_percent > 0:
-            self.discount_amount = (
-                self.total_amount * self.discount_percent / Decimal('100.00')
-            )
-        
+
+    def _calculate_derived_totals(self): # Renamed helper method
+        """
+        Calculate total amounts from items, apply discount, and update status.
+        Includes default doctor consultation fee if not already an item.
+        This method assumes self.pk is available.
+        """
+        items_total = Decimal('0.00')
+        # Here self.pk is guaranteed to be available.
+        items_total = sum(item.total_price for item in self.items.all())
+
+        # Add default doctor consultation fee if not already covered by an item
+        # and if a doctor is assigned and has a fee.
+        if self.doctor and self.doctor.consultation_fee:
+            has_consultation_item = self.items.filter(source='Consultation').exists()
+            if not has_consultation_item:
+                items_total += self.doctor.consultation_fee
+
+        self.total_amount = items_total
+
         # Calculate payable amount
+        if self.discount_percent > 0:
+            self.discount_amount = (self.total_amount * self.discount_percent / Decimal('100.00')).quantize(Decimal('0.01'))
+        else:
+            self.discount_amount = Decimal('0.00') # Ensure discount_amount is 0 if discount_percent is 0
+        
         self.payable_amount = self.total_amount - self.discount_amount
         
         # Calculate balance
@@ -419,7 +464,7 @@ class OPDBill(models.Model):
         if self.received_amount >= self.payable_amount:
             self.payment_status = 'paid'
             self.balance_amount = Decimal('0.00')
-        elif self.received_amount > Decimal('0.00'):
+        elif self.received_amount > Decimal('0.00') and self.received_amount > 0:
             self.payment_status = 'partial'
         else:
             self.payment_status = 'unpaid'
@@ -432,12 +477,7 @@ class OPDBill(models.Model):
         if details:
             self.payment_details = details
         
-        self.calculate_totals()
         self.save()
-        
-        # Update visit payment status
-        self.visit.paid_amount += Decimal(str(amount))
-        self.visit.update_payment_status()
 
 
 class ProcedureMaster(models.Model):
@@ -582,289 +622,413 @@ class ProcedurePackage(models.Model):
         return self.total_charge - self.discounted_charge
 
 
-class ProcedureBill(models.Model):
+# class ProcedureBill(models.Model):
+#     """
+#     Procedure Bill Model - Investigation billing.
+    
+#     Stores billing for procedures and investigations
+#     ordered during OPD visits.
+#     """
+    
+#     BILL_TYPE_CHOICES = [
+#         ('hospital', 'Hospital'),
+#         ('diagnostic', 'Diagnostic Center'),
+#         ('external', 'External Lab'),
+#     ]
+    
+#     PAYMENT_MODE_CHOICES = [
+#         ('cash', 'Cash'),
+#         ('card', 'Card'),
+#         ('upi', 'UPI'),
+#         ('bank', 'Bank Transfer'),
+#         ('multiple', 'Multiple Modes'),
+#     ]
+    
+#     PAYMENT_STATUS_CHOICES = [
+#         ('unpaid', 'Unpaid'),
+#         ('partial', 'Partially Paid'),
+#         ('paid', 'Paid'),
+#     ]
+    
+#     # Primary Fields
+#     id = models.AutoField(primary_key=True)
+#     tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
+#     visit = models.ForeignKey(
+#         Visit,
+#         on_delete=models.CASCADE,
+#         related_name='procedure_bills'
+#     )
+#     bill_number = models.CharField(
+#         max_length=50,
+#         unique=True,
+#         help_text="Unique bill identifier (e.g., PROC-BILL/20231223/001)"
+#     )
+#     bill_date = models.DateTimeField(auto_now_add=True)
+    
+#     # Doctor Information
+#     doctor = models.ForeignKey(
+#         'doctors.DoctorProfile',
+#         on_delete=models.PROTECT,
+#         related_name='ordered_procedures',
+#         help_text="Doctor who ordered the procedures"
+#     )
+    
+#     # Bill Classification
+#     bill_type = models.CharField(
+#         max_length=20,
+#         choices=BILL_TYPE_CHOICES,
+#         default='hospital'
+#     )
+#     category = models.CharField(
+#         max_length=50,
+#         blank=True,
+#         help_text="Additional categorization"
+#     )
+    
+#     # Financial Details
+#     total_amount = models.DecimalField(
+#         max_digits=10,
+#         decimal_places=2,
+#         validators=[MinValueValidator(Decimal('0.00'))]
+#     )
+#     discount_percent = models.DecimalField(
+#         max_digits=5,
+#         decimal_places=2,
+#         default=Decimal('0.00'),
+#         validators=[
+#             MinValueValidator(Decimal('0.00')),
+#             MaxValueValidator(Decimal('100.00'))
+#         ]
+#     )
+#     discount_amount = models.DecimalField(
+#         max_digits=10,
+#         decimal_places=2,
+#         default=Decimal('0.00'),
+#         validators=[MinValueValidator(Decimal('0.00'))]
+#     )
+#     payable_amount = models.DecimalField(
+#         max_digits=10,
+#         decimal_places=2,
+#         validators=[MinValueValidator(Decimal('0.00'))]
+#     )
+    
+#     # Payment Details
+#     payment_mode = models.CharField(
+#         max_length=20,
+#         choices=PAYMENT_MODE_CHOICES,
+#         default='cash'
+#     )
+#     payment_details = models.JSONField(
+#         default=dict,
+#         blank=True,
+#         help_text="Store multiple payment details"
+#     )
+#     received_amount = models.DecimalField(
+#         max_digits=10,
+#         decimal_places=2,
+#         validators=[MinValueValidator(Decimal('0.00'))]
+#     )
+#     balance_amount = models.DecimalField(
+#         max_digits=10,
+#         decimal_places=2,
+#         default=Decimal('0.00'),
+#         validators=[MinValueValidator(Decimal('0.00'))]
+#     )
+#     payment_status = models.CharField(
+#         max_length=20,
+#         choices=PAYMENT_STATUS_CHOICES,
+#         default='unpaid'
+#     )
+    
+#     # Audit Fields
+#     billed_by_id = models.UUIDField(null=True, blank=True, help_text="User who created this bill")
+    
+#     # Timestamps
+#     created_at = models.DateTimeField(auto_now_add=True)
+#     updated_at = models.DateTimeField(auto_now=True)
+    
+#     class Meta:
+#         db_table = 'procedure_bills'
+#         ordering = ['-bill_date']
+#         verbose_name = 'Procedure Bill'
+#         verbose_name_plural = 'Procedure Bills'
+#         indexes = [
+#             models.Index(fields=['tenant_id']),
+#             models.Index(fields=['tenant_id', 'bill_date']),
+#             models.Index(fields=['tenant_id', 'payment_status']),
+#             models.Index(fields=['bill_number'], name='proc_bill_number_idx'),
+#             models.Index(fields=['visit'], name='proc_bill_visit_idx'),
+#             models.Index(fields=['doctor', 'bill_date'], name='proc_bill_doctor_date_idx'),
+#             models.Index(fields=['payment_status'], name='proc_bill_payment_idx'),
+#         ]
+    
+#     def __str__(self):
+#         return self.bill_number
+    
+#     def save(self, *args, **kwargs):
+#         """Auto-generate bill number and calculate amounts."""
+#         if not self.bill_number:
+#             self.bill_number = self.generate_bill_number()
+#         self.calculate_totals()
+#         super().save(*args, **kwargs)
+    
+#     @staticmethod
+#     def generate_bill_number():
+#         """Generate unique bill number: PROC-BILL/YYYYMMDD/###"""
+#         from datetime import date
+#         today = date.today()
+#         date_str = today.strftime('%Y%m%d')
+        
+#         # Get count of bills for today
+#         today_count = ProcedureBill.objects.filter(
+#             bill_date__date=today
+#         ).count() + 1
+        
+#         return f"PROC-BILL/{date_str}/{today_count:03d}"
+    
+#     def calculate_totals(self):
+#         """Calculate total amount from items and apply discount."""
+#         # Calculate total from items
+#         self.total_amount = sum(
+#             item.amount for item in self.items.all()
+#         )
+        
+#         # Calculate discount amount
+#         if self.discount_percent > 0:
+#             self.discount_amount = (
+#                 self.total_amount * self.discount_percent / Decimal('100.00')
+#             )
+        
+#         # Calculate payable amount
+#         self.payable_amount = self.total_amount - self.discount_amount
+        
+#         # Calculate balance
+#         self.balance_amount = self.payable_amount - self.received_amount
+        
+#         # Update payment status
+#         if self.received_amount >= self.payable_amount:
+#             self.payment_status = 'paid'
+#             self.balance_amount = Decimal('0.00')
+#         elif self.received_amount > Decimal('0.00'):
+#             self.payment_status = 'partial'
+#         else:
+#             self.payment_status = 'unpaid'
+    
+#     def record_payment(self, amount, mode='cash', details=None):
+#         """Record a payment for this bill."""
+#         self.received_amount += Decimal(str(amount))
+#         self.payment_mode = mode
+        
+#         if details:
+#             self.payment_details = details
+        
+#         self.calculate_totals()
+#         self.save()
+        
+#         # Update visit payment status
+#         self.visit.paid_amount += Decimal(str(amount))
+#         self.visit.update_payment_status()
+
+
+# class ProcedureBillItem(models.Model):
+#     """
+#     Procedure Bill Item Model - Line items in procedure bills.
+    
+#     Individual procedures/tests listed in a procedure bill.
+#     """
+    
+#     # Primary Fields
+#     id = models.AutoField(primary_key=True)
+#     tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
+#     procedure_bill = models.ForeignKey(
+#         ProcedureBill,
+#         on_delete=models.CASCADE,
+#         related_name='items'
+#     )
+#     procedure = models.ForeignKey(
+#         ProcedureMaster,
+#         on_delete=models.SET_NULL,
+#         null=True,
+#         blank=True,
+#         related_name='bill_items'
+#     )
+    
+#     # Item Details
+#     particular_name = models.CharField(
+#         max_length=200,
+#         help_text="Store name even if procedure is deleted"
+#     )
+#     note = models.TextField(blank=True)
+#     quantity = models.IntegerField(
+#         default=1,
+#         validators=[MinValueValidator(1)]
+#     )
+#     unit_charge = models.DecimalField(
+#         max_digits=10,
+#         decimal_places=2,
+#         validators=[MinValueValidator(Decimal('0.00'))]
+#     )
+#     amount = models.DecimalField(
+#         max_digits=10,
+#         decimal_places=2,
+#         validators=[MinValueValidator(Decimal('0.00'))],
+#         help_text="Quantity × Unit Charge"
+#     )
+#     item_order = models.IntegerField(
+#         default=0,
+#         help_text="Display order in bill"
+#     )
+    
+#     class Meta:
+#         db_table = 'procedure_bill_items'
+#         ordering = ['item_order', 'id']
+#         verbose_name = 'Procedure Bill Item'
+#         verbose_name_plural = 'Procedure Bill Items'
+#         indexes = [
+#             models.Index(fields=['tenant_id']),
+#             models.Index(fields=['tenant_id', 'procedure_bill']),
+#         ]
+    
+#     def __str__(self):
+#         return f"{self.particular_name} - {self.quantity} × {self.unit_charge}"
+    
+#     def save(self, *args, **kwargs):
+#         """Calculate amount before saving."""
+#         self.amount = Decimal(str(self.quantity)) * self.unit_charge
+        
+#         # Store procedure name
+#         if self.procedure and not self.particular_name:
+#             self.particular_name = self.procedure.name
+        
+#         super().save(*args, **kwargs)
+        
+#         # Recalculate bill totals
+#         self.procedure_bill.calculate_totals()
+#         self.procedure_bill.save()
+
+
+class OPDBillItem(models.Model):
     """
-    Procedure Bill Model - Investigation billing.
-    
-    Stores billing for procedures and investigations
-    ordered during OPD visits.
+    OPD Bill Item Model - Unified line items for OPD billing.
+
+    Consolidates all types of OPD charges (consultation, diagnostics,
+    pharmacy, procedures, etc.) similar to IPDBillItem structure.
     """
-    
-    BILL_TYPE_CHOICES = [
-        ('hospital', 'Hospital'),
-        ('diagnostic', 'Diagnostic Center'),
-        ('external', 'External Lab'),
+
+    SOURCE_CHOICES = [
+        ('Consultation', 'Consultation'),
+        ('Pharmacy', 'Pharmacy'),
+        ('Lab', 'Laboratory'),
+        ('Radiology', 'Radiology'),
+        ('Procedure', 'Procedure'),
+        ('Package', 'Package'),
+        ('Therapy', 'Therapy'),
+        ('Other', 'Other'),
     ]
-    
-    PAYMENT_MODE_CHOICES = [
-        ('cash', 'Cash'),
-        ('card', 'Card'),
-        ('upi', 'UPI'),
-        ('bank', 'Bank Transfer'),
-        ('multiple', 'Multiple Modes'),
-    ]
-    
-    PAYMENT_STATUS_CHOICES = [
-        ('unpaid', 'Unpaid'),
-        ('partial', 'Partially Paid'),
-        ('paid', 'Paid'),
-    ]
-    
+
     # Primary Fields
     id = models.AutoField(primary_key=True)
     tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
-    visit = models.ForeignKey(
-        Visit,
-        on_delete=models.CASCADE,
-        related_name='procedure_bills'
-    )
-    bill_number = models.CharField(
-        max_length=50,
-        unique=True,
-        help_text="Unique bill identifier (e.g., PROC-BILL/20231223/001)"
-    )
-    bill_date = models.DateTimeField(auto_now_add=True)
-    
-    # Doctor Information
-    doctor = models.ForeignKey(
-        'doctors.DoctorProfile',
-        on_delete=models.PROTECT,
-        related_name='ordered_procedures',
-        help_text="Doctor who ordered the procedures"
-    )
-    
-    # Bill Classification
-    bill_type = models.CharField(
-        max_length=20,
-        choices=BILL_TYPE_CHOICES,
-        default='hospital'
-    )
-    category = models.CharField(
-        max_length=50,
-        blank=True,
-        help_text="Additional categorization"
-    )
-    
-    # Financial Details
-    total_amount = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        validators=[MinValueValidator(Decimal('0.00'))]
-    )
-    discount_percent = models.DecimalField(
-        max_digits=5,
-        decimal_places=2,
-        default=Decimal('0.00'),
-        validators=[
-            MinValueValidator(Decimal('0.00')),
-            MaxValueValidator(Decimal('100.00'))
-        ]
-    )
-    discount_amount = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        default=Decimal('0.00'),
-        validators=[MinValueValidator(Decimal('0.00'))]
-    )
-    payable_amount = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        validators=[MinValueValidator(Decimal('0.00'))]
-    )
-    
-    # Payment Details
-    payment_mode = models.CharField(
-        max_length=20,
-        choices=PAYMENT_MODE_CHOICES,
-        default='cash'
-    )
-    payment_details = models.JSONField(
-        default=dict,
-        blank=True,
-        help_text="Store multiple payment details"
-    )
-    received_amount = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        validators=[MinValueValidator(Decimal('0.00'))]
-    )
-    balance_amount = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        default=Decimal('0.00'),
-        validators=[MinValueValidator(Decimal('0.00'))]
-    )
-    payment_status = models.CharField(
-        max_length=20,
-        choices=PAYMENT_STATUS_CHOICES,
-        default='unpaid'
-    )
-    
-    # Audit Fields
-    billed_by_id = models.UUIDField(null=True, blank=True, help_text="User who created this bill")
-    
-    # Timestamps
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    
-    class Meta:
-        db_table = 'procedure_bills'
-        ordering = ['-bill_date']
-        verbose_name = 'Procedure Bill'
-        verbose_name_plural = 'Procedure Bills'
-        indexes = [
-            models.Index(fields=['tenant_id']),
-            models.Index(fields=['tenant_id', 'bill_date']),
-            models.Index(fields=['tenant_id', 'payment_status']),
-            models.Index(fields=['bill_number'], name='proc_bill_number_idx'),
-            models.Index(fields=['visit'], name='proc_bill_visit_idx'),
-            models.Index(fields=['doctor', 'bill_date'], name='proc_bill_doctor_date_idx'),
-            models.Index(fields=['payment_status'], name='proc_bill_payment_idx'),
-        ]
-    
-    def __str__(self):
-        return self.bill_number
-    
-    def save(self, *args, **kwargs):
-        """Auto-generate bill number and calculate amounts."""
-        if not self.bill_number:
-            self.bill_number = self.generate_bill_number()
-        self.calculate_totals()
-        super().save(*args, **kwargs)
-    
-    @staticmethod
-    def generate_bill_number():
-        """Generate unique bill number: PROC-BILL/YYYYMMDD/###"""
-        from datetime import date
-        today = date.today()
-        date_str = today.strftime('%Y%m%d')
-        
-        # Get count of bills for today
-        today_count = ProcedureBill.objects.filter(
-            bill_date__date=today
-        ).count() + 1
-        
-        return f"PROC-BILL/{date_str}/{today_count:03d}"
-    
-    def calculate_totals(self):
-        """Calculate total amount from items and apply discount."""
-        # Calculate total from items
-        self.total_amount = sum(
-            item.amount for item in self.items.all()
-        )
-        
-        # Calculate discount amount
-        if self.discount_percent > 0:
-            self.discount_amount = (
-                self.total_amount * self.discount_percent / Decimal('100.00')
-            )
-        
-        # Calculate payable amount
-        self.payable_amount = self.total_amount - self.discount_amount
-        
-        # Calculate balance
-        self.balance_amount = self.payable_amount - self.received_amount
-        
-        # Update payment status
-        if self.received_amount >= self.payable_amount:
-            self.payment_status = 'paid'
-            self.balance_amount = Decimal('0.00')
-        elif self.received_amount > Decimal('0.00'):
-            self.payment_status = 'partial'
-        else:
-            self.payment_status = 'unpaid'
-    
-    def record_payment(self, amount, mode='cash', details=None):
-        """Record a payment for this bill."""
-        self.received_amount += Decimal(str(amount))
-        self.payment_mode = mode
-        
-        if details:
-            self.payment_details = details
-        
-        self.calculate_totals()
-        self.save()
-        
-        # Update visit payment status
-        self.visit.paid_amount += Decimal(str(amount))
-        self.visit.update_payment_status()
 
-
-class ProcedureBillItem(models.Model):
-    """
-    Procedure Bill Item Model - Line items in procedure bills.
-    
-    Individual procedures/tests listed in a procedure bill.
-    """
-    
-    # Primary Fields
-    id = models.AutoField(primary_key=True)
-    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
-    procedure_bill = models.ForeignKey(
-        ProcedureBill,
+    bill = models.ForeignKey(
+        OPDBill,
         on_delete=models.CASCADE,
         related_name='items'
     )
-    procedure = models.ForeignKey(
-        ProcedureMaster,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='bill_items'
-    )
-    
-    # Item Details
-    particular_name = models.CharField(
+    item_name = models.CharField(
         max_length=200,
-        help_text="Store name even if procedure is deleted"
+        help_text="Description of the item/service"
     )
-    note = models.TextField(blank=True)
+    source = models.CharField(
+        max_length=20,
+        choices=SOURCE_CHOICES,
+        default='Other',
+        help_text="Source/category of the charge"
+    )
     quantity = models.IntegerField(
         default=1,
-        validators=[MinValueValidator(1)]
+        validators=[MinValueValidator(1)],
+        help_text="Quantity (e.g., units for medicine, sessions for procedures)"
     )
-    unit_charge = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        validators=[MinValueValidator(Decimal('0.00'))]
-    )
-    amount = models.DecimalField(
+
+    # Pricing with Manual Override Support
+    system_calculated_price = models.DecimalField(
         max_digits=10,
         decimal_places=2,
         validators=[MinValueValidator(Decimal('0.00'))],
-        help_text="Quantity × Unit Charge"
+        help_text="System-calculated price from master data"
     )
-    item_order = models.IntegerField(
-        default=0,
-        help_text="Display order in bill"
+    unit_price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal('0.00'))],
+        help_text="Actual unit price (can be manually overridden)"
     )
-    
+    total_price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal('0.00'))],
+        help_text="Total price (quantity × unit_price)"
+    )
+    is_price_overridden = models.BooleanField(
+        default=False,
+        help_text="Flag indicating if price was manually changed from system default"
+    )
+
+    # Reverse GenericForeignKey for source tracking
+    origin_content_type = models.ForeignKey(
+        ContentType,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text="Type of source order (DiagnosticOrder, MedicineOrder, etc.)",
+        related_name='+'
+    )
+    origin_object_id = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="ID of the source order"
+    )
+    origin_order = GenericForeignKey('origin_content_type', 'origin_object_id')
+
+    # Additional Details
+    notes = models.TextField(
+        blank=True,
+        help_text="Additional notes about this item"
+    )
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
     class Meta:
-        db_table = 'procedure_bill_items'
-        ordering = ['item_order', 'id']
-        verbose_name = 'Procedure Bill Item'
-        verbose_name_plural = 'Procedure Bill Items'
+        db_table = 'opd_bill_items'
+        ordering = ['bill', 'source', 'id']
+        verbose_name = 'OPD Bill Item'
+        verbose_name_plural = 'OPD Bill Items'
         indexes = [
             models.Index(fields=['tenant_id']),
-            models.Index(fields=['tenant_id', 'procedure_bill']),
+            models.Index(fields=['bill', 'source']),
+            models.Index(fields=['origin_content_type', 'origin_object_id']),
         ]
-    
+
     def __str__(self):
-        return f"{self.particular_name} - {self.quantity} × {self.unit_charge}"
-    
+        return f"{self.item_name} - {self.quantity} × {self.unit_price}"
+
     def save(self, *args, **kwargs):
-        """Calculate amount before saving."""
-        self.amount = Decimal(str(self.quantity)) * self.unit_charge
-        
-        # Store procedure name
-        if self.procedure and not self.particular_name:
-            self.particular_name = self.procedure.name
-        
+        """Calculate total price and track manual overrides."""
+        # Set system_calculated_price on first save if not set
+        if not self.pk and not self.system_calculated_price:
+            self.system_calculated_price = self.unit_price
+
+        # Check if price was manually overridden
+        if self.unit_price != self.system_calculated_price:
+            self.is_price_overridden = True
+
+        # Calculate total price
+        self.total_price = Decimal(str(self.quantity)) * self.unit_price
+
         super().save(*args, **kwargs)
-        
-        # Recalculate bill totals
-        self.procedure_bill.calculate_totals()
-        self.procedure_bill.save()
 
 
 class ClinicalNote(models.Model):

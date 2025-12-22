@@ -109,16 +109,41 @@ class BedTransferSerializer(TenantMixin, serializers.ModelSerializer):
 
 
 class IPDBillItemSerializer(TenantMixin, serializers.ModelSerializer):
-    """Serializer for IPD Bill Items."""
+    """Serializer for IPD Bill Items with manual price override support."""
+
+    # Computed field showing if price matches system calculation
+    actual_price = serializers.DecimalField(
+        source='unit_price',
+        max_digits=10,
+        decimal_places=2,
+        read_only=True,
+        help_text="The actual price (same as unit_price, for frontend clarity)"
+    )
 
     class Meta:
         model = IPDBillItem
         fields = [
             'id', 'tenant_id', 'billing', 'item_name', 'source',
-            'quantity', 'unit_price', 'total_price', 'notes',
+            'quantity', 'system_calculated_price', 'unit_price', 'actual_price',
+            'total_price', 'is_price_overridden', 'notes',
+            'origin_content_type', 'origin_object_id',
             'created_at', 'updated_at'
         ]
-        read_only_fields = ['tenant_id', 'total_price', 'created_at', 'updated_at']
+        read_only_fields = [
+            'tenant_id', 'total_price', 'system_calculated_price',
+            'is_price_overridden', 'created_at', 'updated_at'
+        ]
+
+    def validate(self, attrs):
+        """Validate bill item data."""
+        # If unit_price is being set manually and differs from system price
+        if 'unit_price' in attrs and 'system_calculated_price' in self.initial_data:
+            system_price = attrs.get('system_calculated_price')
+            unit_price = attrs.get('unit_price')
+            if system_price and unit_price != system_price:
+                attrs['is_price_overridden'] = True
+
+        return attrs
 
 
 class IPDBillingSerializer(TenantMixin, serializers.ModelSerializer):

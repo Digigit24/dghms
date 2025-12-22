@@ -234,6 +234,178 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         serializer = self.get_serializer(billing)
         return Response(serializer.data)
 
+    @action(detail=True, methods=['post'])
+    def sync_clinical_charges(self, request, pk=None):
+        """
+        Sync all clinical charges (orders) to billing items.
+        This action:
+        1. Identifies all unbilled items for the admission.
+        2. Creates IPDBillItem entries for them.
+        3. Updates the source Orders to link them to these new Bill Items.
+        4. Runs add_bed_charges() to ensure bed charges are up to date.
+        """
+        from django.db import transaction
+        from django.contrib.contenttypes.models import ContentType
+        from apps.diagnostics.models import (
+            Requisition, DiagnosticOrder, MedicineOrder,
+            ProcedureOrder, PackageOrder
+        )
+        from apps.panchakarma.models import PanchakarmaOrder
+
+        billing = self.get_object()
+        admission = billing.admission
+
+        if admission.tenant_id != request.tenant_id:
+            raise PermissionDenied("Access denied")
+
+        created_items = []
+        updated_orders = []
+
+        with transaction.atomic():
+            admission_ct = ContentType.objects.get_for_model(admission)
+            requisitions = Requisition.objects.filter(
+                tenant_id=request.tenant_id,
+                content_type=admission_ct,
+                object_id=admission.pk
+            )
+
+            # Process DiagnosticOrders
+            diagnostic_orders = DiagnosticOrder.objects.filter(
+                tenant_id=request.tenant_id,
+                requisition__in=requisitions,
+                bill_item_content_type__isnull=True  # Correct GFK null check
+            ).select_related('investigation', 'requisition')
+
+            for order in diagnostic_orders:
+                item = IPDBillItem.objects.create(
+                    tenant_id=request.tenant_id,
+                    billing=billing,
+                    item_name=order.investigation.name,
+                    source='Lab' if order.investigation.category == 'laboratory' else 'Radiology',
+                    quantity=1,
+                    unit_price=order.price,
+                    system_calculated_price=order.price,
+                    origin_content_type=ContentType.objects.get_for_model(order),
+                    origin_object_id=order.pk,
+                    notes=f"Test: {order.investigation.code}"
+                )
+                created_items.append(item)
+                order.bill_item_link = item
+                order.save(update_fields=['bill_item_content_type', 'bill_item_object_id'])
+                updated_orders.append(order)
+
+            # Process MedicineOrders
+            medicine_orders = MedicineOrder.objects.filter(
+                tenant_id=request.tenant_id,
+                requisition__in=requisitions,
+                bill_item_content_type__isnull=True
+            ).select_related('product', 'requisition')
+
+            for order in medicine_orders:
+                item = IPDBillItem.objects.create(
+                    tenant_id=request.tenant_id,
+                    billing=billing,
+                    item_name=order.product.product_name,
+                    source='Pharmacy',
+                    quantity=order.quantity,
+                    unit_price=order.price,
+                    system_calculated_price=order.price,
+                    origin_content_type=ContentType.objects.get_for_model(order),
+                    origin_object_id=order.pk,
+                    notes=f"Medicine - Qty: {order.quantity}"
+                )
+                created_items.append(item)
+                order.bill_item_link = item
+                order.save(update_fields=['bill_item_content_type', 'bill_item_object_id'])
+                updated_orders.append(order)
+
+            # Process ProcedureOrders
+            procedure_orders = ProcedureOrder.objects.filter(
+                tenant_id=request.tenant_id,
+                requisition__in=requisitions,
+                bill_item_content_type__isnull=True
+            ).select_related('procedure', 'requisition')
+
+            for order in procedure_orders:
+                item = IPDBillItem.objects.create(
+                    tenant_id=request.tenant_id,
+                    billing=billing,
+                    item_name=order.procedure.name,
+                    source='Procedure',
+                    quantity=order.quantity,
+                    unit_price=order.price,
+                    system_calculated_price=order.price,
+                    origin_content_type=ContentType.objects.get_for_model(order),
+                    origin_object_id=order.pk,
+                    notes=f"Procedure - Qty: {order.quantity}"
+                )
+                created_items.append(item)
+                order.bill_item_link = item
+                order.save(update_fields=['bill_item_content_type', 'bill_item_object_id'])
+                updated_orders.append(order)
+
+            # Process PackageOrders
+            package_orders = PackageOrder.objects.filter(
+                tenant_id=request.tenant_id,
+                requisition__in=requisitions,
+                bill_item_content_type__isnull=True
+            ).select_related('package', 'requisition')
+
+            for order in package_orders:
+                item = IPDBillItem.objects.create(
+                    tenant_id=request.tenant_id,
+                    billing=billing,
+                    item_name=order.package.name,
+                    source='Package',
+                    quantity=order.quantity,
+                    unit_price=order.price,
+                    system_calculated_price=order.price,
+                    origin_content_type=ContentType.objects.get_for_model(order),
+                    origin_object_id=order.pk,
+                    notes=f"Package - Qty: {order.quantity}"
+                )
+                created_items.append(item)
+                order.bill_item_link = item
+                order.save(update_fields=['bill_item_content_type', 'bill_item_object_id'])
+                updated_orders.append(order)
+
+            # Process PanchakarmaOrders
+            panchakarma_orders = PanchakarmaOrder.objects.filter(
+                tenant_id=request.tenant_id,
+                content_type=admission_ct,
+                object_id=admission.pk,
+                bill_item_content_type__isnull=True
+            ).select_related('therapy')
+
+            for order in panchakarma_orders:
+                item = IPDBillItem.objects.create(
+                    tenant_id=request.tenant_id,
+                    billing=billing,
+                    item_name=order.therapy.name,
+                    source='Therapy',
+                    quantity=1,
+                    unit_price=order.therapy.base_charge,
+                    system_calculated_price=order.therapy.base_charge,
+                    origin_content_type=ContentType.objects.get_for_model(order),
+                    origin_object_id=order.pk,
+                    notes="Therapy session"
+                )
+                created_items.append(item)
+                order.bill_item_link = item
+                order.save(update_fields=['bill_item_content_type', 'bill_item_object_id'])
+                updated_orders.append(order)
+
+            # Update bed charges
+            billing.add_bed_charges()
+
+        return Response({
+            'success': True,
+            'message': f'Synced {len(created_items)} clinical charges to billing',
+            'created_items': len(created_items),
+            'updated_orders': len(updated_orders),
+            'items': IPDBillItemSerializer(created_items, many=True).data
+        })
+
 
 class IPDBillItemViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """ViewSet for IPD Bill Items management."""

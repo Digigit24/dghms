@@ -9,6 +9,7 @@ from django.db.models import Q, Count, Avg
 from django.utils import timezone
 from django.db.models import F
 
+
 # OpenAPI/Swagger documentation
 from drf_spectacular.utils import (
     extend_schema,

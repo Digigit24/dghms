@@ -4,7 +4,7 @@ from django.utils.html import format_html
 from common.admin_site import TenantModelAdmin, hms_admin_site
 from .models import (
     Visit, OPDBill, ProcedureMaster, ProcedurePackage,
-    ProcedureBill, ProcedureBillItem, ClinicalNote,
+      ClinicalNote,
     VisitFinding, VisitAttachment,
     ClinicalNoteTemplateGroup, ClinicalNoteTemplate,
     ClinicalNoteTemplateField, ClinicalNoteTemplateFieldOption,
@@ -349,119 +349,6 @@ class ProcedurePackageAdmin(TenantModelAdmin):
             'Active' if obj.is_active else 'Inactive'
         )
     is_active_badge.short_description = 'Status'
-
-
-class ProcedureBillItemInline(admin.TabularInline):
-    """Inline admin for ProcedureBillItem."""
-    
-    model = ProcedureBillItem
-    extra = 1
-    fields = [
-        'procedure',
-        'particular_name',
-        'quantity',
-        'unit_charge',
-        'amount',
-        'note',
-        'item_order',
-    ]
-    readonly_fields = ['amount']
-    autocomplete_fields = ['procedure']
-
-
-class ProcedureBillAdmin(TenantModelAdmin):
-    """Admin interface for ProcedureBill model."""
-
-    list_display = [
-        'bill_number',
-        'visit',
-        'doctor',
-        'bill_date',
-        'total_amount',
-        'payable_amount',
-        'payment_status_badge',
-    ]
-    list_filter = [
-        'payment_status',
-        'bill_type',
-        'payment_mode',
-        'bill_date',
-    ]
-    search_fields = [
-        'bill_number',
-        'visit__visit_number',
-        'doctor__first_name',
-        'doctor__last_name',
-    ]
-    readonly_fields = [
-        'bill_number',
-        'bill_date',
-        'total_amount',
-        'payable_amount',
-        'balance_amount',
-        'payment_status',
-        'created_at',
-        'updated_at',
-        'tenant_id',
-    ]
-    autocomplete_fields = ['visit', 'doctor']
-    inlines = [ProcedureBillItemInline]
-
-    fieldsets = (
-        ('Bill Information', {
-            'fields': (
-                'bill_number',
-                'bill_date',
-                'visit',
-                'doctor',
-            )
-        }),
-        ('Bill Classification', {
-            'fields': (
-                'bill_type',
-                'category',
-            )
-        }),
-        ('Financial Details', {
-            'fields': (
-                'total_amount',
-                'discount_percent',
-                'discount_amount',
-                'payable_amount',
-            )
-        }),
-        ('Payment Information', {
-            'fields': (
-                'payment_mode',
-                'payment_details',
-                'received_amount',
-                'balance_amount',
-                'payment_status',
-            )
-        }),
-        ('Audit', {
-            'fields': (
-                'billed_by_id',
-                'tenant_id',
-                'created_at',
-                'updated_at',
-            )
-        }),
-    )
-    
-    def payment_status_badge(self, obj):
-        """Display payment status with color badge."""
-        colors = {
-            'paid': 'green',
-            'partial': 'orange',
-            'unpaid': 'red',
-        }
-        return format_html(
-            '<span style="background-color: {}; color: white; padding: 3px 10px; border-radius: 3px;">{}</span>',
-            colors.get(obj.payment_status, 'gray'),
-            obj.get_payment_status_display()
-        )
-    payment_status_badge.short_description = 'Payment Status'
 
 
 class ClinicalNoteAdmin(TenantModelAdmin):
@@ -1449,7 +1336,7 @@ hms_admin_site.register(Visit, VisitAdmin)
 hms_admin_site.register(OPDBill, OPDBillAdmin)
 hms_admin_site.register(ProcedureMaster, ProcedureMasterAdmin)
 hms_admin_site.register(ProcedurePackage, ProcedurePackageAdmin)
-hms_admin_site.register(ProcedureBill, ProcedureBillAdmin)
+
 hms_admin_site.register(ClinicalNote, ClinicalNoteAdmin)
 hms_admin_site.register(VisitFinding, VisitFindingAdmin)
 hms_admin_site.register(VisitAttachment, VisitAttachmentAdmin)

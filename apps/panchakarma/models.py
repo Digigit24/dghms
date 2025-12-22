@@ -1,4 +1,6 @@
 from django.db import models
+from django.contrib.contenttypes.fields import GenericForeignKey
+from django.contrib.contenttypes.models import ContentType
 from django.core.validators import MinValueValidator
 from decimal import Decimal
 from common.mixins import TenantModelMixin, EncounterMixin
@@ -45,12 +47,28 @@ class PanchakarmaOrder(TenantModelMixin, EncounterMixin):
     )
     therapy = models.ForeignKey(Therapy, on_delete=models.PROTECT)
     status = models.CharField(
-        max_length=20, 
-        choices=STATUS_CHOICES, 
+        max_length=20,
+        choices=STATUS_CHOICES,
         default='ordered'
     )
     order_date = models.DateTimeField(auto_now_add=True)
     notes = models.TextField(blank=True)
+
+    # GenericForeignKey to link to OPDBillItem or IPDBillItem
+    bill_item_content_type = models.ForeignKey(
+        ContentType,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text="Type of bill item (OPDBillItem or IPDBillItem)",
+        related_name='+'
+    )
+    bill_item_object_id = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="ID of the bill item"
+    )
+    bill_item_link = GenericForeignKey('bill_item_content_type', 'bill_item_object_id')
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -60,6 +78,9 @@ class PanchakarmaOrder(TenantModelMixin, EncounterMixin):
         verbose_name = 'Panchakarma Order'
         verbose_name_plural = 'Panchakarma Orders'
         ordering = ['-order_date']
+        indexes = [
+            models.Index(fields=['bill_item_content_type', 'bill_item_object_id']),
+        ]
 
     def __str__(self):
         return f"{self.therapy.name} for {self.patient}"
