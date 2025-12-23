@@ -937,44 +937,19 @@ class OPDBillItemViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         """
-        Custom create to add tenant_id and ensure bill recalculation.
-        When a new item is created, the parent bill's total needs to be recalculated.
+        Custom create to add tenant_id.
+        Bill recalculation is handled automatically by signals.
         """
         request = self.request
         if hasattr(request, 'tenant_id'):
             serializer.validated_data['tenant_id'] = request.tenant_id
-        
+
         # Ensure system_calculated_price is set if not provided for manual items
         if 'system_calculated_price' not in serializer.validated_data or serializer.validated_data['system_calculated_price'] is None:
             serializer.validated_data['system_calculated_price'] = serializer.validated_data.get('unit_price', Decimal('0.00'))
 
-        opd_bill_item = serializer.save()
-        
-        # Recalculate parent bill totals after item is created
-        if opd_bill_item.bill:
-            opd_bill_item.bill._calculate_derived_totals()
-            opd_bill_item.bill.save(update_fields=['total_amount', 'discount_amount', 'payable_amount', 'balance_amount', 'payment_status'])
-
-    def perform_update(self, serializer):
-        """
-        Custom update to ensure bill recalculation.
-        When an item is updated, the parent bill's total needs to be recalculated.
-        """
-        opd_bill_item = serializer.save()
-        if opd_bill_item.bill:
-            opd_bill_item.bill._calculate_derived_totals()
-            opd_bill_item.bill.save(update_fields=['total_amount', 'discount_amount', 'payable_amount', 'balance_amount', 'payment_status'])
-
-    def perform_destroy(self, instance):
-        """
-        Custom destroy to ensure bill recalculation.
-        When an item is deleted, the parent bill's total needs to be recalculated.
-        """
-        bill = instance.bill
-        instance.delete()
-        if bill:
-            bill._calculate_derived_totals()
-            bill.save(update_fields=['total_amount', 'discount_amount', 'payable_amount', 'balance_amount', 'payment_status'])
+        serializer.save()
+        # Signal will automatically recalculate parent bill totals
 
 # ============================================================================
 # PROCEDURE MASTER VIEWSET

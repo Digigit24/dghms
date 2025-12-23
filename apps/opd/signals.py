@@ -12,8 +12,8 @@ def update_opd_bill_totals(sender, instance, **kwargs):
     OPDBillItem is saved or deleted.
     """
     if instance.bill:
-        instance.bill._calculate_derived_totals() # Call the new helper method
-        # Save the OPDBill instance with updated calculated fields
+        # The save() method will call _calculate_derived_totals() automatically
+        # Just trigger a save to recalculate totals
         instance.bill.save(update_fields=['total_amount', 'discount_amount', 'payable_amount', 'balance_amount', 'payment_status'])
 
 
@@ -21,15 +21,22 @@ def update_opd_bill_totals(sender, instance, **kwargs):
 @receiver([post_save, post_delete], sender=OPDBill)
 def update_visit_payment_status(sender, instance, **kwargs):
     """
-    Signal to update the associated Visit's payment status and paid amount
+    Signal to update the associated Visit's payment status and total/paid amounts
     whenever an OPDBill is saved or deleted.
     """
     if instance.visit:
         visit = instance.visit
-        # Calculate total paid amount from all OPDBills associated with this visit
-        # Summing received_amount for both 'paid' and 'partial' bills
-        total_paid_from_bills = OPDBill.objects.filter(visit=visit).aggregate(Sum('received_amount'))['received_amount__sum'] or Decimal('0.00')
-        
-        visit.paid_amount = total_paid_from_bills
-        visit.update_payment_status() # This method already calls save() on the Visit object.
+
+        # Calculate aggregated amounts from all OPDBills associated with this visit
+        bill_aggregates = OPDBill.objects.filter(visit=visit).aggregate(
+            total_amount_sum=Sum('total_amount'),
+            received_amount_sum=Sum('received_amount')
+        )
+
+        # Update visit's total and paid amounts
+        visit.total_amount = bill_aggregates['total_amount_sum'] or Decimal('0.00')
+        visit.paid_amount = bill_aggregates['received_amount_sum'] or Decimal('0.00')
+
+        # Update payment status (this method calls save() on the Visit)
+        visit.update_payment_status()
 

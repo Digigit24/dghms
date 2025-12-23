@@ -118,25 +118,25 @@ class IPDBillingAdmin(TenantModelAdmin):
     """Admin for IPD Billing model."""
 
     list_display = [
-        'admission', 'bill_number', 'admission', 'bill_date', 'total_amount',
-        'paid_amount', 'balance_amount', 'status', 'tenant_id'
+        'admission', 'bill_number', 'bill_date', 'total_amount',
+        'received_amount', 'balance_amount', 'payment_status', 'tenant_id'
     ]
-    list_filter = ['status', 'bill_date']
+    list_filter = ['payment_status', 'bill_date']
     search_fields = ['bill_number', 'admission__admission_id', 'admission__patient__first_name']
     readonly_fields = [
         'tenant_id', 'bill_number', 'total_amount', 'balance_amount',
-        'status', 'created_by_user_id', 'created_at', 'updated_at'
+        'payment_status', 'billed_by_id', 'created_at', 'updated_at'
     ]
 
     fieldsets = (
         ('Billing Information', {
-            'fields': ('bill_number', 'admission', 'bill_date', 'status')
+            'fields': ('bill_number', 'admission', 'bill_date', 'payment_status')
         }),
         ('Financial Details', {
-            'fields': ('total_amount', 'discount', 'tax', 'paid_amount', 'balance_amount')
+            'fields': ('total_amount', 'discount_percent', 'discount_amount', 'payable_amount', 'received_amount', 'balance_amount')
         }),
         ('System Fields', {
-            'fields': ('tenant_id', 'created_by_user_id', 'created_at', 'updated_at'),
+            'fields': ('tenant_id', 'billed_by_id', 'created_at', 'updated_at'),
             'classes': ('collapse',)
         }),
     )
@@ -147,16 +147,16 @@ class IPDBillItemAdmin(TenantModelAdmin):
     """Admin for IPD Bill Item model."""
 
     list_display = [
-        'id', 'billing', 'item_name', 'source', 'quantity',
+        'id', 'bill', 'item_name', 'source', 'quantity',
         'unit_price', 'total_price', 'tenant_id'
     ]
     list_filter = ['source']
-    search_fields = ['item_name', 'billing__bill_number']
+    search_fields = ['item_name', 'bill__bill_number']
     readonly_fields = ['tenant_id', 'total_price', 'created_at', 'updated_at']
 
     fieldsets = (
         ('Item Information', {
-            'fields': ('billing', 'item_name', 'source', 'quantity', 'unit_price', 'total_price', 'notes')
+            'fields': ('bill', 'item_name', 'source', 'quantity', 'unit_price', 'total_price', 'notes')
         }),
         ('System Fields', {
             'fields': ('tenant_id', 'created_at', 'updated_at'),

@@ -198,31 +198,39 @@ class OPDBillCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = OPDBill
         fields = [
-            'visit', 'doctor', 'opd_type', 'opd_subtype', 'charge_type',
+            'id', 'visit', 'doctor', 'opd_type', 'opd_subtype', 'charge_type',
             'diagnosis', 'remarks', 'total_amount', 'discount_percent',
             'payment_mode', 'payment_details', 'received_amount'
         ]
-    
-    def validate_visit(self, value):
-        """Validate that visit doesn't already have an OPD bill"""
-        if self.instance is None:  # Only for creation
-            if hasattr(value, 'opd_bill'):
-                raise serializers.ValidationError(
-                    "This visit already has an OPD bill"
-                )
-        return value
+        read_only_fields = ['id']
     
     def validate(self, data):
         """Validate bill data"""
-        # Validate received amount doesn't exceed total
-        total = data.get('total_amount', Decimal('0'))
-        received = data.get('received_amount', Decimal('0'))
-        
-        if received > total:
-            raise serializers.ValidationError({
-                'received_amount': 'Received amount cannot exceed total amount'
-            })
-        
+        # Validate received amount doesn't exceed payable amount
+        if self.instance:
+            # For updates, calculate payable amount from instance + updates
+            total = self.instance.total_amount
+
+            # Check if discount is being changed
+            if 'discount_percent' in data and data['discount_percent'] > Decimal('0'):
+                discount_amount = (total * data['discount_percent'] / Decimal('100.00')).quantize(Decimal('0.01'))
+            elif 'discount_amount' in data:
+                discount_amount = data['discount_amount']
+            else:
+                discount_amount = self.instance.discount_amount
+
+            payable_amount = total - discount_amount
+            received = data.get('received_amount', self.instance.received_amount)
+
+            if received > payable_amount:
+                raise serializers.ValidationError({
+                    'received_amount': f'Received amount cannot exceed payable amount ({payable_amount})'
+                })
+        else:
+            # For creates, skip this validation since total will be calculated from items
+            # The model's save() method will handle this
+            pass
+
         return data
     
     def create(self, validated_data):

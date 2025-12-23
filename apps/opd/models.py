@@ -1,5 +1,5 @@
 # opd/models.py
-from django.db import models
+from django.db import models, transaction, IntegrityError
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from django.contrib.contenttypes.models import ContentType
@@ -384,37 +384,65 @@ class OPDBill(models.Model):
         return self.bill_number
     
     def save(self, *args, **kwargs):
-        is_new_instance = self.pk is None
-        
-        if not self.bill_number:
-            self.bill_number = self.generate_bill_number()
+        """
+        Save OPDBill with safeguards against duplicate bill numbers (race conditions).
+        """
+        max_retries = 3
+        last_exception = None
 
-        # 1. Save initially to get a PK for new instances
-        if is_new_instance:
-            super().save(*args, **kwargs) # Save initially to get a PK
-            # Clear kwargs to prevent double-saving issues if args/kwargs contain things
-            # specific to the first save. We'll manually specify update_fields for the second save.
-            kwargs.pop('force_insert', None)
-            kwargs.pop('force_update', None)
-            kwargs.pop('using', None)
-            kwargs.pop('update_fields', None)
+        for _ in range(max_retries):
+            save_kwargs = kwargs.copy()
+            try:
+                with transaction.atomic():
+                    is_new_instance = self.pk is None
 
-        # 2. Now that self.pk is guaranteed to be available (for new instances) or already exists,
-        # calculate derived totals
-        self._calculate_derived_totals() # Call the helper method
+                    if not self.bill_number:
+                        self.bill_number = self.generate_bill_number()
 
-        # 3. Save again with updated calculated fields, using update_fields to prevent recursion
-        # and only updating the fields that _calculate_derived_totals modifies.
-        # For existing instances, this will be a normal save or update relevant fields.
-        update_fields_list = ['total_amount', 'discount_amount', 'payable_amount', 'balance_amount', 'payment_status']
-        # If specific update_fields were passed to the original save call, merge them.
-        if 'update_fields' in kwargs:
-            update_fields_list = list(set(update_fields_list) | set(kwargs['update_fields']))
-            kwargs['update_fields'] = update_fields_list
-        else:
-            kwargs['update_fields'] = update_fields_list
+                    # Check if this is a signal-triggered save (has explicit update_fields)
+                    is_signal_save = 'update_fields' in save_kwargs
 
-        super().save(*args, **kwargs)
+                    if is_new_instance:
+                        # For NEW instances: save all fields first to get PK
+                        super().save(*args, **save_kwargs)
+                        # Clear kwargs to prevent double-saving issues
+                        save_kwargs.pop('force_insert', None)
+                        save_kwargs.pop('force_update', None)
+                        save_kwargs.pop('using', None)
+                        save_kwargs.pop('update_fields', None)
+
+                        # Then calculate and save derived fields
+                        self._calculate_derived_totals()
+                        save_kwargs['update_fields'] = ['total_amount', 'discount_amount', 'payable_amount', 'balance_amount', 'payment_status']
+                        super().save(*args, **save_kwargs)
+
+                    elif is_signal_save:
+                        # Signal-triggered save: only recalculate and save specified fields
+                        self._calculate_derived_totals()
+                        super().save(*args, **save_kwargs)
+
+                    else:
+                        # Normal update: save all changed fields first, then recalculate
+                        # This ensures fields like received_amount, payment_mode, etc. are saved
+                        super().save(*args, **save_kwargs)
+
+                        # Then recalculate derived fields and save them
+                        self._calculate_derived_totals()
+                        save_kwargs['update_fields'] = ['total_amount', 'discount_amount', 'payable_amount', 'balance_amount', 'payment_status']
+                        super().save(*args, **save_kwargs)
+
+                return
+            except IntegrityError as exc:
+                last_exception = exc
+                # Retry if the bill_number collided due to a concurrent create
+                if 'opd_bills_bill_number_key' in str(exc):
+                    self.bill_number = None
+                    continue
+                raise
+
+        # If we exhausted retries, re-raise the last exception
+        if last_exception:
+            raise last_exception
 
     @staticmethod
     def generate_bill_number():
@@ -423,13 +451,31 @@ class OPDBill(models.Model):
         today = date.today()
         date_str = today.strftime('%Y%m%d')
         
-        # Get count of bills for today
-        today_count = OPDBill.objects.filter(
-            bill_date__date=today
-        ).count() + 1
-        
-        return f"OPD-BILL/{date_str}/{today_count:03d}"
+        # Lock today's bills to avoid race conditions while fetching the next sequence
+        last_bill = (
+            OPDBill.objects
+            .filter(bill_date__date=today)
+            .select_for_update()
+            .order_by('-bill_number')
+            .first()
+        )
 
+        last_sequence = 0
+        if last_bill:
+            try:
+                last_sequence = int(last_bill.bill_number.split('/')[-1])
+            except (ValueError, AttributeError):
+                last_sequence = OPDBill.objects.filter(bill_date__date=today).count()
+
+        next_sequence = last_sequence + 1
+
+        # Ensure uniqueness even if there are gaps or manual entries
+        while True:
+            candidate = f"OPD-BILL/{date_str}/{next_sequence:03d}"
+            if not OPDBill.objects.filter(bill_number=candidate).exists():
+                return candidate
+            next_sequence += 1
+        
     def _calculate_derived_totals(self): # Renamed helper method
         """
         Calculate total amounts from items, apply discount, and update status.
@@ -451,10 +497,14 @@ class OPDBill(models.Model):
 
         # Calculate payable amount
         if self.discount_percent > 0:
+            # Calculate discount from percentage (overrides manual discount_amount)
             self.discount_amount = (self.total_amount * self.discount_percent / Decimal('100.00')).quantize(Decimal('0.01'))
-        else:
-            self.discount_amount = Decimal('0.00') # Ensure discount_amount is 0 if discount_percent is 0
-        
+        # else: keep existing discount_amount (allows manual discounts when discount_percent is 0)
+
+        # Ensure discount_amount is set (default to 0 if not set)
+        if self.discount_amount is None:
+            self.discount_amount = Decimal('0.00')
+
         self.payable_amount = self.total_amount - self.discount_amount
         
         # Calculate balance

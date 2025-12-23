@@ -451,76 +451,131 @@ class BedTransfer(models.Model):
 
 class IPDBilling(models.Model):
     """
-    IPD Billing Model - Consolidated billing for IPD admissions.
+    IPD Billing Model - Billing for IPD admissions.
 
+    Supports multiple bills per admission (like OPD).
     Summarizes all charges including bed charges, diagnostics, pharmacy, etc.
     """
 
-    STATUS_CHOICES = [
-        ('pending', 'Pending'),
+    PAYMENT_STATUS_CHOICES = [
+        ('unpaid', 'Unpaid'),
         ('partial', 'Partially Paid'),
         ('paid', 'Paid'),
-        ('cancelled', 'Cancelled'),
     ]
 
+    PAYMENT_MODE_CHOICES = [
+        ('cash', 'Cash'),
+        ('card', 'Card'),
+        ('upi', 'UPI'),
+        ('netbanking', 'Net Banking'),
+        ('insurance', 'Insurance'),
+        ('cheque', 'Cheque'),
+        ('other', 'Other'),
+    ]
+
+    # Primary Fields
+    id = models.AutoField(primary_key=True)
     tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
-    admission = models.OneToOneField(
+
+    # Changed from OneToOneField to ForeignKey to allow multiple bills per admission
+    admission = models.ForeignKey(
         Admission,
-        on_delete=models.CASCADE,
-        related_name='billing',
-        primary_key=True
+        on_delete=models.PROTECT,
+        related_name='ipd_bills',
+        help_text="Admission this bill belongs to"
     )
+
     bill_number = models.CharField(
         max_length=50,
         unique=True,
+        blank=True,
         help_text="Unique bill identifier (e.g., IPD-BILL/20231223/001)"
     )
-    bill_date = models.DateTimeField(auto_now_add=True)
+    bill_date = models.DateTimeField(
+        default=timezone.now,
+        help_text="Bill generation date"
+    )
 
-    # Financial Details
+    # Doctor Reference
+    doctor_id = models.UUIDField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Attending doctor ID"
+    )
+
+    # Diagnosis and Remarks
+    diagnosis = models.TextField(blank=True, help_text="Diagnosis for this bill")
+    remarks = models.TextField(blank=True, help_text="Additional remarks or notes")
+
+    # Financial Details (Auto-calculated from items)
     total_amount = models.DecimalField(
         max_digits=12,
         decimal_places=2,
         default=Decimal('0.00'),
         validators=[MinValueValidator(Decimal('0.00'))],
-        help_text="Total bill amount"
+        help_text="Total amount (sum of items)"
     )
-    discount = models.DecimalField(
+
+    # Discount (percentage or amount)
+    discount_percent = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        validators=[MinValueValidator(Decimal('0.00')), MaxValueValidator(Decimal('100.00'))],
+        help_text="Discount percentage (0-100)"
+    )
+    discount_amount = models.DecimalField(
         max_digits=10,
         decimal_places=2,
         default=Decimal('0.00'),
         validators=[MinValueValidator(Decimal('0.00'))],
-        help_text="Total discount amount"
+        help_text="Discount amount (calculated or manual)"
     )
-    tax = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        default=Decimal('0.00'),
-        validators=[MinValueValidator(Decimal('0.00'))],
-        help_text="Tax amount"
-    )
-    paid_amount = models.DecimalField(
+
+    # Payable amount (after discount)
+    payable_amount = models.DecimalField(
         max_digits=12,
         decimal_places=2,
         default=Decimal('0.00'),
         validators=[MinValueValidator(Decimal('0.00'))],
-        help_text="Amount paid so far"
+        help_text="Amount to be paid (total - discount)"
+    )
+
+    # Payment Details
+    payment_mode = models.CharField(
+        max_length=20,
+        choices=PAYMENT_MODE_CHOICES,
+        default='cash',
+        help_text="Mode of payment"
+    )
+    payment_details = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Payment transaction details (JSON)"
+    )
+    received_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        validators=[MinValueValidator(Decimal('0.00'))],
+        help_text="Amount received from patient"
     )
     balance_amount = models.DecimalField(
         max_digits=12,
         decimal_places=2,
         default=Decimal('0.00'),
-        validators=[MinValueValidator(Decimal('0.00'))],
-        help_text="Balance/due amount"
+        help_text="Balance due (payable - received)"
     )
-    status = models.CharField(
+
+    payment_status = models.CharField(
         max_length=20,
-        choices=STATUS_CHOICES,
-        default='pending'
+        choices=PAYMENT_STATUS_CHOICES,
+        default='unpaid'
     )
 
     # Audit Fields
-    created_by_user_id = models.UUIDField(
+    billed_by_id = models.UUIDField(
         null=True,
         blank=True,
         db_index=True,
@@ -534,23 +589,75 @@ class IPDBilling(models.Model):
     class Meta:
         db_table = 'ipd_billings'
         ordering = ['-bill_date']
-        verbose_name = 'IPD Billing'
-        verbose_name_plural = 'IPD Billings'
+        verbose_name = 'IPD Bill'
+        verbose_name_plural = 'IPD Bills'
         indexes = [
             models.Index(fields=['tenant_id']),
-            models.Index(fields=['tenant_id', 'status']),
+            models.Index(fields=['tenant_id', 'payment_status']),
+            models.Index(fields=['admission', 'bill_date']),
             models.Index(fields=['bill_number'], name='ipd_bill_number_idx'),
-            models.Index(fields=['status'], name='ipd_bill_status_idx'),
+            models.Index(fields=['payment_status'], name='ipd_payment_status_idx'),
         ]
 
     def __str__(self):
         return f"{self.bill_number} - {self.admission.admission_id}"
 
     def save(self, *args, **kwargs):
-        """Auto-generate bill number and calculate totals."""
-        if not self.bill_number:
-            self.bill_number = self.generate_bill_number()
-        super().save(*args, **kwargs)
+        """Save IPD bill with auto-calculations."""
+        from django.db import transaction, IntegrityError
+
+        max_retries = 3
+        last_exception = None
+
+        for _ in range(max_retries):
+            save_kwargs = kwargs.copy()
+            try:
+                with transaction.atomic():
+                    is_new_instance = self.pk is None
+
+                    if not self.bill_number:
+                        self.bill_number = self.generate_bill_number()
+
+                    # Check if this is a signal-triggered save
+                    is_signal_save = 'update_fields' in save_kwargs
+
+                    if is_new_instance:
+                        # For NEW instances: save all fields first to get PK
+                        super().save(*args, **save_kwargs)
+                        save_kwargs.pop('force_insert', None)
+                        save_kwargs.pop('force_update', None)
+                        save_kwargs.pop('using', None)
+                        save_kwargs.pop('update_fields', None)
+
+                        # Then calculate and save derived fields
+                        self._calculate_derived_totals()
+                        save_kwargs['update_fields'] = ['total_amount', 'discount_amount', 'payable_amount', 'balance_amount', 'payment_status']
+                        super().save(*args, **save_kwargs)
+
+                    elif is_signal_save:
+                        # Signal-triggered save: only recalculate and save specified fields
+                        self._calculate_derived_totals()
+                        super().save(*args, **save_kwargs)
+
+                    else:
+                        # Normal update: save all changed fields first, then recalculate
+                        super().save(*args, **save_kwargs)
+
+                        # Then recalculate derived fields and save them
+                        self._calculate_derived_totals()
+                        save_kwargs['update_fields'] = ['total_amount', 'discount_amount', 'payable_amount', 'balance_amount', 'payment_status']
+                        super().save(*args, **save_kwargs)
+
+                return
+            except IntegrityError as exc:
+                last_exception = exc
+                if 'ipd_bill_number_idx' in str(exc) or 'ipd_billings_bill_number_key' in str(exc):
+                    self.bill_number = None
+                    continue
+                raise
+
+        if last_exception:
+            raise last_exception
 
     @staticmethod
     def generate_bill_number():
@@ -566,26 +673,57 @@ class IPDBilling(models.Model):
 
         return f"IPD-BILL/{date_str}/{today_count:03d}"
 
-    def calculate_totals(self):
-        """Calculate total amount from items."""
+    def _calculate_derived_totals(self):
+        """
+        Calculate and update derived financial fields.
+        Called automatically by save() method.
+
+        Calculations:
+        1. total_amount = sum of all item total_prices
+        2. discount_amount = (total_amount * discount_percent / 100) OR manual discount_amount
+        3. payable_amount = total_amount - discount_amount
+        4. balance_amount = payable_amount - received_amount
+        5. payment_status = 'paid' | 'partial' | 'unpaid'
+        """
         # Sum all bill items
-        items_total = sum(
-            item.total_price for item in self.items.all()
-        )
+        items_total = self.items.aggregate(
+            total=models.Sum('total_price')
+        )['total'] or Decimal('0.00')
+
         self.total_amount = items_total
 
-        # Calculate balance
-        net_amount = self.total_amount - self.discount + self.tax
-        self.balance_amount = net_amount - self.paid_amount
+        # Calculate discount
+        if self.discount_percent > 0:
+            # Calculate discount from percentage (overrides manual discount_amount)
+            self.discount_amount = (self.total_amount * self.discount_percent / Decimal('100.00')).quantize(Decimal('0.01'))
+        # else: keep existing discount_amount (allows manual discounts when discount_percent is 0)
 
-        # Update status
-        if self.paid_amount >= net_amount:
-            self.status = 'paid'
+        # Ensure discount_amount is set
+        if self.discount_amount is None:
+            self.discount_amount = Decimal('0.00')
+
+        # Calculate payable amount
+        self.payable_amount = self.total_amount - self.discount_amount
+
+        # Calculate balance
+        self.balance_amount = self.payable_amount - self.received_amount
+
+        # Update payment status
+        if self.received_amount >= self.payable_amount:
+            self.payment_status = 'paid'
             self.balance_amount = Decimal('0.00')
-        elif self.paid_amount > Decimal('0.00'):
-            self.status = 'partial'
+        elif self.received_amount > Decimal('0.00'):
+            self.payment_status = 'partial'
         else:
-            self.status = 'pending'
+            self.payment_status = 'unpaid'
+
+    def record_payment(self, amount, mode='cash', details=None):
+        """Record a payment for this bill."""
+        self.received_amount += Decimal(str(amount))
+        self.payment_mode = mode
+        if details:
+            self.payment_details = details
+        self.save()
 
     def add_bed_charges(self):
         """
@@ -618,7 +756,7 @@ class IPDBilling(models.Model):
 
         # Create or update bed charge item with origin tracking
         bed_item, created = IPDBillItem.objects.update_or_create(
-            billing=self,
+            bill=self,
             source='Bed',
             origin_content_type=admission_ct,
             origin_object_id=self.admission.pk,
@@ -628,13 +766,10 @@ class IPDBilling(models.Model):
                 'quantity': length_of_stay,
                 'unit_price': bed_charge_per_day,
                 'system_calculated_price': bed_charge_per_day,
-                'total_price': total_bed_charge,
                 'notes': f"Bed charges from {self.admission.admission_date.date()} to {(self.admission.discharge_date or timezone.now()).date()}"
             }
         )
-
-        self.calculate_totals()
-        self.save()
+        # No need to call save() - signal will auto-recalculate totals
 
         return bed_item
 
@@ -663,10 +798,11 @@ class IPDBillItem(models.Model):
     id = models.AutoField(primary_key=True)
     tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
 
-    billing = models.ForeignKey(
+    bill = models.ForeignKey(
         IPDBilling,
         on_delete=models.CASCADE,
-        related_name='items'
+        related_name='items',
+        help_text="IPD bill this item belongs to"
     )
     item_name = models.CharField(
         max_length=200,
@@ -736,28 +872,32 @@ class IPDBillItem(models.Model):
 
     class Meta:
         db_table = 'ipd_bill_items'
-        ordering = ['billing', 'source', 'id']
+        ordering = ['bill', 'source', 'id']
         verbose_name = 'IPD Bill Item'
         verbose_name_plural = 'IPD Bill Items'
         indexes = [
             models.Index(fields=['tenant_id']),
-            models.Index(fields=['billing', 'source']),
+            models.Index(fields=['bill', 'source']),
             models.Index(fields=['origin_content_type', 'origin_object_id']),
         ]
 
     def __str__(self):
-        return f"{self.item_name} - {self.quantity} × {self.unit_price}"
+        return f"{self.item_name} ({self.source}) - {self.bill.bill_number}"
 
     def save(self, *args, **kwargs):
-        """Calculate total price and track manual overrides."""
-        # Set system_calculated_price on first save if not set
-        if not self.pk and not self.system_calculated_price:
-            self.system_calculated_price = self.unit_price
+        """Auto-calculate total_price and detect price overrides."""
+        # Auto-calculate total_price
+        self.total_price = self.unit_price * self.quantity
 
-        # Check if price was manually overridden
-        if self.unit_price != self.system_calculated_price:
+        # Detect if price was manually overridden
+        if self.system_calculated_price and self.unit_price != self.system_calculated_price:
             self.is_price_overridden = True
+        else:
+            self.is_price_overridden = False
 
-        # Calculate total price
-        self.total_price = Decimal(str(self.quantity)) * self.unit_price
         super().save(*args, **kwargs)
+
+    @property
+    def price_override_difference(self):
+        """Return the difference between system price and actual price."""
+        return self.unit_price - self.system_calculated_price

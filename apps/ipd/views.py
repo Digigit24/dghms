@@ -149,7 +149,7 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     permission_classes = [HMSPermission]
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['status', 'admission']
+    filterset_fields = ['payment_status', 'admission']
     search_fields = ['bill_number', 'admission__admission_id', 'admission__patient__first_name']
     ordering_fields = ['bill_date', 'total_amount', 'created_at']
     ordering = ['-bill_date']
@@ -188,7 +188,7 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         # Pass tenant_id, user_id, and admission instance to the serializer's create method
         serializer.save(
             tenant_id=request.tenant_id,
-            created_by_user_id=request.user_id,
+            billed_by_id=request.user_id,
             admission=admission
         )
 

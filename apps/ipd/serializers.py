@@ -123,25 +123,33 @@ class IPDBillItemSerializer(TenantMixin, serializers.ModelSerializer):
     class Meta:
         model = IPDBillItem
         fields = [
-            'id', 'tenant_id', 'billing', 'item_name', 'source',
+            'id', 'tenant_id', 'bill', 'item_name', 'source',
             'quantity', 'system_calculated_price', 'unit_price', 'actual_price',
             'total_price', 'is_price_overridden', 'notes',
             'origin_content_type', 'origin_object_id',
             'created_at', 'updated_at'
         ]
         read_only_fields = [
-            'tenant_id', 'total_price', 'system_calculated_price',
+            'id', 'tenant_id', 'total_price',
             'is_price_overridden', 'created_at', 'updated_at'
         ]
+        extra_kwargs = {
+            'system_calculated_price': {'required': False, 'allow_null': True}
+        }
 
     def validate(self, attrs):
         """Validate bill item data."""
-        # If unit_price is being set manually and differs from system price
-        if 'unit_price' in attrs and 'system_calculated_price' in self.initial_data:
-            system_price = attrs.get('system_calculated_price')
-            unit_price = attrs.get('unit_price')
-            if system_price and unit_price != system_price:
-                attrs['is_price_overridden'] = True
+        unit_price = attrs.get('unit_price')
+        
+        # If system_calculated_price is not provided, set it to unit_price
+        if 'system_calculated_price' not in attrs or attrs.get('system_calculated_price') is None:
+            attrs['system_calculated_price'] = unit_price
+
+        # Detect if price was manually overridden
+        if unit_price != attrs.get('system_calculated_price'):
+            attrs['is_price_overridden'] = True
+        else:
+            attrs['is_price_overridden'] = False
 
         return attrs
 
@@ -156,33 +164,25 @@ class IPDBillingSerializer(TenantMixin, serializers.ModelSerializer):
     class Meta:
         model = IPDBilling
         fields = [
-            'tenant_id', 'admission', 'admission_id', 'patient_name',
-            'bill_number', 'bill_date', 'total_amount', 'discount', 'tax',
-            'paid_amount', 'balance_amount', 'status', 'items',
-            'created_by_user_id', 'created_at', 'updated_at'
+            'id', 'tenant_id', 'admission', 'admission_id', 'patient_name',
+            'bill_number', 'bill_date', 'doctor_id', 'diagnosis', 'remarks',
+            'total_amount', 'discount_percent', 'discount_amount', 'payable_amount',
+            'payment_mode', 'payment_details', 'received_amount', 'balance_amount', 'payment_status',
+            'items', 'billed_by_id', 'created_at', 'updated_at'
         ]
         read_only_fields = [
-            'tenant_id', 'bill_number', 'total_amount', 'balance_amount',
-            'status', 'created_by_user_id', 'created_at', 'updated_at'
+            'id', 'tenant_id', 'bill_number', 'total_amount', 'payable_amount', 'balance_amount',
+            'payment_status', 'billed_by_id', 'created_at', 'updated_at'
         ]
 
     def create(self, validated_data):
         """
-        Create a new IPD Billing instance, and automatically add bed charges.
+        Create a new IPD Billing instance.
         """
-        # Ensure admission is provided
-        admission = validated_data.get('admission')
-        if not admission:
-            raise serializers.ValidationError({'admission': 'Admission is required.'})
-
-        # Check if a bill already exists for this admission
-        if IPDBilling.objects.filter(admission=admission).exists():
-            raise serializers.ValidationError({'admission': 'A bill already exists for this admission.'})
-
-        # Create the billing instance
+        # The admission instance is expected to be in validated_data
         billing = IPDBilling.objects.create(**validated_data)
 
-        # Add initial bed charges
+        # Optionally, add initial bed charges or other items
         billing.add_bed_charges()
 
         return billing
@@ -197,6 +197,6 @@ class IPDBillingListSerializer(TenantMixin, serializers.ModelSerializer):
     class Meta:
         model = IPDBilling
         fields = [
-            'bill_number', 'admission_id', 'patient_name',
-            'bill_date', 'total_amount', 'paid_amount', 'balance_amount', 'status'
+            'id', 'bill_number', 'admission_id', 'patient_name',
+            'bill_date', 'total_amount', 'received_amount', 'balance_amount', 'payment_status'
         ]
