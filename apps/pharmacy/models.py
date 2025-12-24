@@ -2,6 +2,8 @@ from django.db import models
 from django.conf import settings
 from django.core.validators import MinValueValidator
 from decimal import Decimal
+from django.contrib.postgres.search import SearchVector, SearchVectorField
+from django.contrib.postgres.indexes import GinIndex
 
 
 class ProductCategory(models.Model):
@@ -71,7 +73,10 @@ class PharmacyProduct(models.Model):
     
     # Status
     is_active = models.BooleanField(default=True)
-    
+
+    # Full-text search vector (populated automatically)
+    search_vector = SearchVectorField(null=True, editable=False)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -84,6 +89,8 @@ class PharmacyProduct(models.Model):
             models.Index(fields=['product_name']),
             models.Index(fields=['company']),
             models.Index(fields=['batch_no']),
+            # Full-text search index (GIN)
+            GinIndex(fields=['search_vector'], name='pharmacy_search_vector_idx'),
         ]
 
     def __str__(self):
@@ -104,6 +111,15 @@ class PharmacyProduct(models.Model):
         if not self.selling_price:
             self.selling_price = self.mrp
         super().save(*args, **kwargs)
+
+        # Update search vector after save (in a separate query)
+        PharmacyProduct.objects.filter(pk=self.pk).update(
+            search_vector=(
+                SearchVector('product_name', weight='A', config='english') +
+                SearchVector('company', weight='B', config='english') +
+                SearchVector('batch_no', weight='C', config='english')
+            )
+        )
 
 
 class Cart(models.Model):

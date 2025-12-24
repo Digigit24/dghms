@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from common.mixins import TenantMixin
 from .models import (
     ProductCategory,
     PharmacyProduct,
@@ -9,9 +10,9 @@ from .models import (
 )
 
 
-class ProductCategorySerializer(serializers.ModelSerializer):
+class ProductCategorySerializer(TenantMixin, serializers.ModelSerializer):
     """Serializer for Product Categories"""
-    
+
     class Meta:
         model = ProductCategory
         fields = [
@@ -23,10 +24,10 @@ class ProductCategorySerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at'
         ]
-        read_only_fields = ['created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at', 'tenant_id']
 
 
-class PharmacyProductSerializer(serializers.ModelSerializer):
+class PharmacyProductSerializer(TenantMixin, serializers.ModelSerializer):
     """Serializer for Pharmacy Products"""
     category = ProductCategorySerializer(read_only=True)
     category_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
@@ -53,7 +54,7 @@ class PharmacyProductSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at'
         ]
-        read_only_fields = ['created_at', 'updated_at', 'is_in_stock', 'low_stock_warning']
+        read_only_fields = ['created_at', 'updated_at', 'is_in_stock', 'low_stock_warning', 'search_vector', 'tenant_id']
 
     def validate_category_id(self, value):
         """Validate category exists"""
@@ -70,7 +71,7 @@ class PharmacyProductSerializer(serializers.ModelSerializer):
         return value
 
 
-class CartItemSerializer(serializers.ModelSerializer):
+class CartItemSerializer(TenantMixin, serializers.ModelSerializer):
     """Serializer for Cart Items"""
     product = PharmacyProductSerializer(read_only=True)
     product_id = serializers.IntegerField(write_only=True)
@@ -90,7 +91,7 @@ class CartItemSerializer(serializers.ModelSerializer):
             'price_at_time',
             'total_price'
         ]
-        read_only_fields = ['price_at_time', 'total_price']
+        read_only_fields = ['price_at_time', 'total_price', 'tenant_id']
 
     def validate_product_id(self, value):
         """Validate product exists and is active"""
@@ -109,7 +110,7 @@ class CartItemSerializer(serializers.ModelSerializer):
         return value
 
 
-class CartSerializer(serializers.ModelSerializer):
+class CartSerializer(TenantMixin, serializers.ModelSerializer):
     """Serializer for Cart"""
     cart_items = CartItemSerializer(many=True, read_only=True)
     total_items = serializers.IntegerField(read_only=True)
@@ -130,10 +131,10 @@ class CartSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at'
         ]
-        read_only_fields = ['user_id', 'created_at', 'updated_at', 'total_items', 'total_amount']
+        read_only_fields = ['user_id', 'created_at', 'updated_at', 'total_items', 'total_amount', 'tenant_id']
 
 
-class PharmacyOrderItemSerializer(serializers.ModelSerializer):
+class PharmacyOrderItemSerializer(TenantMixin, serializers.ModelSerializer):
     """Serializer for Order Items"""
     product = PharmacyProductSerializer(read_only=True)
     total_price = serializers.DecimalField(
@@ -151,10 +152,10 @@ class PharmacyOrderItemSerializer(serializers.ModelSerializer):
             'price_at_time',
             'total_price'
         ]
-        read_only_fields = ['product', 'price_at_time', 'total_price']
+        read_only_fields = ['product', 'price_at_time', 'total_price', 'tenant_id']
 
 
-class PharmacyOrderSerializer(serializers.ModelSerializer):
+class PharmacyOrderSerializer(TenantMixin, serializers.ModelSerializer):
     """Serializer for Pharmacy Orders"""
     order_items = PharmacyOrderItemSerializer(many=True, read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
@@ -176,7 +177,7 @@ class PharmacyOrderSerializer(serializers.ModelSerializer):
             'updated_at',
             'order_items'
         ]
-        read_only_fields = ['user_id', 'total_amount', 'created_at', 'updated_at']
+        read_only_fields = ['user_id', 'total_amount', 'created_at', 'updated_at', 'tenant_id']
 
     def validate_shipping_address(self, value):
         """Validate shipping address is not empty"""

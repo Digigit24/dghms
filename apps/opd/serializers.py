@@ -1228,13 +1228,13 @@ class ClinicalNoteTemplateResponseCreateUpdateSerializer(serializers.ModelSerial
     field_responses = ClinicalNoteTemplateFieldResponseCreateUpdateSerializer(many=True, required=False)
 
     # Fields for setting encounter via encounter_type and encounter_id
-    encounter_type_name = serializers.CharField(write_only=True, required=False)
-    encounter_id = serializers.IntegerField(write_only=True, required=False)
+    encounter_type = serializers.CharField(write_only=True, required=True)
+    object_id = serializers.IntegerField(write_only=True, required=True)
 
     class Meta:
         model = ClinicalNoteTemplateResponse
         fields = [
-            'encounter_type_name', 'encounter_id', 'template', 'status', 'field_responses',
+            'encounter_type', 'object_id', 'template', 'status', 'field_responses',
             'original_assigned_doctor_id', 'doctor_switched_reason',
             'canvas_data', 'response_sequence'
         ]
@@ -1248,16 +1248,6 @@ class ClinicalNoteTemplateResponseCreateUpdateSerializer(serializers.ModelSerial
                 'original_assigned_doctor_id': 'Required when doctor_switched_reason is provided'
             })
 
-        # Validate encounter fields
-        if 'encounter_type_name' in data and 'encounter_id' not in data:
-            raise serializers.ValidationError({
-                'encounter_id': 'Required when encounter_type_name is provided'
-            })
-        if 'encounter_id' in data and 'encounter_type_name' not in data:
-            raise serializers.ValidationError({
-                'encounter_type_name': 'Required when encounter_id is provided'
-            })
-
         return data
 
     @transaction.atomic
@@ -1266,8 +1256,8 @@ class ClinicalNoteTemplateResponseCreateUpdateSerializer(serializers.ModelSerial
         from django.contrib.contenttypes.models import ContentType
 
         field_responses_data = validated_data.pop('field_responses', [])
-        encounter_type_name = validated_data.pop('encounter_type_name', None)
-        encounter_id = validated_data.pop('encounter_id', None)
+        encounter_type = validated_data.pop('encounter_type', None)
+        object_id = validated_data.pop('object_id', None)
 
         request = self.context.get('request')
 
@@ -1280,21 +1270,20 @@ class ClinicalNoteTemplateResponseCreateUpdateSerializer(serializers.ModelSerial
             validated_data['filled_by_id'] = request.user_id
 
         # Set content_type and object_id from encounter fields
-        if encounter_type_name and encounter_id:
-            if encounter_type_name.lower() == 'opd':
+        if encounter_type and object_id:
+            if encounter_type.lower() == 'visit' or encounter_type.lower() == 'opd':
                 content_type = ContentType.objects.get(app_label='opd', model='visit')
-            elif encounter_type_name.lower() == 'ipd':
+            elif encounter_type.lower() == 'admission' or encounter_type.lower() == 'ipd':
                 content_type = ContentType.objects.get(app_label='ipd', model='admission')
             else:
                 raise serializers.ValidationError({
-                    'encounter_type_name': f'Invalid encounter type: {encounter_type_name}. Must be "opd" or "ipd".'
+                    'encounter_type': f'Invalid encounter type: {encounter_type}. Must be "visit", "opd", "admission", or "ipd".'
                 })
 
             validated_data['content_type'] = content_type
-            validated_data['object_id'] = encounter_id
+            validated_data['object_id'] = object_id
 
         # Auto-calculate response_sequence if not provided
-        # This is additional logic at serializer level (model also has it)
         if 'response_sequence' not in validated_data or not validated_data.get('response_sequence'):
             max_seq = ClinicalNoteTemplateResponse.objects.filter(
                 content_type=validated_data['content_type'],
@@ -1303,7 +1292,7 @@ class ClinicalNoteTemplateResponseCreateUpdateSerializer(serializers.ModelSerial
             ).aggregate(models.Max('response_sequence'))['response_sequence__max']
             validated_data['response_sequence'] = (max_seq or 0) + 1
 
-        # Create response (model save() will also calculate sequence if needed)
+        # Create response
         response = ClinicalNoteTemplateResponse.objects.create(**validated_data)
 
         # Create field responses

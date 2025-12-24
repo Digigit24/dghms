@@ -1,13 +1,18 @@
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django_filters.rest_framework import DjangoFilterBackend
+from django.contrib.postgres.search import SearchQuery, SearchRank
+from django.core.cache import cache
+from django.http import HttpResponse
 
 from common.drf_auth import HMSPermission, IsAuthenticated
 from common.mixins import TenantViewSetMixin
 from django.db.models import Q, Sum, Count, F
 from django.utils import timezone
 from datetime import timedelta
+from celery.result import AsyncResult
 
 from .models import (
     ProductCategory,
@@ -24,6 +29,8 @@ from .serializers import (
     CartItemSerializer,
     PharmacyOrderSerializer
 )
+from .tasks import import_products_task, export_products_task
+from .import_export import ProductImporter, ProductExporter
 
 
 class ProductCategoryViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
@@ -87,6 +94,12 @@ class PharmacyProductViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         'destroy': 'delete_product',
         'low_stock': 'view_products',
         'expiring_soon': 'view_products',
+        'search_products': 'view_products',
+        'autocomplete': 'view_products',
+        'import_products': 'create_product',
+        'export_products': 'view_products',
+        'task_status': 'view_products',
+        'download_export': 'view_products',
     }
     filter_backends = [
         DjangoFilterBackend,
@@ -209,6 +222,298 @@ class PharmacyProductViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             'data': stats
         })
 
+    @action(detail=False, methods=['get'])
+    def search_products(self, request):
+        """
+        Full-text search using PostgreSQL search vectors
+        Supports ranking and relevance scoring
+
+        Query params:
+        - q: Search query (required)
+        - limit: Number of results (default: 20, max: 100)
+        """
+        query_text = request.query_params.get('q', '').strip()
+
+        if not query_text:
+            return Response({
+                'success': False,
+                'error': 'Search query (q) is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Get limit
+        try:
+            limit = int(request.query_params.get('limit', 20))
+            limit = min(limit, 100)  # Max 100 results
+        except ValueError:
+            limit = 20
+
+        # Create search query
+        search_query = SearchQuery(query_text, config='english')
+
+        # Filter by tenant and search
+        queryset = self.get_queryset().filter(
+            search_vector=search_query,
+            is_active=True
+        ).annotate(
+            rank=SearchRank(F('search_vector'), search_query)
+        ).order_by('-rank')[:limit]
+
+        serializer = self.get_serializer(queryset, many=True)
+
+        return Response({
+            'success': True,
+            'count': queryset.count(),
+            'query': query_text,
+            'data': serializer.data
+        })
+
+    @action(detail=False, methods=['get'])
+    def autocomplete(self, request):
+        """
+        Autocomplete/suggestions endpoint for frontend
+        Returns top 10 product suggestions based on search query
+
+        Query params:
+        - q: Search query (required, min 2 chars)
+        """
+        query_text = request.query_params.get('q', '').strip()
+
+        if len(query_text) < 2:
+            return Response({
+                'success': False,
+                'error': 'Search query must be at least 2 characters'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Use full-text search for autocomplete
+        search_query = SearchQuery(query_text, config='english')
+
+        # Get top 10 suggestions
+        queryset = self.get_queryset().filter(
+            search_vector=search_query,
+            is_active=True
+        ).annotate(
+            rank=SearchRank(F('search_vector'), search_query)
+        ).order_by('-rank')[:10]
+
+        # Return lightweight response
+        suggestions = [
+            {
+                'id': p.id,
+                'product_name': p.product_name,
+                'company': p.company,
+                'batch_no': p.batch_no,
+                'selling_price': float(p.selling_price) if p.selling_price else float(p.mrp),
+                'quantity': p.quantity,
+                'is_in_stock': p.is_in_stock
+            }
+            for p in queryset
+        ]
+
+        return Response({
+            'success': True,
+            'count': len(suggestions),
+            'suggestions': suggestions
+        })
+
+    @action(detail=False, methods=['post'], parser_classes=[MultiPartParser, FormParser, JSONParser])
+    def import_products(self, request):
+        """
+        Import products from CSV, XLSX, or JSON file (async)
+
+        Accepts:
+        - Multipart form data with 'file' field
+        - JSON data with base64 encoded file
+
+        Query params:
+        - format: 'csv', 'xlsx', or 'json' (required)
+        - skip_duplicates: 'true' or 'false' (default: true)
+
+        Returns task_id for tracking import progress
+        """
+        file_format = request.query_params.get('format', '').lower()
+        skip_duplicates = request.query_params.get('skip_duplicates', 'true').lower() == 'true'
+
+        # Validate format
+        if file_format not in ['csv', 'xlsx', 'json']:
+            return Response({
+                'success': False,
+                'error': 'Invalid format. Must be csv, xlsx, or json'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Get file content
+        if 'file' in request.FILES:
+            uploaded_file = request.FILES['file']
+            file_content = uploaded_file.read()
+        elif 'file_content' in request.data:
+            # Base64 encoded content
+            import base64
+            file_content = base64.b64decode(request.data['file_content'])
+        else:
+            return Response({
+                'success': False,
+                'error': 'No file provided. Use "file" field or "file_content" (base64)'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Start async import task
+        task = import_products_task.delay(
+            file_content=file_content,
+            file_format=file_format,
+            tenant_id=str(request.tenant_id),
+            skip_duplicates=skip_duplicates
+        )
+
+        return Response({
+            'success': True,
+            'message': 'Import started',
+            'task_id': task.id,
+            'status_url': f'/api/pharmacy/products/task_status/?task_id={task.id}'
+        }, status=status.HTTP_202_ACCEPTED)
+
+    @action(detail=False, methods=['get'])
+    def export_products(self, request):
+        """
+        Export products to CSV, XLSX, or JSON file (async)
+
+        Query params:
+        - format: 'csv', 'xlsx', or 'json' (required)
+        - Supports all standard filter params (category, company, is_active, etc.)
+
+        Returns task_id for tracking export progress
+        """
+        file_format = request.query_params.get('format', '').lower()
+
+        # Validate format
+        if file_format not in ['csv', 'xlsx', 'json']:
+            return Response({
+                'success': False,
+                'error': 'Invalid format. Must be csv, xlsx, or json'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Collect filters from query params
+        filters = {}
+        if 'is_active' in request.query_params:
+            filters['is_active'] = request.query_params.get('is_active').lower() == 'true'
+        if 'category_id' in request.query_params:
+            filters['category_id'] = request.query_params.get('category_id')
+        if 'company' in request.query_params:
+            filters['company'] = request.query_params.get('company')
+        if 'search' in request.query_params:
+            filters['search'] = request.query_params.get('search')
+
+        # Start async export task
+        task = export_products_task.delay(
+            tenant_id=str(request.tenant_id),
+            file_format=file_format,
+            filters=filters
+        )
+
+        return Response({
+            'success': True,
+            'message': 'Export started',
+            'task_id': task.id,
+            'status_url': f'/api/pharmacy/products/task_status/?task_id={task.id}',
+            'download_url': f'/api/pharmacy/products/download_export/?task_id={task.id}'
+        }, status=status.HTTP_202_ACCEPTED)
+
+    @action(detail=False, methods=['get'])
+    def task_status(self, request):
+        """
+        Check status of import/export task
+
+        Query params:
+        - task_id: Celery task ID (required)
+        """
+        task_id = request.query_params.get('task_id')
+
+        if not task_id:
+            return Response({
+                'success': False,
+                'error': 'task_id is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check task status
+        task_result = AsyncResult(task_id)
+
+        # Get cached status and result
+        cached_status = cache.get(f'import_task_{task_id}_status') or cache.get(f'export_task_{task_id}_status')
+        cached_progress = cache.get(f'import_task_{task_id}_progress') or cache.get(f'export_task_{task_id}_progress')
+        cached_result = cache.get(f'import_task_{task_id}_result') or cache.get(f'export_task_{task_id}_result')
+
+        response_data = {
+            'success': True,
+            'task_id': task_id,
+            'state': task_result.state,
+            'status': cached_status or task_result.state.lower(),
+            'progress': cached_progress or 0,
+        }
+
+        if task_result.ready():
+            if task_result.successful():
+                response_data['result'] = cached_result or task_result.result
+            else:
+                response_data['error'] = str(task_result.info)
+        elif cached_result:
+            response_data['result'] = cached_result
+
+        return Response(response_data)
+
+    @action(detail=False, methods=['get'])
+    def download_export(self, request):
+        """
+        Download exported file
+
+        Query params:
+        - task_id: Celery task ID (required)
+        """
+        task_id = request.query_params.get('task_id')
+
+        if not task_id:
+            return Response({
+                'success': False,
+                'error': 'task_id is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Get result from cache
+        result = cache.get(f'export_task_{task_id}_result')
+
+        if not result or not result.get('success'):
+            return Response({
+                'success': False,
+                'error': 'Export not ready or failed. Check task status first.'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Get file content from cache
+        cache_key = result.get('cache_key')
+        file_content = cache.get(cache_key)
+
+        if not file_content:
+            return Response({
+                'success': False,
+                'error': 'Export file has expired. Please re-export.'
+            }, status=status.HTTP_410_GONE)
+
+        # Determine content type and filename
+        file_format = result.get('file_format', 'csv')
+        content_types = {
+            'csv': 'text/csv',
+            'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'json': 'application/json'
+        }
+        extensions = {
+            'csv': 'csv',
+            'xlsx': 'xlsx',
+            'json': 'json'
+        }
+
+        # Create response
+        response = HttpResponse(
+            file_content,
+            content_type=content_types.get(file_format, 'application/octet-stream')
+        )
+        response['Content-Disposition'] = f'attachment; filename="pharmacy_products_{timezone.now().strftime("%Y%m%d_%H%M%S")}.{extensions.get(file_format, "txt")}"'
+
+        return response
+
 
 class CartViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """
@@ -240,7 +545,11 @@ class CartViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def add_item(self, request):
         """Add item to cart"""
-        cart, _ = Cart.objects.get_or_create(user_id=request.user.id)
+        cart, _ = Cart.objects.get_or_create(
+            user_id=request.user_id,
+            tenant_id=request.tenant_id,
+            defaults={'tenant_id': request.tenant_id}
+        )
         product_id = request.data.get('product_id')
         quantity = int(request.data.get('quantity', 1))
 
@@ -259,7 +568,11 @@ class CartViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
         # Get product
         try:
-            product = PharmacyProduct.objects.get(id=product_id, is_active=True)
+            product = PharmacyProduct.objects.get(
+                id=product_id,
+                tenant_id=request.tenant_id,
+                is_active=True
+            )
         except PharmacyProduct.DoesNotExist:
             return Response({
                 'success': False,
@@ -277,7 +590,9 @@ class CartViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         cart_item, created = CartItem.objects.get_or_create(
             cart=cart,
             product=product,
+            tenant_id=request.tenant_id,
             defaults={
+                'tenant_id': request.tenant_id,
                 'quantity': quantity,
                 'price_at_time': product.selling_price
             }
@@ -306,7 +621,10 @@ class CartViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def update_item(self, request):
         """Update cart item quantity"""
-        cart = Cart.objects.get(user_id=request.user.id)
+        cart = Cart.objects.get(
+            user_id=request.user_id,
+            tenant_id=request.tenant_id
+        )
         cart_item_id = request.data.get('cart_item_id')
         quantity = int(request.data.get('quantity', 1))
 
@@ -344,7 +662,10 @@ class CartViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def remove_item(self, request):
         """Remove item from cart"""
-        cart = Cart.objects.get(user_id=request.user.id)
+        cart = Cart.objects.get(
+            user_id=request.user_id,
+            tenant_id=request.tenant_id
+        )
         cart_item_id = request.data.get('cart_item_id')
 
         try:
@@ -366,7 +687,11 @@ class CartViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def clear(self, request):
         """Clear all items from cart"""
-        cart, _ = Cart.objects.get_or_create(user_id=request.user.id)
+        cart, _ = Cart.objects.get_or_create(
+            user_id=request.user_id,
+            tenant_id=request.tenant_id,
+            defaults={'tenant_id': request.tenant_id}
+        )
         cart.cart_items.all().delete()
 
         serializer = CartSerializer(cart)
@@ -412,7 +737,10 @@ class PharmacyOrderViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     def create(self, request):
         """Create order from cart"""
         try:
-            cart = Cart.objects.get(user_id=request.user.id)
+            cart = Cart.objects.get(
+                user_id=request.user_id,
+                tenant_id=request.tenant_id
+            )
         except Cart.DoesNotExist:
             return Response({
                 'success': False,
@@ -459,7 +787,8 @@ class PharmacyOrderViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
         # Create order
         order = PharmacyOrder.objects.create(
-            user_id=request.user.id,
+            tenant_id=request.tenant_id,
+            user_id=request.user_id,
             total_amount=cart.total_amount,
             shipping_address=shipping_address,
             billing_address=billing_address
@@ -469,6 +798,7 @@ class PharmacyOrderViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         for cart_item in cart.cart_items.all():
             # Create order item
             PharmacyOrderItem.objects.create(
+                tenant_id=request.tenant_id,
                 order=order,
                 product=cart_item.product,
                 quantity=cart_item.quantity,

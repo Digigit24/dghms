@@ -307,3 +307,14 @@ META_ACCESS_TOKEN = config('META_ACCESS_TOKEN', default='EAAMS6cNGH0YBQKKZBtCHGU
 GOOGLE_SHEETS_API_URL = config('GOOGLE_SHEETS_API_URL', default='https://script.google.com/macros/s/AKfycby2ILM2o0y1jqZbjdOY5CQdhgmFjVMI61fZ_JrxJIEu5oQB-By7qwW4uoVE3QYPZrBQ/exec')
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# --- Celery Settings ---
+CELERY_BROKER_URL = config('CELERY_BROKER_URL', default='redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = config('CELERY_RESULT_BACKEND', default='redis://localhost:6379/0')
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes max per task
+CELERY_RESULT_EXPIRES = 3600  # Results expire after 1 hour
