@@ -410,15 +410,15 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 class IPDBillItemViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """ViewSet for IPD Bill Items management."""
 
-    queryset = IPDBillItem.objects.select_related('billing')
+    queryset = IPDBillItem.objects.select_related('bill')
     serializer_class = IPDBillItemSerializer
     hms_module = 'ipd'
     permission_classes = [HMSPermission]
 
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ['billing', 'source']
+    filterset_fields = ['bill', 'source']
     ordering_fields = ['created_at']
-    ordering = ['billing', 'source', 'id']
+    ordering = ['bill', 'source', 'id']
 
     def perform_create(self, serializer):
         """Set tenant_id automatically."""
