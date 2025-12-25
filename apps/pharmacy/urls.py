@@ -5,7 +5,8 @@ from .views import (
     ProductCategoryViewSet,
     PharmacyProductViewSet,
     CartViewSet,
-    PharmacyOrderViewSet
+    PharmacyOrderViewSet,
+    RazorpayCreateOrderView
 )
 
 router = DefaultRouter()
@@ -15,5 +16,6 @@ router.register(r'cart', CartViewSet)
 router.register(r'orders', PharmacyOrderViewSet)
 
 urlpatterns = [
-    path('', include(router.urls))
+    path('', include(router.urls)),
+    path('razorpay/create-order/', RazorpayCreateOrderView.as_view(), name='razorpay-create-order'),
 ]

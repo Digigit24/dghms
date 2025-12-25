@@ -2,10 +2,12 @@ from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from rest_framework.views import APIView
 from django_filters.rest_framework import DjangoFilterBackend
 from django.contrib.postgres.search import SearchQuery, SearchRank
 from django.core.cache import cache
 from django.http import HttpResponse
+from django.conf import settings
 
 from common.drf_auth import HMSPermission, IsAuthenticated
 from common.mixins import TenantViewSetMixin
@@ -13,6 +15,8 @@ from django.db.models import Q, Sum, Count, F
 from django.utils import timezone
 from datetime import timedelta
 from celery.result import AsyncResult
+import razorpay
+import logging
 
 from .models import (
     ProductCategory,
@@ -27,10 +31,13 @@ from .serializers import (
     PharmacyProductSerializer,
     CartSerializer,
     CartItemSerializer,
-    PharmacyOrderSerializer
+    PharmacyOrderSerializer,
+    RazorpayOrderSerializer
 )
 from .tasks import import_products_task, export_products_task
 from .import_export import ProductImporter, ProductExporter
+
+logger = logging.getLogger(__name__)
 
 
 class ProductCategoryViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
@@ -870,3 +877,135 @@ class PharmacyOrderViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             'success': True,
             'data': stats
         })
+
+class RazorpayCreateOrderView(APIView):
+    """
+    Create a Razorpay order for pharmacy payments.
+    This endpoint securely creates a Razorpay order without exposing API keys to the frontend.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        """
+        Create a Razorpay order.
+
+        Request Body:
+        {
+            "amount": 100.50,
+            "notes": "Order notes",
+            "voucher_code": "MEDIXPERT"
+        }
+
+        Response:
+        {
+            "success": true,
+            "data": {
+                "razorpay_order_id": "order_xxx",
+                "amount": 10050,  // Amount in paise
+                "currency": "INR",
+                "notes": {...}
+            }
+        }
+        """
+        # Validate request data
+        serializer = RazorpayOrderSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({
+                'success': False,
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check if Razorpay credentials are configured
+        if not settings.RAZORPAY_KEY_ID or not settings.RAZORPAY_KEY_SECRET:
+            logger.error("Razorpay credentials not configured in settings")
+            return Response({
+                'success': False,
+                'message': 'Payment gateway not configured. Please contact administrator.'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        try:
+            # Initialize Razorpay client
+            client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
+
+            # Get validated data
+            validated_data = serializer.validated_data
+            amount_inr = validated_data.get('amount')
+            notes = validated_data.get('notes', '')
+            voucher_code = validated_data.get('voucher_code', '')
+
+            # Convert amount to paise (Razorpay requires amount in smallest currency unit)
+            amount_paise = int(float(amount_inr) * 100)
+
+            # Prepare order data
+            order_data = {
+                'amount': amount_paise,
+                'currency': 'INR',
+                'payment_capture': 1,  # Auto capture payment
+            }
+
+            # Add notes if provided
+            if notes or voucher_code:
+                order_notes = {}
+                if notes:
+                    order_notes['notes'] = notes
+                if voucher_code:
+                    order_notes['voucher_code'] = voucher_code
+                # Add user information
+                if hasattr(request, 'user_id'):
+                    order_notes['user_id'] = str(request.user_id)
+                if hasattr(request, 'tenant_id'):
+                    order_notes['tenant_id'] = str(request.tenant_id)
+
+                order_data['notes'] = order_notes
+
+            # Create Razorpay order
+            razorpay_order = client.order.create(data=order_data)
+
+            logger.info(f"Razorpay order created successfully: {razorpay_order.get('id')}")
+
+            # Return order details (without exposing secret key)
+            return Response({
+                'success': True,
+                'data': {
+                    'razorpay_order_id': razorpay_order.get('id'),
+                    'amount': razorpay_order.get('amount'),
+                    'amount_inr': float(razorpay_order.get('amount')) / 100,
+                    'currency': razorpay_order.get('currency'),
+                    'status': razorpay_order.get('status'),
+                    'notes': razorpay_order.get('notes', {}),
+                    # Return Razorpay Key ID for frontend checkout
+                    'razorpay_key_id': settings.RAZORPAY_KEY_ID
+                }
+            }, status=status.HTTP_201_CREATED)
+
+        except razorpay.errors.BadRequestError as e:
+            logger.error(f"Razorpay bad request error: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Invalid payment request. Please check the amount and try again.',
+                'error': str(e)
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        except razorpay.errors.GatewayError as e:
+            logger.error(f"Razorpay gateway error: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Payment gateway error. Please try again later.',
+                'error': str(e)
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+        except razorpay.errors.ServerError as e:
+            logger.error(f"Razorpay server error: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Payment server error. Please try again later.',
+                'error': str(e)
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+        except Exception as e:
+            logger.error(f"Unexpected error creating Razorpay order: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'An unexpected error occurred. Please try again.',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

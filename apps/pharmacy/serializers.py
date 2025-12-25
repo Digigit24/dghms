@@ -190,3 +190,31 @@ class PharmacyOrderSerializer(TenantMixin, serializers.ModelSerializer):
         if not value or not value.strip():
             raise serializers.ValidationError("Billing address is required")
         return value
+
+
+class RazorpayOrderSerializer(serializers.Serializer):
+    """Serializer for creating Razorpay orders"""
+    amount = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        required=True,
+        help_text="Order amount in INR"
+    )
+    notes = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=500,
+        help_text="Additional notes for the order"
+    )
+    voucher_code = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=50,
+        help_text="Voucher/coupon code if any"
+    )
+
+    def validate_amount(self, value):
+        """Validate amount is positive"""
+        if value <= 0:
+            raise serializers.ValidationError("Amount must be greater than 0")
+        return value
