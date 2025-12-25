@@ -45,6 +45,7 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
         '/admin',         # Allow all admin paths - custom admin site handles auth
         '/api/auth/',     # Allow all auth endpoints
         '/api/nuviformsubmit',  # Nuvi form submission (no auth required)
+        '/api/nakshatra',  # Nakshatra form submission (no auth required)
         '/static/',       # Allow static files (CSS, JS, images)
         '/media/',        # Allow media files
         '/health/',       # Health check endpoint

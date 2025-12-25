@@ -41,6 +41,9 @@ urlpatterns = [
 
     # Nuvi API (No authentication required)
     path('api/', include('apps.nuviapi.urls')),
+
+    # Nakshatra API (No authentication required)
+    path('api/', include('apps.nakshatra_api.urls')),
     
     # ✅ API Documentation endpoints
     # OpenAPI schema
