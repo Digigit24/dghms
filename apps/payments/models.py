@@ -50,6 +50,7 @@ class Transaction(models.Model):
         ('upi', 'UPI'),
         ('net_banking', 'Net Banking'),
         ('online', 'Online Payment'),
+        ('razorpay', 'Razorpay'),
         ('cheque', 'Cheque'),
         ('insurance', 'Insurance'),
         ('other', 'Other')

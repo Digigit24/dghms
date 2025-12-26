@@ -64,6 +64,7 @@ class Order(models.Model):
         ('upi', 'UPI'),
         ('net_banking', 'Net Banking'),
         ('online', 'Online Payment'),
+        ('razorpay', 'Razorpay'),
         ('insurance', 'Insurance'),
         ('other', 'Other')
     ]
@@ -136,11 +137,67 @@ class Order(models.Model):
     
     # Additional Metadata
     notes = models.TextField(
-        blank=True, 
-        null=True, 
+        blank=True,
+        null=True,
         help_text="Additional order notes or instructions"
     )
-    
+
+    # Appointment Reference (for consultation orders)
+    appointment = models.ForeignKey(
+        'appointments.Appointment',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='orders',
+        help_text="Associated appointment for consultation orders"
+    )
+
+    # Razorpay Payment Gateway Fields
+    razorpay_order_id = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        unique=True,
+        db_index=True,
+        help_text="Razorpay order ID"
+    )
+    razorpay_payment_id = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Razorpay payment ID after successful payment"
+    )
+    razorpay_signature = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text="Razorpay signature for verification"
+    )
+    payment_verified = models.BooleanField(
+        default=False,
+        help_text="Whether Razorpay payment signature was verified"
+    )
+    payment_failed_reason = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Reason if payment failed"
+    )
+
+    # Audit Fields
+    created_by_user_id = models.UUIDField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="SuperAdmin User ID who created this order"
+    )
+    cancelled_by_user_id = models.UUIDField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="SuperAdmin User ID who cancelled this order"
+    )
+
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -163,6 +220,9 @@ class Order(models.Model):
             models.Index(fields=['tenant_id', 'created_at']),
             models.Index(fields=['patient', 'status']),
             models.Index(fields=['created_at']),
+            models.Index(fields=['razorpay_order_id']),
+            models.Index(fields=['razorpay_payment_id']),
+            models.Index(fields=['tenant_id', 'payment_verified']),
         ]
     
     def __str__(self):
@@ -297,3 +357,57 @@ class OrderFee(models.Model):
     
     def __str__(self):
         return f"{self.fee_type.name} for {self.order}"
+
+
+class RazorpayConfig(models.Model):
+    """
+    Razorpay configuration per tenant
+    Stores API credentials and webhook secrets for Razorpay payment gateway
+    """
+    tenant_id = models.UUIDField(
+        unique=True,
+        db_index=True,
+        help_text="Tenant this config belongs to"
+    )
+
+    # API Credentials
+    razorpay_key_id = models.CharField(
+        max_length=255,
+        help_text="Razorpay Key ID from dashboard"
+    )
+    razorpay_key_secret = models.CharField(
+        max_length=255,
+        help_text="Razorpay Key Secret (encrypted storage recommended)"
+    )
+    razorpay_webhook_secret = models.CharField(
+        max_length=255,
+        help_text="Razorpay Webhook Secret for signature verification"
+    )
+
+    # Settings
+    is_test_mode = models.BooleanField(
+        default=True,
+        help_text="Use test mode credentials"
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Enable Razorpay payments for this tenant"
+    )
+    auto_capture = models.BooleanField(
+        default=True,
+        help_text="Automatically capture payments (vs manual capture)"
+    )
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'razorpay_configs'
+        verbose_name = 'Razorpay Configuration'
+        verbose_name_plural = 'Razorpay Configurations'
+
+    def __str__(self):
+        mode = "Test" if self.is_test_mode else "Live"
+        status = "Active" if self.is_active else "Inactive"
+        return f"Razorpay Config - Tenant {self.tenant_id} ({mode}, {status})"

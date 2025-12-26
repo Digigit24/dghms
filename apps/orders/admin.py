@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.utils.html import format_html
 from common.admin_site import TenantModelAdmin, hms_admin_site
-from .models import Order, OrderItem, OrderFee, FeeType
+from .models import Order, OrderItem, OrderFee, FeeType, RazorpayConfig
 
 
 class OrderFeeInline(admin.TabularInline):
@@ -80,6 +80,7 @@ class OrderAdmin(TenantModelAdmin):
         'total_fees',
         'total_amount',
         'is_paid',
+        'payment_verified',
         'payment_method',
         'created_at'
     ]
@@ -88,6 +89,7 @@ class OrderAdmin(TenantModelAdmin):
         'status',
         'services_type',
         'is_paid',
+        'payment_verified',
         'payment_method',
         'created_at'
     ]
@@ -96,7 +98,9 @@ class OrderAdmin(TenantModelAdmin):
         'order_number',
         'patient__first_name',
         'patient__last_name',
-        'patient__mobile_primary'
+        'patient__mobile_primary',
+        'razorpay_order_id',
+        'razorpay_payment_id'
     ]
 
     inlines = [OrderItemInline, OrderFeeInline]
@@ -106,9 +110,15 @@ class OrderAdmin(TenantModelAdmin):
         'subtotal',
         'total_fees',
         'total_amount',
+        'razorpay_order_id',
+        'razorpay_payment_id',
+        'razorpay_signature',
+        'payment_verified',
         'created_at',
         'updated_at',
         'tenant_id',
+        'created_by_user_id',
+        'cancelled_by_user_id',
     ]
 
     fieldsets = (
@@ -116,6 +126,7 @@ class OrderAdmin(TenantModelAdmin):
             'fields': (
                 'order_number',
                 'patient',
+                'appointment',
                 'services_type',
                 'status',
                 'notes'
@@ -130,13 +141,26 @@ class OrderAdmin(TenantModelAdmin):
                 'is_paid'
             )
         }),
-        ('Timestamps', {
+        ('Razorpay Payment Details', {
+            'fields': (
+                'razorpay_order_id',
+                'razorpay_payment_id',
+                'razorpay_signature',
+                'payment_verified',
+                'payment_failed_reason'
+            ),
+            'classes': ('collapse',)
+        }),
+        ('Audit & Timestamps', {
             'fields': (
                 'user_id',
+                'created_by_user_id',
+                'cancelled_by_user_id',
                 'tenant_id',
                 'created_at',
                 'updated_at'
-            )
+            ),
+            'classes': ('collapse',)
         }),
     )
     
@@ -242,7 +266,59 @@ class OrderItemAdmin(TenantModelAdmin):
         )
 
 
+class RazorpayConfigAdmin(TenantModelAdmin):
+    """Admin configuration for Razorpay Config"""
+    list_display = [
+        'tenant_id',
+        'is_active',
+        'is_test_mode',
+        'auto_capture',
+        'updated_at'
+    ]
+
+    list_filter = [
+        'is_active',
+        'is_test_mode',
+        'auto_capture'
+    ]
+
+    readonly_fields = [
+        'tenant_id',
+        'created_at',
+        'updated_at'
+    ]
+
+    fieldsets = (
+        ('Tenant Information', {
+            'fields': ('tenant_id',)
+        }),
+        ('API Credentials', {
+            'fields': (
+                'razorpay_key_id',
+                'razorpay_key_secret',
+                'razorpay_webhook_secret'
+            ),
+            'description': 'Get credentials from Razorpay Dashboard. Keep these secure!'
+        }),
+        ('Settings', {
+            'fields': ('is_test_mode', 'is_active', 'auto_capture')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+    def get_readonly_fields(self, request, obj=None):
+        """Make key_secret readonly after creation for security"""
+        readonly = list(super().get_readonly_fields(request, obj))
+        if obj:  # Editing existing config
+            readonly.append('razorpay_key_secret')
+        return readonly
+
+
 # Register models with custom admin site
 hms_admin_site.register(FeeType, FeeTypeAdmin)
 hms_admin_site.register(Order, OrderAdmin)
 hms_admin_site.register(OrderItem, OrderItemAdmin)
+hms_admin_site.register(RazorpayConfig, RazorpayConfigAdmin)

@@ -201,6 +201,12 @@ JWT_LEEWAY = config('JWT_LEEWAY', default=30, cast=int)  # Clock skew tolerance 
 # --- SuperAdmin Integration ---
 SUPERADMIN_URL = config('SUPERADMIN_URL', default='https://admin.celiyo.com')
 
+# --- Razorpay Payment Gateway ---
+RAZORPAY_KEY_ID = config('RAZORPAY_KEY_ID', default='')
+RAZORPAY_KEY_SECRET = config('RAZORPAY_KEY_SECRET', default='')
+RAZORPAY_WEBHOOK_SECRET = config('RAZORPAY_WEBHOOK_SECRET', default='')
+RAZORPAY_TEST_MODE = config('RAZORPAY_TEST_MODE', default=True, cast=bool)
+
 # --- Session Settings (for admin authentication) ---
 SESSION_COOKIE_AGE = 3600 * 8  # 8 hours
 SESSION_SAVE_EVERY_REQUEST = True

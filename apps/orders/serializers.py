@@ -358,3 +358,71 @@ class OrderListSerializer(serializers.ModelSerializer):
     
     def get_patient_name(self, obj):
         return obj.patient.full_name if obj.patient else 'Unknown'
+
+
+class RazorpayOrderCreateSerializer(serializers.Serializer):
+    """
+    Serializer for creating Razorpay order
+    Step 1: Frontend calls this to get razorpay_order_id for checkout
+    """
+    patient_id = serializers.PrimaryKeyRelatedField(
+        queryset=PatientProfile.objects.all(),
+        help_text="Patient ID for this order"
+    )
+    services_type = serializers.ChoiceField(
+        choices=Order.SERVICE_TYPE_CHOICES,
+        help_text="Type of service (consultation, diagnostic, etc.)"
+    )
+    appointment_id = serializers.PrimaryKeyRelatedField(
+        queryset=Appointment.objects.all(),
+        required=False,
+        allow_null=True,
+        help_text="Required for consultation orders"
+    )
+    items = serializers.ListField(
+        child=serializers.DictField(),
+        help_text="Service items (same format as Order creation)"
+    )
+    fees = serializers.ListField(
+        child=serializers.DictField(),
+        required=False,
+        help_text="Additional fees (optional)"
+    )
+    notes = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        help_text="Order notes"
+    )
+
+    def validate(self, attrs):
+        """
+        Validate that appointment_id is provided for consultation orders
+        """
+        if attrs.get('services_type') == 'consultation':
+            if not attrs.get('appointment_id'):
+                raise serializers.ValidationError({
+                    'appointment_id': 'Required for consultation orders'
+                })
+        return attrs
+
+
+class RazorpayPaymentVerifySerializer(serializers.Serializer):
+    """
+    Serializer for verifying Razorpay payment
+    Step 2: Frontend calls this after payment success with payment details
+    """
+    order_id = serializers.UUIDField(
+        help_text="DigiHMS Order UUID"
+    )
+    razorpay_order_id = serializers.CharField(
+        max_length=255,
+        help_text="Razorpay order ID"
+    )
+    razorpay_payment_id = serializers.CharField(
+        max_length=255,
+        help_text="Razorpay payment ID"
+    )
+    razorpay_signature = serializers.CharField(
+        max_length=255,
+        help_text="Razorpay payment signature for verification"
+    )

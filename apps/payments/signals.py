@@ -48,6 +48,7 @@ def create_transaction_for_opd_bill(sender, instance, created, **kwargs):
                 'card': 'card',
                 'upi': 'upi',
                 'bank': 'net_banking',
+                'razorpay': 'razorpay',
                 'multiple': 'other',
             }
             payment_method = payment_method_mapping.get(
@@ -122,6 +123,7 @@ def create_transaction_for_partial_opd_payment(sender, instance, **kwargs):
                 'card': 'card',
                 'upi': 'upi',
                 'bank': 'net_banking',
+                'razorpay': 'razorpay',
                 'multiple': 'other',
             }
             payment_method = payment_method_mapping.get(
@@ -139,5 +141,66 @@ def create_transaction_for_partial_opd_payment(sender, instance, **kwargs):
                 object_id=instance.id,
                 user_id=instance.billed_by_id,
                 description=f"Partial Payment: {instance.bill_number} - {instance.visit.patient.full_name if instance.visit and instance.visit.patient else 'Unknown Patient'}"
+            )
+
+
+@receiver(post_save, sender='orders.Order')
+def create_transaction_for_order_payment(sender, instance, created, **kwargs):
+    """
+    Auto-create transaction when Order is paid via Razorpay or online payment.
+
+    Triggered after:
+    - Order is updated and is_paid=True
+    - Payment method is 'razorpay' or 'online'
+    """
+    from apps.payments.models import Transaction, PaymentCategory
+
+    # Only create transaction for paid orders
+    if instance.is_paid and instance.payment_method in ['razorpay', 'online']:
+        # Check if transaction already exists for this order
+        content_type = ContentType.objects.get_for_model(instance)
+        existing_transaction = Transaction.objects.filter(
+            content_type=content_type,
+            object_id=instance.id,
+            tenant_id=instance.tenant_id
+        ).exists()
+
+        if not existing_transaction:
+            # Map services_type to PaymentCategory name
+            category_map = {
+                'consultation': 'Consultation',
+                'diagnostic': 'Diagnostic Services',
+                'laboratory': 'Laboratory',
+                'pharmacy': 'Pharmacy',
+                'nursing_care': 'Nursing Care',
+                'home_healthcare': 'Home Healthcare',
+            }
+
+            category_name = category_map.get(
+                instance.services_type,
+                'Other Services'
+            )
+
+            # Get or create category based on service type
+            category, _ = PaymentCategory.objects.get_or_create(
+                tenant_id=instance.tenant_id,
+                name=category_name,
+                defaults={
+                    'category_type': 'income',
+                    'description': f'Income from {category_name.lower()}'
+                }
+            )
+
+            # Create transaction
+            Transaction.objects.create(
+                tenant_id=instance.tenant_id,
+                amount=instance.total_amount,
+                category=category,
+                transaction_type='payment',
+                payment_method=instance.payment_method,
+                content_type=content_type,
+                object_id=instance.id,
+                user_id=instance.created_by_user_id,
+                description=f"Order Payment: {instance.order_number} - {instance.get_services_type_display()}"
             )
 

@@ -247,6 +247,7 @@ class OPDBill(models.Model):
         ('card', 'Card'),
         ('upi', 'UPI'),
         ('bank', 'Bank Transfer'),
+        ('razorpay', 'Razorpay'),
         ('multiple', 'Multiple Modes'),
     ]
     
