@@ -308,8 +308,8 @@ META_ACCESS_TOKEN = config('META_ACCESS_TOKEN', default='EAAMS6cNGH0YBQKKZBtCHGU
 GOOGLE_SHEETS_API_URL = config('GOOGLE_SHEETS_API_URL', default='https://script.google.com/macros/s/AKfycby2ILM2o0y1jqZbjdOY5CQdhgmFjVMI61fZ_JrxJIEu5oQB-By7qwW4uoVE3QYPZrBQ/exec')
 
 # --- Nakshatra API Settings ---
-nakshatra_pixal_id = config('NAKSHATRA_PIXAL_ID', default='2606290336403133')
-Nakshtra_access_token = config('NAKSHTRA_ACCESS_TOKEN', default='EAARJZClCxRhgBQWF7OH80ZCaQUaQ1M2ZAHCCq1BAEolUwAUZB1UqWWnQuzrGwXZBF7nzPrjXW7uc8NcpL2JZCNwPb7ZCrkTaxMQViuchzzvDzuDxzXHdIny7jFlG4j0Lcg78ZC6rZCwATOTXZCkZAaCJ9m9cMUUPRei7goJL6trL72ytoxDjjwuaMuSfZBrbEX3LkAZDZD')
+NAKSHATRA_PIXAL_ID = config('NAKSHATRA_PIXAL_ID', default='2606290336403133')
+NAKSHTRA_ACCESS_TOKEN = config('NAKSHTRA_ACCESS_TOKEN', default='EAARJZClCxRhgBQWF7OH80ZCaQUaQ1M2ZAHCCq1BAEolUwAUZB1UqWWnQuzrGwXZBF7nzPrjXW7uc8NcpL2JZCNwPb7ZCrkTaxMQViuchzzvDzuDxzXHdIny7jFlG4j0Lcg78ZC6rZCwATOTXZCkZAaCJ9m9cMUUPRei7goJL6trL72ytoxDjjwuaMuSfZBrbEX3LkAZDZD')
 NAKSHATRA_API_ENDPOINT = config('NAKSHATRA_API_ENDPOINT', default='https://forms.thedigitechsolutions.com/api/forms/submit/09f77c2c-a501-4b0b-b96d-552efe7145d5')
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

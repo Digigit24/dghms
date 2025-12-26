@@ -120,16 +120,16 @@ def nakshatra_form_submit_api(request):
         }
 
         # Meta API URL (v19.0 as used in settings, but user mentioned it in curl)
-        meta_url = f"https://graph.facebook.com/v19.0/{settings.nakshatra_pixal_id}/events"
+        meta_url = f"https://graph.facebook.com/v19.0/{settings.NAKSHATRA_PIXAL_ID}/events"
 
         logger.info("[NAKSHATRA API] Step 3: Firing Meta CAPI...")
         logger.debug(f"[NAKSHATRA API] Meta URL: {meta_url}")
-        logger.debug(f"[NAKSHATRA API] Meta Pixel ID: {settings.nakshatra_pixal_id}")
+        logger.debug(f"[NAKSHATRA API] Meta Pixel ID: {settings.NAKSHATRA_PIXAL_ID}")
 
         try:
             capi_response = requests.post(
                 meta_url,
-                params={'access_token': settings.Nakshtra_access_token},
+                params={'access_token': settings.NAKSHTRA_ACCESS_TOKEN},
                 json=capi_payload,
                 timeout=10
             )
