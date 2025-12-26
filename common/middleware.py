@@ -45,7 +45,11 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
         '/admin',         # Allow all admin paths - custom admin site handles auth
         '/api/auth/',     # Allow all auth endpoints
         '/api/nuviformsubmit',  # Nuvi form submission (no auth required)
+<<<<<<< HEAD
         '/api/orders/webhooks/razorpay/',  # Razorpay webhook (verified by signature)
+=======
+        '/api/nakshatra',  # Nakshatra form submission (no auth required)
+>>>>>>> 3536cbce72b432dfc65a880da54c25159e1c99d0
         '/static/',       # Allow static files (CSS, JS, images)
         '/media/',        # Allow media files
         '/health/',       # Health check endpoint
