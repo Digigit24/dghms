@@ -1132,6 +1132,16 @@ class ClinicalNoteTemplateFieldResponseSerializer(serializers.ModelSerializer):
 class ClinicalNoteTemplateFieldResponseCreateUpdateSerializer(serializers.ModelSerializer):
     """Serializer for creating/updating field responses"""
 
+    # Explicitly allow null for all value fields
+    value_text = serializers.CharField(allow_null=True, allow_blank=True, required=False)
+    value_number = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True, required=False)
+    value_boolean = serializers.BooleanField(allow_null=True, required=False)
+    value_date = serializers.DateField(allow_null=True, required=False)
+    value_datetime = serializers.DateTimeField(allow_null=True, required=False)
+    value_time = serializers.TimeField(allow_null=True, required=False)
+    value_json = serializers.JSONField(allow_null=True, required=False)
+    full_canvas_json = serializers.JSONField(allow_null=True, required=False)
+
     class Meta:
         model = ClinicalNoteTemplateFieldResponse
         fields = [
@@ -1329,7 +1339,11 @@ class ClinicalNoteTemplateResponseCreateUpdateSerializer(serializers.ModelSerial
                 ]
                 has_value = any(field in field_response_data and field_response_data[field] is not None for field in value_fields)
 
-                if has_value:
+                # Also check if selected_options has any values
+                has_selected_options = 'selected_options' in field_response_data and len(field_response_data.get('selected_options', [])) > 0
+
+                # Only create if there's an actual value or selected options
+                if has_value or has_selected_options:
                     ClinicalNoteTemplateFieldResponse.objects.create(
                         response=instance,
                         tenant_id=instance.tenant_id,

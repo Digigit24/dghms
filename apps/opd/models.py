@@ -2142,7 +2142,7 @@ class ClinicalNoteTemplateFieldResponse(models.Model):
     )
 
     # Value Storage (use appropriate field based on type)
-    value_text = models.TextField(blank=True)
+    value_text = models.TextField(null=True, blank=True)
     value_number = models.DecimalField(
         max_digits=10,
         decimal_places=2,
