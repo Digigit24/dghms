@@ -1113,6 +1113,7 @@ class ClinicalNoteTemplateFieldResponseSerializer(serializers.ModelSerializer):
     field_label = serializers.CharField(source='field.field_label', read_only=True)
     field_type = serializers.CharField(source='field.field_type', read_only=True)
     display_value = serializers.SerializerMethodField()
+    selected_options = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
 
     class Meta:
         model = ClinicalNoteTemplateFieldResponse
@@ -1121,7 +1122,7 @@ class ClinicalNoteTemplateFieldResponseSerializer(serializers.ModelSerializer):
             'value_text', 'value_number', 'value_boolean',
             'value_date', 'value_datetime', 'value_time', 'value_json',
             'full_canvas_json', 'canvas_thumbnail', 'canvas_version_history',
-            'display_value'
+            'selected_options', 'display_value'
         ]
 
     def get_display_value(self, obj):
@@ -1141,13 +1142,18 @@ class ClinicalNoteTemplateFieldResponseCreateUpdateSerializer(serializers.ModelS
     value_time = serializers.TimeField(allow_null=True, required=False)
     value_json = serializers.JSONField(allow_null=True, required=False)
     full_canvas_json = serializers.JSONField(allow_null=True, required=False)
+    selected_options = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=ClinicalNoteTemplateFieldOption.objects.all(),
+        required=False
+    )
 
     class Meta:
         model = ClinicalNoteTemplateFieldResponse
         fields = [
             'field', 'value_text', 'value_number',
             'value_boolean', 'value_date', 'value_datetime', 'value_time',
-            'value_json', 'full_canvas_json'
+            'value_json', 'full_canvas_json', 'selected_options'
         ]
 
 
@@ -1307,11 +1313,19 @@ class ClinicalNoteTemplateResponseCreateUpdateSerializer(serializers.ModelSerial
 
         # Create field responses
         for field_response_data in field_responses_data:
-            ClinicalNoteTemplateFieldResponse.objects.create(
+            # Extract selected_options before creating (ManyToMany must be set after object creation)
+            selected_options = field_response_data.pop('selected_options', [])
+
+            # Create the field response
+            field_response = ClinicalNoteTemplateFieldResponse.objects.create(
                 response=response,
                 tenant_id=validated_data['tenant_id'],
                 **field_response_data
             )
+
+            # Set the ManyToMany relationship
+            if selected_options:
+                field_response.selected_options.set(selected_options)
 
         return response
 
@@ -1344,11 +1358,19 @@ class ClinicalNoteTemplateResponseCreateUpdateSerializer(serializers.ModelSerial
 
                 # Only create if there's an actual value or selected options
                 if has_value or has_selected_options:
-                    ClinicalNoteTemplateFieldResponse.objects.create(
+                    # Extract selected_options before creating (ManyToMany must be set after object creation)
+                    selected_options = field_response_data.pop('selected_options', [])
+
+                    # Create the field response
+                    field_response = ClinicalNoteTemplateFieldResponse.objects.create(
                         response=instance,
                         tenant_id=instance.tenant_id,
                         **field_response_data
                     )
+
+                    # Set the ManyToMany relationship
+                    if selected_options:
+                        field_response.selected_options.set(selected_options)
 
         return instance
 
