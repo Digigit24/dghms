@@ -43,7 +43,8 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
         '/api/redoc',     # ReDoc documentation
         '/api/schema',    # OpenAPI schema
         '/admin',         # Allow all admin paths - custom admin site handles auth
-        '/api/auth/',     # Allow all auth endpoints
+        '/auth/',         # Allow all auth endpoints (login, logout, etc.)
+        '/api/auth/',     # Allow all API auth endpoints
         '/api/nuviformsubmit',  # Nuvi form submission (no auth required)
         'api/nakshatra',    # Nakshatra integration endpoint
         '/api/orders/webhooks/razorpay/',  # Razorpay webhook (verified by signature)

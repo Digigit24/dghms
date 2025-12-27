@@ -269,15 +269,21 @@
             try {
                 // Build request body
                 const requestBody = { email, password };
+
+                // Build headers
+                const headers = {
+                    'Content-Type': 'application/json',
+                };
+
+                // Add tenant_id to both body and header if provided
                 if (tenant_id && tenant_id.trim() !== '') {
                     requestBody.tenant_id = tenant_id.trim();
+                    headers['X-Tenant-ID'] = tenant_id.trim();
                 }
 
                 const response = await fetch('/auth/proxy-login/', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: headers,
                     body: JSON.stringify(requestBody)
                 });
 

@@ -7,6 +7,9 @@ from django.views.generic import RedirectView
 # Import custom HMS admin site
 from common.admin_site import hms_admin_site
 
+# Import authentication views
+from common.views import superadmin_proxy_login_view, admin_logout_view
+
 # ✅ Import drf-spectacular views
 from drf_spectacular.views import (
     SpectacularAPIView,
@@ -22,6 +25,8 @@ urlpatterns = [
     path('admin/', hms_admin_site.urls),
 
     # Authentication endpoints (SuperAdmin integration)
+    path('auth/proxy-login/', superadmin_proxy_login_view, name='superadmin-proxy-login'),
+    path('auth/logout/', admin_logout_view, name='admin-logout'),
     path('api/auth/', include('apps.auth.urls')),
 
     # API endpoints

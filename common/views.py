@@ -153,6 +153,10 @@ class TokenLoginView(View):
 def superadmin_proxy_login_view(request):
     """
     Function-based view for SuperAdmin login proxy to avoid CORS issues
+    Supports tenant_id from:
+    1. Request body (tenant_id field)
+    2. X-Tenant-ID header
+    3. X-Tenant-Id header (case insensitive)
     """
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
@@ -162,7 +166,14 @@ def superadmin_proxy_login_view(request):
         data = json.loads(request.body)
         email = data.get('email')
         password = data.get('password')
-        tenant_id = data.get('tenant_id')  # Optional tenant_id
+
+        # Get tenant_id from multiple sources (priority order)
+        tenant_id = (
+            data.get('tenant_id') or  # 1. Request body
+            request.META.get('HTTP_X_TENANT_ID') or  # 2. X-Tenant-ID header
+            request.META.get('HTTP_X_TENANT_Id') or  # 3. X-Tenant-Id header (alt case)
+            None
+        )
 
         logger.info(f"Login attempt for email: {email}, tenant_id: {tenant_id or 'not specified'}")
 
