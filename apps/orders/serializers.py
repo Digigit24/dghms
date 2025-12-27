@@ -3,7 +3,8 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from decimal import Decimal
 
-from .models import Order, OrderItem, OrderFee, FeeType
+from common.mixins import TenantMixin
+from .models import Order, OrderItem, OrderFee, FeeType, RazorpayConfig
 from apps.patients.models import PatientProfile
 from apps.appointments.models import Appointment
 
@@ -426,3 +427,86 @@ class RazorpayPaymentVerifySerializer(serializers.Serializer):
         max_length=255,
         help_text="Razorpay payment signature for verification"
     )
+
+
+class RazorpayConfigListSerializer(TenantMixin, serializers.ModelSerializer):
+    """
+    List view serializer for RazorpayConfig
+    Shows minimal info with masked secrets
+    """
+    razorpay_key_id_masked = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RazorpayConfig
+        fields = [
+            'id', 'tenant_id', 'razorpay_key_id_masked',
+            'is_test_mode', 'is_active', 'auto_capture',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['tenant_id']
+
+    def get_razorpay_key_id_masked(self, obj):
+        """Mask the key ID for security (show first 4 and last 4 chars)"""
+        if obj.razorpay_key_id and len(obj.razorpay_key_id) > 8:
+            return f"{obj.razorpay_key_id[:4]}...{obj.razorpay_key_id[-4:]}"
+        return "****"
+
+
+class RazorpayConfigDetailSerializer(TenantMixin, serializers.ModelSerializer):
+    """
+    Detail view serializer for RazorpayConfig
+    Shows all fields but sensitive ones are write-only
+    """
+    class Meta:
+        model = RazorpayConfig
+        fields = [
+            'id', 'tenant_id', 'razorpay_key_id',
+            'razorpay_key_secret', 'razorpay_webhook_secret',
+            'is_test_mode', 'is_active', 'auto_capture',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['tenant_id', 'created_at', 'updated_at']
+        extra_kwargs = {
+            'razorpay_key_secret': {'write_only': True},
+            'razorpay_webhook_secret': {'write_only': True},
+        }
+
+
+class RazorpayConfigCreateUpdateSerializer(TenantMixin, serializers.ModelSerializer):
+    """
+    Create/Update serializer for RazorpayConfig
+    All sensitive fields are write-only
+    """
+    class Meta:
+        model = RazorpayConfig
+        fields = [
+            'razorpay_key_id', 'razorpay_key_secret',
+            'razorpay_webhook_secret', 'is_test_mode',
+            'is_active', 'auto_capture'
+        ]
+        extra_kwargs = {
+            'razorpay_key_secret': {'write_only': True},
+            'razorpay_webhook_secret': {'write_only': True},
+        }
+
+    def validate(self, attrs):
+        """Custom validation for Razorpay config"""
+        # Ensure key_id is provided
+        if not attrs.get('razorpay_key_id'):
+            raise serializers.ValidationError({
+                'razorpay_key_id': 'Razorpay Key ID is required'
+            })
+
+        # Ensure key_secret is provided for new configs
+        if not self.instance and not attrs.get('razorpay_key_secret'):
+            raise serializers.ValidationError({
+                'razorpay_key_secret': 'Razorpay Key Secret is required'
+            })
+
+        # Ensure webhook_secret is provided for new configs
+        if not self.instance and not attrs.get('razorpay_webhook_secret'):
+            raise serializers.ValidationError({
+                'razorpay_webhook_secret': 'Razorpay Webhook Secret is required'
+            })
+
+        return attrs

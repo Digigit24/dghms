@@ -262,11 +262,6 @@ class SuperAdminAuthBackend(BaseBackend):
                         request.session['tenant_id'] = user_data.get('tenant')
                         request.session['tenant_slug'] = user_data.get('tenant_name')
                         request.session['user_data'] = user_payload
-                        
-                        # Clear any existing Django auth session keys
-                        from django.contrib.auth import SESSION_KEY
-                        if SESSION_KEY in request.session:
-                            del request.session[SESSION_KEY]
 
                     logger.info(f"Successfully authenticated user {username} for tenant {user_data.get('tenant_name')}")
                     return user

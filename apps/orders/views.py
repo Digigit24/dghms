@@ -24,16 +24,183 @@ from drf_spectacular.utils import (
 from common.drf_auth import HMSPermission
 from common.mixins import TenantViewSetMixin
 
-from .models import Order, OrderItem, FeeType
+from .models import Order, OrderItem, FeeType, RazorpayConfig
 from .serializers import (
     OrderCreateUpdateSerializer,
     OrderDetailSerializer,
     OrderListSerializer,
     FeeTypeSerializer,
     RazorpayOrderCreateSerializer,
-    RazorpayPaymentVerifySerializer
+    RazorpayPaymentVerifySerializer,
+    RazorpayConfigListSerializer,
+    RazorpayConfigDetailSerializer,
+    RazorpayConfigCreateUpdateSerializer
 )
 from .razorpay_utils import RazorpayClient
+
+
+# RazorpayConfig Management
+@extend_schema_view(
+    list=extend_schema(
+        summary="List Razorpay Configurations",
+        description="Get Razorpay configuration for current tenant (Admin only)",
+        tags=['Razorpay Config']
+    ),
+    create=extend_schema(
+        summary="Create Razorpay Configuration",
+        description="Create Razorpay configuration for tenant (Admin only)",
+        tags=['Razorpay Config']
+    ),
+    retrieve=extend_schema(
+        summary="Get Razorpay Configuration Details",
+        description="Retrieve Razorpay configuration details (Admin only)",
+        tags=['Razorpay Config']
+    ),
+    update=extend_schema(
+        summary="Update Razorpay Configuration",
+        description="Update Razorpay configuration (Admin only)",
+        tags=['Razorpay Config']
+    ),
+    partial_update=extend_schema(
+        summary="Partially Update Razorpay Configuration",
+        description="Partially update Razorpay configuration (Admin only)",
+        tags=['Razorpay Config']
+    )
+)
+class RazorpayConfigViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
+    """
+    Razorpay Configuration Management
+    Allows tenants to manage their Razorpay payment gateway credentials
+    """
+    queryset = RazorpayConfig.objects.all()
+    permission_classes = [HMSPermission]
+    hms_module = 'orders'
+    http_method_names = ['get', 'post', 'put', 'patch']  # No delete
+
+    action_permission_map = {
+        'list': 'manage_razorpay_config',
+        'retrieve': 'manage_razorpay_config',
+        'create': 'manage_razorpay_config',
+        'update': 'manage_razorpay_config',
+        'partial_update': 'manage_razorpay_config',
+    }
+
+    def get_serializer_class(self):
+        """Return appropriate serializer based on action"""
+        if self.action == 'list':
+            return RazorpayConfigListSerializer
+        elif self.action in ['create', 'update', 'partial_update']:
+            return RazorpayConfigCreateUpdateSerializer
+        return RazorpayConfigDetailSerializer
+
+    def get_queryset(self):
+        """Override to return only tenant's config"""
+        queryset = super().get_queryset()
+        # Each tenant should only see their own config
+        return queryset.filter(tenant_id=self.request.tenant_id)
+
+    def list(self, request, *args, **kwargs):
+        """List razorpay config (should be only one per tenant)"""
+        queryset = self.filter_queryset(self.get_queryset())
+
+        # Should only be one config per tenant
+        config = queryset.first()
+
+        if not config:
+            return Response({
+                'success': True,
+                'data': None,
+                'message': 'No Razorpay configuration found for this tenant'
+            })
+
+        serializer = self.get_serializer(config)
+        return Response({
+            'success': True,
+            'data': serializer.data
+        })
+
+    def create(self, request, *args, **kwargs):
+        """Create Razorpay config (only if doesn't exist)"""
+        # Check if config already exists for this tenant
+        existing_config = RazorpayConfig.objects.filter(
+            tenant_id=request.tenant_id
+        ).first()
+
+        if existing_config:
+            return Response({
+                'success': False,
+                'error': 'Razorpay configuration already exists for this tenant. Use PUT/PATCH to update.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        # tenant_id is auto-set by TenantMixin
+        config = serializer.save()
+
+        # Return with detail serializer (but secrets are write-only)
+        detail_serializer = RazorpayConfigDetailSerializer(config)
+
+        return Response({
+            'success': True,
+            'message': 'Razorpay configuration created successfully',
+            'data': detail_serializer.data
+        }, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        """Update Razorpay config"""
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+
+        config = serializer.save()
+
+        # Return with detail serializer
+        detail_serializer = RazorpayConfigDetailSerializer(config)
+
+        return Response({
+            'success': True,
+            'message': 'Razorpay configuration updated successfully',
+            'data': detail_serializer.data
+        })
+
+    def partial_update(self, request, *args, **kwargs):
+        """Partial update Razorpay config"""
+        kwargs['partial'] = True
+        return self.update(request, *args, **kwargs)
+
+    @extend_schema(
+        summary="Get Razorpay Public Key",
+        description="Get Razorpay public key ID for frontend checkout (Public endpoint)",
+        responses={200: OpenApiResponse(description="Public key returned")},
+        tags=['Razorpay Config']
+    )
+    @action(detail=False, methods=['GET'], url_path='public-key')
+    def get_public_key(self, request):
+        """
+        Public endpoint to get Razorpay Key ID for frontend checkout
+        This is safe to expose as it's the public key
+        """
+        config = RazorpayConfig.objects.filter(
+            tenant_id=request.tenant_id,
+            is_active=True
+        ).first()
+
+        if not config:
+            return Response({
+                'success': False,
+                'error': 'Razorpay not configured for this tenant'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        return Response({
+            'success': True,
+            'data': {
+                'razorpay_key_id': config.razorpay_key_id,
+                'is_test_mode': config.is_test_mode
+            }
+        })
 
 
 # Fee Type Management
@@ -69,16 +236,16 @@ class FeeTypeViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         'partial_update': 'manage_fee_types',
         'destroy': 'manage_fee_types',
     }
-    
+
     def list(self, request, *args, **kwargs):
         """List fee types with ability to filter"""
         queryset = self.filter_queryset(self.get_queryset())
-        
+
         # Optional filtering
         category = request.query_params.get('category')
         if category:
             queryset = queryset.filter(category=category)
-        
+
         serializer = self.get_serializer(queryset, many=True)
         return Response({
             'success': True,

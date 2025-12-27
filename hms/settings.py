@@ -120,10 +120,10 @@ MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
-    'common.middleware.JWTAuthenticationMiddleware',  # JWT authentication for API requests
     'django.middleware.csrf.CsrfViewMiddleware',
+    'common.middleware.JWTAuthenticationMiddleware',  # JWT authentication for API requests
     'django.contrib.auth.middleware.AuthenticationMiddleware',  # Required by Django admin
-    'common.middleware.CustomAuthenticationMiddleware',  # Override with our custom auth
+    'common.middleware.CustomAuthenticationMiddleware',  # Fallback auth and sets additional attributes
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]

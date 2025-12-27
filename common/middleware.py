@@ -256,47 +256,46 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
 
 class CustomAuthenticationMiddleware(MiddlewareMixin):
     """
-    Custom authentication middleware that replaces Django's AuthenticationMiddleware
-    Uses session-based TenantUser instead of Django's User model
+    Custom authentication middleware that runs AFTER Django's AuthenticationMiddleware
+    Sets additional request attributes (tenant_id, permissions, etc.) from session data
 
-    NOTE: This middleware runs AFTER JWTAuthenticationMiddleware. If JWT auth
-    already set request.user, we don't overwrite it.
+    NOTE: This middleware runs AFTER both JWTAuthenticationMiddleware and Django's
+    AuthenticationMiddleware. It supplements the authenticated user with HMS-specific
+    attributes.
     """
 
     def process_request(self, request):
-        """Set request.user based on session data instead of Django's auth system"""
+        """Set additional HMS-specific attributes on the request"""
         from .auth_backends import TenantUser
         from django.contrib.auth.models import AnonymousUser
-        from django.contrib.auth import SESSION_KEY
 
-        # IMPORTANT: If user is already set (by JWT middleware), don't overwrite it
+        # Check if user is authenticated (either by JWT or Django's auth)
         if hasattr(request, 'user') and request.user is not None:
-            # Check if it's already authenticated (not AnonymousUser)
             if not isinstance(request.user, AnonymousUser):
-                print(f"[CUSTOM AUTH] ✅ User already set by JWT middleware: {request.user.email}")
+                # User is authenticated - check if it's a TenantUser
+                if isinstance(request.user, TenantUser):
+                    # TenantUser already has all necessary attributes
+                    # Just ensure request attributes are set
+                    request.user_id = getattr(request.user, '_original_id', request.user.id)
+                    request.email = request.user.email
+                    request.tenant_id = request.user.tenant_id
+                    request.tenant_slug = request.user.tenant_slug
+                    request.is_super_admin = request.user.is_super_admin
+                    request.permissions = request.user.permissions
+                    request.enabled_modules = request.user.enabled_modules
+                    request.user_type = request.user.user_type
+                    request.is_patient = request.user.is_patient
+
+                    # Store tenant_id in thread-local storage
+                    set_current_tenant_id(request.tenant_id)
+
+                    print(f"[CUSTOM AUTH] ✅ User authenticated: {request.user.email} (tenant: {request.tenant_id})")
+                else:
+                    # User is authenticated but not a TenantUser (shouldn't happen)
+                    print(f"[CUSTOM AUTH] ⚠️ User is authenticated but not TenantUser: {type(request.user)}")
+
                 return None
 
-        # Clear any Django auth session keys that might cause conflicts
-        if hasattr(request, 'session'):
-            # Remove Django's auth session keys to prevent conflicts
-            if SESSION_KEY in request.session:
-                del request.session[SESSION_KEY]
-            if '_auth_user_backend' in request.session:
-                del request.session['_auth_user_backend']
-            if '_auth_user_hash' in request.session:
-                del request.session['_auth_user_hash']
-
-        # Check if we have user data in session
-        if hasattr(request, 'session') and request.session.get('user_data'):
-            user_data = request.session.get('user_data')
-            request.user = TenantUser(user_data)
-            # Set _cached_user to prevent Django from trying to load user from database
-            request._cached_user = request.user
-            print(f"[CUSTOM AUTH] ✅ User set from session: {request.user.email}")
-        else:
-            # Create anonymous user only if no other auth method succeeded
-            request.user = AnonymousUser()
-            request._cached_user = request.user
-            print(f"[CUSTOM AUTH] ⚠️ No auth found - setting AnonymousUser for {request.path}")
-
+        # If we get here, user is not authenticated
+        print(f"[CUSTOM AUTH] ⚠️ No authenticated user for {request.path}")
         return None
