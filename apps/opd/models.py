@@ -477,40 +477,28 @@ class OPDBill(models.Model):
                 return candidate
             next_sequence += 1
         
-    def _calculate_derived_totals(self): # Renamed helper method
+    def _calculate_derived_totals(self):
         """
         Calculate total amounts from items, apply discount, and update status.
-        Includes default doctor consultation fee if not already an item.
         This method assumes self.pk is available.
         """
-        items_total = Decimal('0.00')
-        # Here self.pk is guaranteed to be available.
+        # Calculate total ONLY from actual bill items (no automatic fees)
         items_total = sum(item.total_price for item in self.items.all())
-
-        # Add default doctor consultation fee if not already covered by an item
-        # and if a doctor is assigned and has a fee.
-        if self.doctor and self.doctor.consultation_fee:
-            has_consultation_item = self.items.filter(source='Consultation').exists()
-            if not has_consultation_item:
-                items_total += self.doctor.consultation_fee
 
         self.total_amount = items_total
 
         # Calculate payable amount
         if self.discount_percent > 0:
-            # Calculate discount from percentage (overrides manual discount_amount)
             self.discount_amount = (self.total_amount * self.discount_percent / Decimal('100.00')).quantize(Decimal('0.01'))
-        # else: keep existing discount_amount (allows manual discounts when discount_percent is 0)
 
-        # Ensure discount_amount is set (default to 0 if not set)
         if self.discount_amount is None:
             self.discount_amount = Decimal('0.00')
 
         self.payable_amount = self.total_amount - self.discount_amount
-        
+
         # Calculate balance
         self.balance_amount = self.payable_amount - self.received_amount
-        
+
         # Update payment status
         if self.received_amount >= self.payable_amount:
             self.payment_status = 'paid'

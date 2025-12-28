@@ -46,7 +46,7 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
         '/auth/',         # Allow all auth endpoints (login, logout, etc.)
         '/api/auth/',     # Allow all API auth endpoints
         '/api/nuviformsubmit',  # Nuvi form submission (no auth required)
-        'api/nakshatra',    # Nakshatra integration endpoint
+        '/api/nakshatra/',    # Nakshatra integration endpoint (no auth required)
         '/api/orders/webhooks/razorpay/',  # Razorpay webhook (verified by signature)
         '/static/',       # Allow static files (CSS, JS, images)
         '/media/',        # Allow media files
