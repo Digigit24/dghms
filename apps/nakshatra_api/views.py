@@ -8,7 +8,18 @@ from django.conf import settings
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
+from rest_framework import viewsets, filters, status as drf_status
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from rest_framework.permissions import AllowAny
+from django_filters.rest_framework import DjangoFilterBackend
 from .utils import create_meta_user_data_payload
+from .models import NakshatraLead
+from .serializers import (
+    NakshatraLeadSerializer,
+    NakshatraLeadListSerializer,
+    NakshatraLeadCreateSerializer
+)
 
 # Set up logger
 logger = logging.getLogger('nakshatra_api')
@@ -58,6 +69,32 @@ def nakshatra_form_submit_api(request):
         logger.debug(f"  - date: {form_data.get('date', 'N/A')}")
         logger.debug(f"  - client_event_id: {form_data.get('client_event_id', 'N/A')}")
 
+        # --- 0. SAVE LEAD TO DATABASE ---
+        logger.info("[NAKSHATRA API] Step 0: Saving lead to database...")
+
+        # Get client IP and user agent
+        client_ip = request.META.get('REMOTE_ADDR')
+        user_agent = request.META.get('HTTP_USER_AGENT', '')
+
+        # Initialize lead object (will be saved after API calls)
+        lead_data = {
+            'first_name': form_data.get('fname', ''),
+            'last_name': form_data.get('lname', ''),
+            'email': form_data.get('email', ''),
+            'phone': form_data.get('phone', ''),
+            'services': form_data.get('services', ''),
+            'appointment_date': form_data.get('date', ''),
+            'client_event_id': form_data.get('client_event_id'),
+            'ip_address': client_ip,
+            'user_agent': user_agent,
+            'custom_api_status': 'pending',
+            'meta_capi_status': 'pending',
+        }
+
+        # Create lead record
+        lead = NakshatraLead.objects.create(**lead_data)
+        logger.info(f"[NAKSHATRA API] ✅ Lead saved to database with ID: {lead.id}")
+
         # --- 1. HANDLE CUSTOM API INTEGRATION ---
 
         # Create a payload for your custom API service
@@ -84,15 +121,32 @@ def nakshatra_form_submit_api(request):
             if custom_response.status_code == 200:
                 logger.info(f"[NAKSHATRA API] ✅ Custom API: SUCCESS (Status: {custom_response.status_code})")
                 logger.debug(f"[NAKSHATRA API] Custom API Response: {custom_response.text[:200]}")
+                # Update lead status
+                lead.custom_api_status = 'success'
+                lead.custom_api_response = custom_response.text[:500]  # Store first 500 chars
+                lead.save(update_fields=['custom_api_status', 'custom_api_response'])
             else:
                 logger.warning(f"[NAKSHATRA API] ⚠️ Custom API: FAILED (Status: {custom_response.status_code})")
                 logger.warning(f"[NAKSHATRA API] Custom API Error: {custom_response.text}")
+                # Update lead status
+                lead.custom_api_status = 'failed'
+                lead.custom_api_response = f"Status {custom_response.status_code}: {custom_response.text[:500]}"
+                lead.save(update_fields=['custom_api_status', 'custom_api_response'])
         except requests.exceptions.Timeout as e:
             logger.error(f"[NAKSHATRA API] ❌ Custom API: TIMEOUT after 10s - {e}")
+            lead.custom_api_status = 'error'
+            lead.custom_api_response = f"Timeout: {str(e)}"
+            lead.save(update_fields=['custom_api_status', 'custom_api_response'])
         except requests.exceptions.ConnectionError as e:
             logger.error(f"[NAKSHATRA API] ❌ Custom API: CONNECTION ERROR - {e}")
+            lead.custom_api_status = 'error'
+            lead.custom_api_response = f"Connection Error: {str(e)}"
+            lead.save(update_fields=['custom_api_status', 'custom_api_response'])
         except requests.exceptions.RequestException as e:
             logger.error(f"[NAKSHATRA API] ❌ Custom API: REQUEST ERROR - {e}")
+            lead.custom_api_status = 'error'
+            lead.custom_api_response = f"Request Error: {str(e)}"
+            lead.save(update_fields=['custom_api_status', 'custom_api_response'])
 
         # --- 2. FIRE META CONVERSIONS API (CAPI) ---
 
@@ -137,15 +191,32 @@ def nakshatra_form_submit_api(request):
             if capi_response.status_code == 200:
                 logger.info(f"[NAKSHATRA API] ✅ Meta CAPI: SUCCESS (Status: {capi_response.status_code})")
                 logger.debug(f"[NAKSHATRA API] Meta CAPI Response: {capi_response.text}")
+                # Update lead status
+                lead.meta_capi_status = 'success'
+                lead.meta_capi_response = capi_response.text[:500]  # Store first 500 chars
+                lead.save(update_fields=['meta_capi_status', 'meta_capi_response'])
             else:
                 logger.warning(f"[NAKSHATRA API] ⚠️ Meta CAPI: FAILED (Status: {capi_response.status_code})")
                 logger.warning(f"[NAKSHATRA API] Meta CAPI Error: {capi_response.text}")
+                # Update lead status
+                lead.meta_capi_status = 'failed'
+                lead.meta_capi_response = f"Status {capi_response.status_code}: {capi_response.text[:500]}"
+                lead.save(update_fields=['meta_capi_status', 'meta_capi_response'])
         except requests.exceptions.Timeout as e:
             logger.error(f"[NAKSHATRA API] ❌ Meta CAPI: TIMEOUT after 10s - {e}")
+            lead.meta_capi_status = 'error'
+            lead.meta_capi_response = f"Timeout: {str(e)}"
+            lead.save(update_fields=['meta_capi_status', 'meta_capi_response'])
         except requests.exceptions.ConnectionError as e:
             logger.error(f"[NAKSHATRA API] ❌ Meta CAPI: CONNECTION ERROR - {e}")
+            lead.meta_capi_status = 'error'
+            lead.meta_capi_response = f"Connection Error: {str(e)}"
+            lead.save(update_fields=['meta_capi_status', 'meta_capi_response'])
         except requests.exceptions.RequestException as e:
             logger.error(f"[NAKSHATRA API] ❌ Meta CAPI: REQUEST ERROR - {e}")
+            lead.meta_capi_status = 'error'
+            lead.meta_capi_response = f"Request Error: {str(e)}"
+            lead.save(update_fields=['meta_capi_status', 'meta_capi_response'])
 
         # --- 3. RETURN SUCCESS RESPONSE ---
         logger.info("[NAKSHATRA API] ✅ Request completed successfully")
@@ -169,3 +240,84 @@ def nakshatra_form_submit_api(request):
             'status': 'error',
             'message': 'An internal error occurred.'
         }, status=500)
+
+
+# --- VIEWSET FOR MANAGING LEADS ---
+
+class NakshatraLeadViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    ViewSet for viewing Nakshatra leads.
+
+    This is a read-only viewset - leads are created via the form submission endpoint.
+    Provides list and retrieve operations for viewing stored leads.
+
+    **Authentication**: Public endpoint (no authentication required)
+    **Permissions**: AllowAny (for now - can be restricted later)
+
+    Endpoints:
+    - GET /api/nakshatra/leads/ - List all leads
+    - GET /api/nakshatra/leads/{id}/ - Retrieve a specific lead
+    """
+
+    queryset = NakshatraLead.objects.all()
+    permission_classes = [AllowAny]  # Public access - can be restricted later
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+
+    # Filtering
+    filterset_fields = ['custom_api_status', 'meta_capi_status', 'services']
+
+    # Search
+    search_fields = ['first_name', 'last_name', 'email', 'phone', 'services']
+
+    # Ordering
+    ordering_fields = ['created_at', 'first_name', 'last_name']
+    ordering = ['-created_at']  # Default ordering
+
+    def get_serializer_class(self):
+        """Use different serializers for list and detail views"""
+        if self.action == 'list':
+            return NakshatraLeadListSerializer
+        return NakshatraLeadSerializer
+
+    @action(detail=False, methods=['get'])
+    def stats(self, request):
+        """
+        Get statistics about leads.
+
+        Returns counts of leads by status and total leads.
+
+        Example: GET /api/nakshatra/leads/stats/
+        """
+        from django.db.models import Count, Q
+
+        total_leads = NakshatraLead.objects.count()
+
+        # Count by custom API status
+        custom_api_stats = NakshatraLead.objects.values('custom_api_status').annotate(
+            count=Count('id')
+        )
+
+        # Count by Meta CAPI status
+        meta_capi_stats = NakshatraLead.objects.values('meta_capi_status').annotate(
+            count=Count('id')
+        )
+
+        # Count successfully processed leads
+        successful_leads = NakshatraLead.objects.filter(
+            custom_api_status='success',
+            meta_capi_status='success'
+        ).count()
+
+        # Count failed leads
+        failed_leads = NakshatraLead.objects.filter(
+            Q(custom_api_status='failed') | Q(custom_api_status='error') |
+            Q(meta_capi_status='failed') | Q(meta_capi_status='error')
+        ).count()
+
+        return Response({
+            'total_leads': total_leads,
+            'successful_leads': successful_leads,
+            'failed_leads': failed_leads,
+            'custom_api_status': {item['custom_api_status']: item['count'] for item in custom_api_stats},
+            'meta_capi_status': {item['meta_capi_status']: item['count'] for item in meta_capi_stats},
+        })
