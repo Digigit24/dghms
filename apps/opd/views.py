@@ -693,7 +693,7 @@ class OPDBillFilter(django_filters.FilterSet):
             OpenApiParameter(name='doctor', type=int, description='Filter by doctor ID'),
             OpenApiParameter(name='payment_status', type=str, description='Filter by payment status (paid, partial, unpaid)'),
             OpenApiParameter(name='opd_type', type=str, description='Filter by OPD type (consultation, follow_up, emergency)'),
-            OpenApiParameter(name='charge_type', type=str, description='Filter by charge type (first_visit, revisit, emergency)'),
+            OpenApiParameter(name='charge_type', type=str, description='Filter by charge type (first_visit, revisit, follow_up, emergency)'),
             OpenApiParameter(name='search', type=str, description='Search by bill number, visit number, or patient name'),
         ],
         tags=['OPD - Bills']

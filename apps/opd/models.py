@@ -239,6 +239,7 @@ class OPDBill(models.Model):
     CHARGE_TYPE_CHOICES = [
         ('first_visit', 'First Visit'),
         ('revisit', 'Revisit'),
+        ('follow_up', 'Follow-up'),
         ('emergency', 'Emergency'),
     ]
     
