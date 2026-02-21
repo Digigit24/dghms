@@ -20,13 +20,13 @@ class PaymentCategory(models.Model):
     ]
 
     tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
-    name = models.CharField(max_length=100, unique=True)
+    name = models.CharField(max_length=100)
     category_type = models.CharField(
-        max_length=20, 
+        max_length=20,
         choices=CATEGORY_CHOICES
     )
     description = models.TextField(blank=True, null=True)
-    
+
     class Meta:
         db_table = 'payment_categories'
         verbose_name = 'Payment Category'
@@ -34,6 +34,12 @@ class PaymentCategory(models.Model):
         indexes = [
             models.Index(fields=['tenant_id']),
             models.Index(fields=['tenant_id', 'category_type']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['tenant_id', 'name'],
+                name='unique_payment_category_per_tenant'
+            ),
         ]
     
     def __str__(self):
