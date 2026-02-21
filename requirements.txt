@@ -38,6 +38,7 @@ python-decouple==3.8
 pytz==2025.2
 PyYAML==6.0.3
 razorpay==1.4.1
+setuptools>=75.0.0
 redis==5.0.1
 referencing==0.36.2
 requests==2.31.0
