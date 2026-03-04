@@ -257,6 +257,11 @@ class InvestigationViewSet(viewsets.ModelViewSet):
             if celery_result.successful():
                 result = cached['result'] or celery_result.result
                 data['result'] = result
+                # Always mark as 'completed' when Celery says SUCCESS —
+                # this covers both import tasks (which set inv_status cache)
+                # and export tasks (which only set inv_exp_status cache).
+                data['status'] = 'completed'
+                data['progress'] = 100
                 # When task is done, ensure top-level counters reflect final result
                 # (live cache counters may still be 0 if task finished before first poll)
                 if result and isinstance(result, dict):
@@ -264,6 +269,7 @@ class InvestigationViewSet(viewsets.ModelViewSet):
                     data['updated']  = result.get('updated',  data['updated'])
                     data['skipped']  = result.get('skipped',  data['skipped'])
             else:
+                data['status'] = 'failed'
                 data['error'] = str(celery_result.info)
         elif cached['result']:
             data['result'] = cached['result']
