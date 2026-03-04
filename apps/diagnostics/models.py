@@ -12,14 +12,31 @@ class Investigation(TenantModelMixin):
     Investigation Model - Master test list (Name, Code, Category, Base Charge).
     """
     CATEGORY_CHOICES = [
-        ('laboratory', 'Laboratory'),
+        # Lab sub-departments
+        ('haematology', 'Haematology'),
+        ('clinical_chemistry', 'Clinical Chemistry'),
+        ('biochemistry', 'Biochemistry'),
+        ('microbiology', 'Microbiology'),
+        ('serology', 'Serology'),
+        ('immunology', 'Immunology'),
+        ('histopathology', 'Histopathology'),
+        ('cytology', 'Cytology'),
+        ('genetics', 'Genetics'),
+        ('molecular_biology', 'Molecular Biology'),
+        ('blood_bank', 'Blood Bank'),
+        ('toxicology', 'Toxicology'),
+        ('endocrinology', 'Endocrinology'),
+        # Imaging
         ('radiology', 'Radiology'),
-        ('pathology', 'Pathology'),
-        ('cardiology', 'Cardiology'),
         ('ultrasound', 'Ultrasound'),
         ('ct_scan', 'CT Scan'),
         ('mri', 'MRI'),
         ('xray', 'X-Ray'),
+        ('ecg', 'ECG'),
+        # Other
+        ('cardiology', 'Cardiology'),
+        ('pathology', 'Pathology'),
+        ('laboratory', 'Laboratory'),
         ('other', 'Other'),
     ]
 
@@ -29,7 +46,8 @@ class Investigation(TenantModelMixin):
     )
     code = models.CharField(
         max_length=50,
-        help_text="Unique test code (e.g., 'CBC', 'CXR')"
+        blank=True,
+        help_text="Unique test code (e.g., 'CBC', 'CXR'). Auto-generated if left blank."
     )
     category = models.CharField(
         max_length=50,
@@ -42,6 +60,16 @@ class Investigation(TenantModelMixin):
         default=Decimal('0.00'),
         validators=[MinValueValidator(Decimal('0.00'))],
         help_text="Base charge for this test"
+    )
+    specimen_type = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="Type of specimen required (e.g., Blood, Urine, Stool, Sputum)"
+    )
+    reported_by = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="Who typically reports this test (e.g., Pathologist, Radiologist)"
     )
     description = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
