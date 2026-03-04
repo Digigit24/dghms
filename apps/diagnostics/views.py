@@ -23,7 +23,10 @@ from .serializers import (
     MedicineOrderSerializer, PackageOrderSerializer,
     ProcedureOrderSerializer, RequisitionSerializer,
 )
-from .tasks import export_investigations_task, get_export_cache, get_import_cache, import_investigations_task
+from .tasks import (
+    export_investigations_task, get_export_cache, get_import_cache,
+    import_investigations_task, set_cancel_flag,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -237,11 +240,17 @@ class InvestigationViewSet(viewsets.ModelViewSet):
         cached = get_import_cache(task_id)
 
         data = {
-            'success': True,
-            'task_id': task_id,
-            'state': celery_result.state,
-            'status': cached['status'] or celery_result.state.lower(),
-            'progress': cached['progress'],
+            'success':     True,
+            'task_id':     task_id,
+            'state':       celery_result.state,
+            'status':      cached['status'] or celery_result.state.lower(),
+            'progress':    cached['progress'],
+            # Live counters (update while task is running)
+            'imported':    cached['imported'],
+            'updated':     cached['updated'],
+            'skipped':     cached['skipped'],
+            # Current row being processed
+            'current_row': cached['current_row'],
         }
 
         if celery_result.ready():
@@ -253,6 +262,42 @@ class InvestigationViewSet(viewsets.ModelViewSet):
             data['result'] = cached['result']
 
         return Response(data)
+
+    # ------------------------------------------------------------------
+    # Cancel a running import
+    # ------------------------------------------------------------------
+
+    @action(detail=False, methods=['post'], url_path='cancel_import')
+    def cancel_import(self, request):
+        """
+        Signal a running import task to stop after the current row.
+
+        Body (JSON):
+            task_id – Celery task ID returned by start_import
+
+        Response:
+            { success, message }
+        """
+        task_id = request.data.get('task_id')
+        if not task_id:
+            return Response(
+                {'success': False, 'error': 'task_id is required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        celery_result = AsyncResult(task_id)
+        if celery_result.ready():
+            return Response(
+                {'success': False, 'error': 'Task already finished, nothing to cancel.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        set_cancel_flag(task_id)
+        return Response({
+            'success': True,
+            'message': 'Cancel signal sent. Import will stop after the current row.',
+            'task_id': task_id,
+        })
 
     # ------------------------------------------------------------------
     # Export – kick off async task

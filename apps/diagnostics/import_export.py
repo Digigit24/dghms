@@ -211,19 +211,19 @@ class InvestigationImporter:
     # Public entry points
     # ------------------------------------------------------------------
 
-    def import_from_xlsx(self, file_content: bytes, progress_cb=None) -> Dict[str, Any]:
+    def import_from_xlsx(self, file_content: bytes, progress_cb=None, row_cb=None, cancel_check=None) -> Dict[str, Any]:
         try:
             df = pd.read_excel(io.BytesIO(file_content))
             rows = df.fillna('').to_dict('records')
-            return self._process_rows(rows, progress_cb)
+            return self._process_rows(rows, progress_cb, row_cb, cancel_check)
         except Exception as exc:
             return self._error_result(f'Excel parsing error: {exc}')
 
-    def import_from_csv(self, file_content: bytes, progress_cb=None) -> Dict[str, Any]:
+    def import_from_csv(self, file_content: bytes, progress_cb=None, row_cb=None, cancel_check=None) -> Dict[str, Any]:
         try:
             text = file_content.decode('utf-8-sig')
             rows = list(csv.DictReader(io.StringIO(text)))
-            return self._process_rows(rows, progress_cb)
+            return self._process_rows(rows, progress_cb, row_cb, cancel_check)
         except Exception as exc:
             return self._error_result(f'CSV parsing error: {exc}')
 
@@ -231,12 +231,18 @@ class InvestigationImporter:
     # Core processing
     # ------------------------------------------------------------------
 
-    def _process_rows(self, rows: List[Dict], progress_cb=None) -> Dict[str, Any]:
+    def _process_rows(self, rows: List[Dict], progress_cb=None, row_cb=None, cancel_check=None) -> Dict[str, Any]:
         imported = updated = skipped = 0
         errors: List[str] = []
         total = len(rows)
+        cancelled = False
 
         for idx, raw_row in enumerate(rows, start=1):
+            # Check cancel flag before processing each row
+            if cancel_check and cancel_check():
+                cancelled = True
+                break
+
             if progress_cb:
                 progress_cb(idx, total)
 
@@ -244,16 +250,24 @@ class InvestigationImporter:
             if not mapped:
                 errors.append(f'Row {idx}: No mapped fields found – check your field mapping.')
                 skipped += 1
+                action = 'error'
+                name = f'Row {idx}'
+                if row_cb:
+                    row_cb(idx, total, name, action, imported, updated, skipped)
                 continue
 
             clean, row_errors = self._clean(mapped, idx)
             if row_errors:
                 errors.extend(row_errors)
 
+            name = clean.get('name') or clean.get('code') or f'Row {idx}'
+
             # At least name or code must survive cleaning
             if not clean.get('name') and not clean.get('code'):
                 errors.append(f'Row {idx}: "name" or "code" is required.')
                 skipped += 1
+                if row_cb:
+                    row_cb(idx, total, name, 'error', imported, updated, skipped)
                 continue
 
             try:
@@ -262,18 +276,26 @@ class InvestigationImporter:
                     if self.update_existing:
                         self._update_investigation(existing, clean)
                         updated += 1
+                        action = 'updated'
                     elif self.skip_duplicates:
                         errors.append(f'Row {idx}: Already exists – skipped (name/code match).')
                         skipped += 1
+                        action = 'skipped'
                     else:
                         self._create_investigation(clean)
                         imported += 1
+                        action = 'imported'
                 else:
                     self._create_investigation(clean)
                     imported += 1
+                    action = 'imported'
             except Exception as exc:
                 errors.append(f'Row {idx}: DB error – {exc}')
                 skipped += 1
+                action = 'error'
+
+            if row_cb:
+                row_cb(idx, total, name, action, imported, updated, skipped)
 
         return {
             'success': (imported + updated) > 0 or total == 0,
@@ -281,6 +303,8 @@ class InvestigationImporter:
             'updated': updated,
             'skipped': skipped,
             'total_rows': total,
+            'cancelled': cancelled,
+            'processed_rows': imported + updated + skipped,
             'errors': errors,
         }
 

@@ -51,6 +51,22 @@ def import_investigations_task(
             pct = int((current / total) * 100) if total > 0 else 0
             _set(task_id, 'progress', pct)
 
+        def row_cb(row_num: int, total: int, name: str, action: str,
+                   imported: int, updated: int, skipped: int):
+            """Called after every row — stores live counters + current row info."""
+            _set(task_id, 'current_row', {
+                'row_num': row_num,
+                'total':   total,
+                'name':    name,
+                'action':  action,   # 'imported' | 'updated' | 'skipped' | 'error'
+            })
+            _set(task_id, 'live_imported', imported)
+            _set(task_id, 'live_updated',  updated)
+            _set(task_id, 'live_skipped',  skipped)
+
+        def cancel_check() -> bool:
+            return get_cancel_flag(task_id)
+
         importer = InvestigationImporter(
             tenant_id=tenant_id,
             field_mapping=field_mapping,
@@ -59,9 +75,9 @@ def import_investigations_task(
         )
 
         if file_format == 'xlsx':
-            result = importer.import_from_xlsx(file_content, progress_cb)
+            result = importer.import_from_xlsx(file_content, progress_cb, row_cb, cancel_check)
         elif file_format == 'csv':
-            result = importer.import_from_csv(file_content, progress_cb)
+            result = importer.import_from_csv(file_content, progress_cb, row_cb, cancel_check)
         else:
             result = {
                 'success': False,
@@ -165,9 +181,13 @@ def _set(task_id: str, key: str, value, timeout: int = 3600):
 
 def get_import_cache(task_id: str) -> dict:
     return {
-        'status':   cache.get(f'inv_status_{task_id}'),
-        'progress': cache.get(f'inv_progress_{task_id}', 0),
-        'result':   cache.get(f'inv_result_{task_id}'),
+        'status':      cache.get(f'inv_status_{task_id}'),
+        'progress':    cache.get(f'inv_progress_{task_id}', 0),
+        'result':      cache.get(f'inv_result_{task_id}'),
+        'current_row': cache.get(f'inv_current_row_{task_id}'),
+        'imported':    cache.get(f'inv_live_imported_{task_id}', 0),
+        'updated':     cache.get(f'inv_live_updated_{task_id}', 0),
+        'skipped':     cache.get(f'inv_live_skipped_{task_id}', 0),
     }
 
 
@@ -176,3 +196,12 @@ def get_export_cache(task_id: str) -> dict:
         'status': cache.get(f'inv_exp_status_{task_id}'),
         'result': cache.get(f'inv_exp_result_{task_id}'),
     }
+
+
+# Cancel helpers
+def set_cancel_flag(task_id: str):
+    cache.set(f'inv_cancel_{task_id}', True, timeout=3600)
+
+
+def get_cancel_flag(task_id: str) -> bool:
+    return bool(cache.get(f'inv_cancel_{task_id}', False))
