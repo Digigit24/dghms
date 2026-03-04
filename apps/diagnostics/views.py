@@ -316,18 +316,18 @@ class InvestigationViewSet(viewsets.ModelViewSet):
         Start an async export of investigations.
 
         Query params:
-            format     – 'xlsx' or 'csv'  (required)
-            category   – filter by category slug  (optional)
-            is_active  – 'true'/'false'            (optional)
-            search     – name contains search term (optional)
+            file_format – 'xlsx' or 'csv'  (required)
+            category    – filter by category slug  (optional)
+            is_active   – 'true'/'false'            (optional)
+            search      – name contains search term (optional)
 
         Response (202 Accepted):
             { task_id, status_url, download_url }
         """
-        file_format = request.query_params.get('format', '').lower()
+        file_format = request.query_params.get('file_format', '').lower()
         if file_format not in ('xlsx', 'csv'):
             return Response(
-                {'success': False, 'error': 'format must be "xlsx" or "csv".'},
+                {'success': False, 'error': 'file_format must be "xlsx" or "csv".'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
