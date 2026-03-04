@@ -182,12 +182,28 @@ class HMSPermission(permissions.BasePermission):
         Map DRF action to HMS permission name.
         Can be overridden in view with `action_permission_map`.
         """
-        # Check if view has custom mapping
-        if hasattr(view, 'action_permission_map'):
-            return view.action_permission_map.get(action)
+        # Check view-specific mapping first
+        view_map = getattr(view, 'action_permission_map', {})
+        if action in view_map:
+            return view_map[action]
 
-        # Use default mapping
-        return self.action_permission_map.get(action)
+        # Fall back to default CRUD mapping
+        if action in self.action_permission_map:
+            return self.action_permission_map[action]
+
+        # For unknown custom actions (export, import, download, etc.),
+        # infer permission from HTTP method so they are not blocked by default.
+        request = getattr(view, 'request', None)
+        if request:
+            method = request.method.upper()
+            if method == 'GET':
+                return 'view'
+            elif method in ('POST', 'PUT', 'PATCH'):
+                return 'create'
+            elif method == 'DELETE':
+                return 'delete'
+
+        return None
 
     def check_hms_permission(self, request, module, permission_name):
         """

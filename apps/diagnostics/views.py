@@ -255,7 +255,14 @@ class InvestigationViewSet(viewsets.ModelViewSet):
 
         if celery_result.ready():
             if celery_result.successful():
-                data['result'] = cached['result'] or celery_result.result
+                result = cached['result'] or celery_result.result
+                data['result'] = result
+                # When task is done, ensure top-level counters reflect final result
+                # (live cache counters may still be 0 if task finished before first poll)
+                if result and isinstance(result, dict):
+                    data['imported'] = result.get('imported', data['imported'])
+                    data['updated']  = result.get('updated',  data['updated'])
+                    data['skipped']  = result.get('skipped',  data['skipped'])
             else:
                 data['error'] = str(celery_result.info)
         elif cached['result']:
