@@ -11,10 +11,6 @@ class InvestigationSerializer(TenantMixin, serializers.ModelSerializer):
         model = Investigation
         fields = '__all__'
         read_only_fields = ['tenant_id']
-        # code is auto-generated when blank – make it optional in the API too
-        extra_kwargs = {
-            'code': {'required': False, 'allow_blank': True},
-        }
 
 class InvestigationRangeSerializer(TenantMixin, serializers.ModelSerializer):
     class Meta:
