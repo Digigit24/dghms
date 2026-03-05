@@ -1,13 +1,5 @@
 # DigiHMS - Hospital Management System
 
-## Technical Documentation
-
-**Version:** 2.0 (SuperAdmin Integration)
-**Date:** March 2026
-**Classification:** Internal Technical Reference
-
----
-
 <a id="table-of-contents"></a>
 
 ## Table of Contents
@@ -1100,6 +1092,3 @@ DigiHMS is a professionally architected, multi-tenant hospital management system
 
 The system is designed to scale horizontally, support diverse healthcare facility types (clinics, hospitals, Ayurvedic centers), and integrate with the broader Celiyo product suite through its JWT-based authentication architecture.
 
----
-
-*This document was auto-generated from codebase analysis. For development guidelines and contribution standards, refer to `claude.md` and `rules.md` in the project root.*

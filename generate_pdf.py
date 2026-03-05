@@ -76,7 +76,7 @@ h1:first-of-type {
     color: #0d47a1;
     border-bottom: 3px solid #0d47a1;
     padding-bottom: 12px;
-    margin-top: 120px;
+    margin-top: 20px;
     margin-bottom: 6px;
     text-align: center;
     letter-spacing: 1px;
@@ -112,7 +112,6 @@ h1 {
     border-bottom: 2px solid #1565c0;
     padding-bottom: 6px;
     margin-top: 30px;
-    page-break-before: always;
 }
 
 h2 {
