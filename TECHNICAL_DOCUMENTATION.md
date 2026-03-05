@@ -2,55 +2,57 @@
 
 <a id="table-of-contents"></a>
 
-## Table of Contents
+## Index
 
-1. [Project Overview](#1-project-overview)
-   - 1.1 [Purpose & Problem Statement](#11-purpose--problem-statement)
-   - 1.2 [Target Users](#12-target-users)
-   - 1.3 [Key Design Decisions](#13-key-design-decisions)
-2. [System Architecture](#2-system-architecture)
-   - 2.1 [High-Level Architecture](#21-high-level-architecture)
-   - 2.2 [Satellite Application Pattern](#22-satellite-application-pattern)
-   - 2.3 [Multi-Tenancy Architecture](#23-multi-tenancy-architecture)
-   - 2.4 [Authentication & Authorization Flow](#24-authentication--authorization-flow)
-3. [Technology Stack](#3-technology-stack)
-   - 3.1 [Core Technologies](#31-core-technologies)
-   - 3.2 [Third-Party Libraries](#32-third-party-libraries)
-   - 3.3 [External Integrations](#33-external-integrations)
-4. [Project Structure](#4-project-structure)
-   - 4.1 [Directory Layout](#41-directory-layout)
-   - 4.2 [Key File Descriptions](#42-key-file-descriptions)
-5. [Core Modules / Components](#5-core-modules--components)
-   - 5.1 [Common Module](#51-common-module)
-   - 5.2 [Patients Module](#52-patients-module)
-   - 5.3 [Doctors Module](#53-doctors-module)
-   - 5.4 [Appointments Module](#54-appointments-module)
-   - 5.5 [OPD Module](#55-opd-module)
-   - 5.6 [IPD Module](#56-ipd-module)
-   - 5.7 [Pharmacy Module](#57-pharmacy-module)
-   - 5.8 [Diagnostics Module](#58-diagnostics-module)
-   - 5.9 [Orders & Payments Module](#59-orders--payments-module)
-   - 5.10 [Services Module](#510-services-module)
-   - 5.11 [Panchakarma Module](#511-panchakarma-module)
-   - 5.12 [Hospital Configuration Module](#512-hospital-configuration-module)
-   - 5.13 [External API Modules](#513-external-api-modules)
-6. [Key Functionalities](#6-key-functionalities)
-7. [API / Service Layer](#7-api--service-layer)
-   - 7.1 [API Endpoint Reference](#71-api-endpoint-reference)
-   - 7.2 [Authentication Endpoints](#72-authentication-endpoints)
-   - 7.3 [Public Endpoints](#73-public-endpoints)
-8. [Database Design](#8-database-design)
-   - 8.1 [Entity Relationship Overview](#81-entity-relationship-overview)
-   - 8.2 [Core Models Reference](#82-core-models-reference)
-   - 8.3 [Naming Conventions](#83-naming-conventions)
-9. [Application Flow](#9-application-flow)
-   - 9.1 [API Request Lifecycle](#91-api-request-lifecycle)
-   - 9.2 [OPD Patient Flow](#92-opd-patient-flow)
-   - 9.3 [IPD Admission Flow](#93-ipd-admission-flow)
-   - 9.4 [Billing Flow](#94-billing-flow)
-10. [Important Business Logic](#10-important-business-logic)
-11. [System Strengths](#11-system-strengths)
-12. [Conclusion](#12-conclusion)
+| No. | Section | Page |
+|-----|---------|------|
+| **1** | **[Project Overview](#1-project-overview)** | |
+| 1.1 | [Purpose & Problem Statement](#11-purpose--problem-statement) | |
+| 1.2 | [Target Users](#12-target-users) | |
+| 1.3 | [Key Design Decisions](#13-key-design-decisions) | |
+| **2** | **[System Architecture](#2-system-architecture)** | |
+| 2.1 | [High-Level Architecture](#21-high-level-architecture) | |
+| 2.2 | [Satellite Application Pattern](#22-satellite-application-pattern) | |
+| 2.3 | [Multi-Tenancy Architecture](#23-multi-tenancy-architecture) | |
+| 2.4 | [Authentication & Authorization Flow](#24-authentication--authorization-flow) | |
+| **3** | **[Technology Stack](#3-technology-stack)** | |
+| 3.1 | [Core Technologies](#31-core-technologies) | |
+| 3.2 | [Third-Party Libraries](#32-third-party-libraries) | |
+| 3.3 | [External Integrations](#33-external-integrations) | |
+| **4** | **[Project Structure](#4-project-structure)** | |
+| 4.1 | [Directory Layout](#41-directory-layout) | |
+| 4.2 | [Key File Descriptions](#42-key-file-descriptions) | |
+| **5** | **[Core Modules / Components](#5-core-modules--components)** | |
+| 5.1 | [Common Module](#51-common-module) | |
+| 5.2 | [Patients Module](#52-patients-module) | |
+| 5.3 | [Doctors Module](#53-doctors-module) | |
+| 5.4 | [Appointments Module](#54-appointments-module) | |
+| 5.5 | [OPD Module](#55-opd-module) | |
+| 5.6 | [IPD Module](#56-ipd-module) | |
+| 5.7 | [Pharmacy Module](#57-pharmacy-module) | |
+| 5.8 | [Diagnostics Module](#58-diagnostics-module) | |
+| 5.9 | [Orders & Payments Module](#59-orders--payments-module) | |
+| 5.10 | [Services Module](#510-services-module) | |
+| 5.11 | [Panchakarma Module](#511-panchakarma-module) | |
+| 5.12 | [Hospital Configuration Module](#512-hospital-configuration-module) | |
+| 5.13 | [External API Modules](#513-external-api-modules) | |
+| **6** | **[Key Functionalities](#6-key-functionalities)** | |
+| **7** | **[API / Service Layer](#7-api--service-layer)** | |
+| 7.1 | [API Endpoint Reference](#71-api-endpoint-reference) | |
+| 7.2 | [Authentication Endpoints](#72-authentication-endpoints) | |
+| 7.3 | [Public Endpoints](#73-public-endpoints) | |
+| **8** | **[Database Design](#8-database-design)** | |
+| 8.1 | [Entity Relationship Overview](#81-entity-relationship-overview) | |
+| 8.2 | [Core Models Reference](#82-core-models-reference) | |
+| 8.3 | [Naming Conventions](#83-naming-conventions) | |
+| **9** | **[Application Flow](#9-application-flow)** | |
+| 9.1 | [API Request Lifecycle](#91-api-request-lifecycle) | |
+| 9.2 | [OPD Patient Flow](#92-opd-patient-flow) | |
+| 9.3 | [IPD Admission Flow](#93-ipd-admission-flow) | |
+| 9.4 | [Billing Flow](#94-billing-flow) | |
+| **10** | **[Important Business Logic](#10-important-business-logic)** | |
+| **11** | **[System Strengths](#11-system-strengths)** | |
+| **12** | **[Conclusion](#12-conclusion)** | |
 
 ---
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Generate professional PDF from TECHNICAL_DOCUMENTATION.md"""
 
+import re
 import markdown
 from weasyprint import HTML, CSS
 import os
@@ -28,6 +29,38 @@ html_body = markdown.markdown(
         "toc": {"permalink": False, "toc_depth": 3},
         "codehilite": {"css_class": "highlight", "guess_lang": False},
     },
+)
+
+# Post-process: Add class to the index table (first table after the Index heading)
+# Mark the index table with a special class
+html_body = html_body.replace(
+    '<h2 id="index">Index</h2>',
+    '<h2 id="index">Index</h2>\n<div class="index-section">',
+    1,
+)
+# Close the index div after the first table following the Index heading
+# Find the first </table> after "index-section" and close the div
+parts = html_body.split('<div class="index-section">')
+if len(parts) == 2:
+    after_index = parts[1]
+    after_index = after_index.replace('</table>', '</table>\n</div>', 1)
+    html_body = parts[0] + '<div class="index-section">' + after_index
+
+# Replace empty Page column cells with target-counter page number links
+def add_page_numbers(match):
+    """Replace empty td cells in index table with page number references."""
+    td_content = match.group(1)
+    href_match = re.search(r'href="(#[^"]+)"', td_content)
+    if href_match:
+        href = href_match.group(1)
+        return f'{td_content}</td>\n<td class="page-num"><a href="{href}"></a></td>'
+    return match.group(0)
+
+# Match td with a link followed by </td><td></td> (empty page column)
+html_body = re.sub(
+    r'(<td>.*?<a href="#[^"]+">.*?</a>.*?)</td>\s*\n<td></td>',
+    add_page_numbers,
+    html_body,
 )
 
 # Professional CSS
@@ -136,11 +169,54 @@ h4 {
     margin-top: 14px;
 }
 
-/* ===== TABLE OF CONTENTS ===== */
-/* Style the TOC section */
-h2#table-of-contents,
-h2:nth-of-type(1) {
-    page-break-before: always;
+/* ===== INDEX TABLE ===== */
+.index-section {
+    page-break-inside: avoid;
+}
+
+.index-section table {
+    margin-top: 10px;
+}
+
+.index-section th:first-child {
+    width: 50px;
+    text-align: center;
+}
+
+.index-section th:last-child {
+    width: 50px;
+    text-align: center;
+}
+
+.index-section td:first-child {
+    text-align: center;
+    font-size: 9pt;
+    color: #37474f;
+    white-space: nowrap;
+}
+
+.index-section td.page-num {
+    text-align: center;
+    font-size: 9pt;
+    color: #546e7a;
+}
+
+.index-section td.page-num a::after {
+    content: target-counter(attr(href url), page);
+}
+
+.index-section td.page-num a {
+    color: #546e7a;
+    text-decoration: none;
+}
+
+.index-section a {
+    color: #1a1a1a;
+}
+
+.index-section td strong a {
+    color: #0d47a1;
+    font-weight: 600;
 }
 
 /* ===== TABLES ===== */
