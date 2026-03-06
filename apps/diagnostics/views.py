@@ -522,7 +522,7 @@ class RequisitionViewSet(viewsets.ModelViewSet):
 
 
 class DiagnosticOrderViewSet(viewsets.ModelViewSet):
-    queryset = DiagnosticOrder.objects.all()
+    queryset = DiagnosticOrder.objects.select_related('investigation', 'requisition__patient')
     serializer_class = DiagnosticOrderSerializer
     permission_classes = [HMSPermission]
     hms_module = 'diagnostics'

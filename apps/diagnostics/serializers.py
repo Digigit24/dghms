@@ -21,6 +21,9 @@ class InvestigationRangeSerializer(TenantMixin, serializers.ModelSerializer):
 class DiagnosticOrderSerializer(TenantMixin, serializers.ModelSerializer):
     investigation_name = serializers.CharField(source='investigation.name', read_only=True)
     patient = serializers.IntegerField(source='requisition.patient_id', read_only=True)
+    patient_name = serializers.CharField(source='requisition.patient.full_name', read_only=True)
+    patient_mobile = serializers.CharField(source='requisition.patient.mobile_primary', read_only=True)
+    patient_email = serializers.EmailField(source='requisition.patient.email', read_only=True, allow_null=True)
 
     class Meta:
         model = DiagnosticOrder
