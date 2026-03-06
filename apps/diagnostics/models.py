@@ -515,6 +515,7 @@ class LabReport(TenantModelMixin):
     )
     
     verified_at = models.DateTimeField(null=True, blank=True)
+    whatsapp_sent = models.BooleanField(default=False)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
