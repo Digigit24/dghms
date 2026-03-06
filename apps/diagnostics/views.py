@@ -535,7 +535,7 @@ class DiagnosticOrderViewSet(viewsets.ModelViewSet):
 
 
 class LabReportViewSet(viewsets.ModelViewSet):
-    queryset = LabReport.objects.all()
+    queryset = LabReport.objects.select_related('diagnostic_order__investigation', 'diagnostic_order__requisition__patient')
     serializer_class = LabReportSerializer
     permission_classes = [HMSPermission]
     parser_classes = [MultiPartParser, FormParser]
