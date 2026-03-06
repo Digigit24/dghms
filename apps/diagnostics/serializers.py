@@ -20,6 +20,7 @@ class InvestigationRangeSerializer(TenantMixin, serializers.ModelSerializer):
 
 class DiagnosticOrderSerializer(TenantMixin, serializers.ModelSerializer):
     investigation_name = serializers.CharField(source='investigation.name', read_only=True)
+    patient = serializers.IntegerField(source='requisition.patient_id', read_only=True)
 
     class Meta:
         model = DiagnosticOrder
