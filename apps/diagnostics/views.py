@@ -538,6 +538,7 @@ class LabReportViewSet(viewsets.ModelViewSet):
     queryset = LabReport.objects.all()
     serializer_class = LabReportSerializer
     permission_classes = [HMSPermission]
+    parser_classes = [MultiPartParser, FormParser]
     hms_module = 'diagnostics'
 
     def get_queryset(self):

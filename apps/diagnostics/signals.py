@@ -4,7 +4,7 @@ from django.dispatch import receiver
 from django.contrib.contenttypes.models import ContentType
 from decimal import Decimal
 
-from .models import DiagnosticOrder, MedicineOrder, ProcedureOrder, PackageOrder
+from .models import DiagnosticOrder, LabReport, MedicineOrder, ProcedureOrder, PackageOrder
 
 
 def create_or_update_bill_item(order_instance, item_name, source):
@@ -93,3 +93,29 @@ def package_order_post_save(sender, instance, created, **kwargs):
     if instance.status == 'completed' and instance.content_object:
         item_name = f"{instance.package.name} (Package) x{instance.quantity}"
         create_or_update_bill_item(instance, item_name, 'Procedure')
+
+
+@receiver(post_save, sender=LabReport)
+def lab_report_post_save(sender, instance, created, **kwargs):
+    """
+    When a LabReport is created or updated:
+    1. Mark the linked DiagnosticOrder as 'completed'.
+    2. If every DiagnosticOrder under the parent Requisition is now 'completed',
+       mark the Requisition as 'completed' too.
+    """
+    order = instance.diagnostic_order
+
+    # Step 1: complete the individual order (skip if already completed to avoid recursion)
+    if order.status != 'completed':
+        DiagnosticOrder.objects.filter(pk=order.pk).update(status='completed')
+        order.status = 'completed'
+
+    # Step 2: check if ALL orders on the requisition are completed
+    requisition = order.requisition
+    pending_orders = DiagnosticOrder.objects.filter(
+        requisition=requisition
+    ).exclude(status__in=['completed', 'cancelled'])
+
+    if not pending_orders.exists():
+        from .models import Requisition
+        Requisition.objects.filter(pk=requisition.pk).update(status='completed')

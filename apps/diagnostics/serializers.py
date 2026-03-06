@@ -151,7 +151,17 @@ class RequisitionSerializer(TenantMixin, serializers.ModelSerializer):
         return requisition
 
 class LabReportSerializer(TenantMixin, serializers.ModelSerializer):
+    attachment_url = serializers.SerializerMethodField()
+
     class Meta:
         model = LabReport
         fields = '__all__'
         read_only_fields = ['tenant_id', 'created_at', 'updated_at']
+
+    def get_attachment_url(self, obj):
+        if not obj.attachment:
+            return None
+        request = self.context.get('request')
+        if request:
+            return request.build_absolute_uri(obj.attachment.url)
+        return obj.attachment.url
