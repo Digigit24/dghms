@@ -156,6 +156,10 @@ class RequisitionSerializer(TenantMixin, serializers.ModelSerializer):
 
 class LabReportSerializer(TenantMixin, serializers.ModelSerializer):
     attachment_url = serializers.SerializerMethodField()
+    patient_name = serializers.CharField(source='diagnostic_order.requisition.patient.full_name', read_only=True)
+    patient_mobile = serializers.CharField(source='diagnostic_order.requisition.patient.mobile_primary', read_only=True)
+    investigation_id = serializers.IntegerField(source='diagnostic_order.investigation_id', read_only=True)
+    investigation_name = serializers.CharField(source='diagnostic_order.investigation.name', read_only=True)
 
     class Meta:
         model = LabReport
