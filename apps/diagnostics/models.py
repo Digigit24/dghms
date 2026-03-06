@@ -515,6 +515,11 @@ class LabReport(TenantModelMixin):
     )
     
     verified_at = models.DateTimeField(null=True, blank=True)
+    whatsapp_sent = models.BooleanField(default=False)
+    whatsapp_message_log_id = models.CharField(max_length=255, blank=True, null=True)
+    whatsapp_read = models.BooleanField(default=False)
+    whatsapp_failed = models.BooleanField(default=False)
+    whatsapp_delivered = models.BooleanField(default=False)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
