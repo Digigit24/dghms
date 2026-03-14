@@ -107,7 +107,7 @@ class VisitCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Visit
         fields = [
-            'patient', 'doctor', 'appointment', 'visit_type',
+            'patient', 'doctor', 'appointment', 'visit_date', 'visit_type',
             'is_follow_up', 'referred_by', 'status', 'queue_position'
         ]
     

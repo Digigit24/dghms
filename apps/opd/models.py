@@ -83,7 +83,7 @@ class Visit(models.Model):
     created_by_id = models.UUIDField(null=True, blank=True, help_text="User who created the visit")
     
     # Visit Information
-    visit_date = models.DateField(auto_now_add=True)
+    visit_date = models.DateField(default=timezone.now)
     visit_type = models.CharField(
         max_length=20,
         choices=VISIT_TYPE_CHOICES,
