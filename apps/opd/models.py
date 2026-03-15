@@ -173,22 +173,22 @@ class Visit(models.Model):
     def save(self, *args, **kwargs):
         """Auto-generate visit number if not set."""
         if not self.visit_number:
-            self.visit_number = self.generate_visit_number()
+            self.visit_number = self.generate_visit_number(self.visit_date)
         super().save(*args, **kwargs)
-    
+
     @staticmethod
-    def generate_visit_number():
+    def generate_visit_number(visit_date=None):
         """Generate unique visit number: OPD/YYYYMMDD/###"""
         from datetime import date
-        today = date.today()
-        date_str = today.strftime('%Y%m%d')
-        
-        # Get count of visits for today
-        today_count = Visit.objects.filter(
-            visit_date=today
+        target_date = visit_date or date.today()
+        date_str = target_date.strftime('%Y%m%d')
+
+        # Get count of visits for the target date
+        day_count = Visit.objects.filter(
+            visit_date=target_date
         ).count() + 1
-        
-        return f"OPD/{date_str}/{today_count:03d}"
+
+        return f"OPD/{date_str}/{day_count:03d}"
     
     def calculate_waiting_time(self):
         """Calculate time spent in waiting queue."""
