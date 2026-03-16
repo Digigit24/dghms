@@ -182,13 +182,21 @@ class Visit(models.Model):
         from datetime import date
         target_date = visit_date or date.today()
         date_str = target_date.strftime('%Y%m%d')
+        prefix = f"OPD/{date_str}/"
 
-        # Get count of visits for the target date
-        day_count = Visit.objects.filter(
-            visit_date=target_date
-        ).count() + 1
+        # Get the highest existing visit number for this date
+        last_visit = Visit.objects.filter(
+            visit_number__startswith=prefix
+        ).order_by('-visit_number').first()
 
-        return f"OPD/{date_str}/{day_count:03d}"
+        if last_visit:
+            # Extract the sequence number from the last visit number
+            last_seq = int(last_visit.visit_number.split('/')[-1])
+            next_seq = last_seq + 1
+        else:
+            next_seq = 1
+
+        return f"{prefix}{next_seq:03d}"
     
     def calculate_waiting_time(self):
         """Calculate time spent in waiting queue."""
