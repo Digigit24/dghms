@@ -356,10 +356,17 @@ class Admission(models.Model):
             delta = timezone.now() - self.admission_date
             return delta.days
 
-    def discharge(self, discharge_type='Normal', discharge_summary='', discharged_by_user_id=None):
-        """Discharge the patient and release the bed."""
+    def discharge(self, discharge_type='Normal', discharge_summary='', discharged_by_user_id=None, discharge_date=None):
+        """Discharge the patient and release the bed.
+
+        Args:
+            discharge_type: Type of discharge (e.g., 'Normal', 'Against Medical Advice')
+            discharge_summary: Summary notes for discharge
+            discharged_by_user_id: ID of user performing discharge
+            discharge_date: Optional specific discharge date/time (defaults to current time)
+        """
         self.status = 'discharged'
-        self.discharge_date = timezone.now()
+        self.discharge_date = discharge_date or timezone.now()
         self.discharge_type = discharge_type
         self.discharge_summary = discharge_summary
         self.discharged_by_user_id = discharged_by_user_id

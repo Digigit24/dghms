@@ -72,6 +72,15 @@ class AdmissionSerializer(TenantMixin, serializers.ModelSerializer):
             'discharged_by_user_id', 'created_at', 'updated_at'
         ]
 
+    def validate_discharge_date(self, value):
+        if value is not None:
+            admission_date = self.initial_data.get('admission_date')
+            if admission_date and value < admission_date:
+                raise serializers.ValidationError(
+                    "Discharge date must be after or equal to admission date"
+                )
+        return value
+
     def get_length_of_stay(self, obj):
         return obj.calculate_length_of_stay()
 

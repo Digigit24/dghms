@@ -91,7 +91,14 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def discharge(self, request, pk=None):
-        """Discharge a patient."""
+        """Discharge a patient.
+
+        Optionally pass discharge_date in ISO format to set a specific discharge time.
+        If not provided, defaults to current time.
+        """
+        from django.utils import timezone
+        from rest_framework.exceptions import ValidationError as DRFValidationError
+
         admission = self.get_object()
 
         if admission.status != 'admitted':
@@ -102,11 +109,32 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
         discharge_type = request.data.get('discharge_type', 'Normal')
         discharge_summary = request.data.get('discharge_summary', '')
+        discharge_date = request.data.get('discharge_date')
+
+        # Validate discharge_date if provided
+        if discharge_date:
+            try:
+                from dateutil.parser import isoparse
+                discharge_datetime = isoparse(discharge_date)
+            except (ValueError, TypeError):
+                return Response(
+                    {'error': 'Invalid discharge_date format. Use ISO 8601 format.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            if discharge_datetime < admission.admission_date:
+                return Response(
+                    {'error': 'Discharge date must be after or equal to admission date'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        else:
+            discharge_datetime = timezone.now()
 
         admission.discharge(
             discharge_type=discharge_type,
             discharge_summary=discharge_summary,
-            discharged_by_user_id=request.user_id
+            discharged_by_user_id=request.user_id,
+            discharge_date=discharge_datetime
         )
 
         serializer = self.get_serializer(admission)
