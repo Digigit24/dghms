@@ -173,21 +173,40 @@ class Visit(models.Model):
     def save(self, *args, **kwargs):
         """Auto-generate visit number if not set."""
         if not self.visit_number:
-            self.visit_number = self.generate_visit_number()
-        super().save(*args, **kwargs)
-    
+            max_retries = 5
+            for attempt in range(max_retries):
+                try:
+                    self.visit_number = self.generate_visit_number()
+                    super().save(*args, **kwargs)
+                    return
+                except IntegrityError:
+                    if attempt == max_retries - 1:
+                        raise
+                    continue
+        else:
+            super().save(*args, **kwargs)
+
     @staticmethod
     def generate_visit_number():
-        """Generate unique visit number: OPD/YYYYMMDD/###"""
+        """Generate unique visit number: OPD/YYYYMMDD/### with race condition handling."""
         from datetime import date
+        from django.db import connection
+
         today = date.today()
         date_str = today.strftime('%Y%m%d')
-        
-        # Get count of visits for today
-        today_count = Visit.objects.filter(
-            visit_date=today
-        ).count() + 1
-        
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT COUNT(*) FROM opd_visits
+                WHERE visit_date = %s
+                FOR UPDATE SKIP LOCKED
+                """,
+                [today]
+            )
+            result = cursor.fetchone()
+            today_count = (result[0] if result else 0) + 1
+
         return f"OPD/{date_str}/{today_count:03d}"
     
     def calculate_waiting_time(self):
