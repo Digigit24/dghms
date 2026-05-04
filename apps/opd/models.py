@@ -182,30 +182,38 @@ class Visit(models.Model):
                 except IntegrityError:
                     if attempt == max_retries - 1:
                         raise
+                    # Retry with exponential backoff
+                    import time
+                    time.sleep(0.1 * (2 ** attempt))
                     continue
         else:
             super().save(*args, **kwargs)
 
     @staticmethod
     def generate_visit_number():
-        """Generate unique visit number: OPD/YYYYMMDD/### with race condition handling."""
+        """Generate unique visit number: OPD/YYYYMMDD/### with collision avoidance."""
         from datetime import date
-        from django.db import connection
+        from django.db import transaction
 
         today = date.today()
         date_str = today.strftime('%Y%m%d')
 
-        with connection.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT COUNT(*) FROM opd_visits
-                WHERE visit_date = %s
-                FOR UPDATE SKIP LOCKED
-                """,
-                [today]
-            )
-            result = cursor.fetchone()
-            today_count = (result[0] if result else 0) + 1
+        # Use transaction to ensure consistent count
+        with transaction.atomic():
+            # Get the maximum visit number for today
+            latest_visits = Visit.objects.filter(
+                visit_date=today,
+                visit_number__startswith=f"OPD/{date_str}/"
+            ).order_by('-visit_number').values('visit_number')[:1]
+
+            if latest_visits:
+                # Extract the sequence number from the last visit
+                last_visit_number = latest_visits[0]['visit_number']
+                # Format: OPD/20260503/001 → extract 001
+                last_sequence = int(last_visit_number.split('/')[-1])
+                today_count = last_sequence + 1
+            else:
+                today_count = 1
 
         return f"OPD/{date_str}/{today_count:03d}"
     
