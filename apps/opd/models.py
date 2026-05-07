@@ -176,7 +176,11 @@ class Visit(models.Model):
             max_retries = 5
             for attempt in range(max_retries):
                 try:
-                    self.visit_number = self.generate_visit_number()
+                    # Pass tenant_id to generation method
+                    self.visit_number = self.generate_visit_number_for_tenant(
+                        self.tenant_id,
+                        self.visit_date
+                    )
                     super().save(*args, **kwargs)
                     return
                 except IntegrityError:
@@ -190,32 +194,44 @@ class Visit(models.Model):
             super().save(*args, **kwargs)
 
     @staticmethod
-    def generate_visit_number():
-        """Generate unique visit number: OPD/YYYYMMDD/### with collision avoidance."""
+    def generate_visit_number_for_tenant(tenant_id, visit_date):
+        """Generate unique visit number per tenant: OPD/YYYYMMDD/###"""
         from datetime import date
-        from django.db import transaction
 
-        today = date.today()
+        today = visit_date if isinstance(visit_date, date) else visit_date.date()
         date_str = today.strftime('%Y%m%d')
 
-        # Use transaction to ensure consistent count
-        with transaction.atomic():
-            # Get the maximum visit number for today
-            latest_visits = Visit.objects.filter(
-                visit_date=today,
-                visit_number__startswith=f"OPD/{date_str}/"
-            ).order_by('-visit_number').values('visit_number')[:1]
+        # Filter by both tenant_id AND visit_date
+        # This is critical for multi-tenant systems!
+        latest_visits = Visit.objects.filter(
+            tenant_id=tenant_id,
+            visit_date=today
+        ).order_by('-visit_number').values('visit_number')[:1]
 
-            if latest_visits:
-                # Extract the sequence number from the last visit
-                last_visit_number = latest_visits[0]['visit_number']
-                # Format: OPD/20260503/001 → extract 001
+        if latest_visits:
+            # Extract sequence from: OPD/20260507/005 → 5
+            last_visit_number = latest_visits[0]['visit_number']
+            try:
                 last_sequence = int(last_visit_number.split('/')[-1])
                 today_count = last_sequence + 1
-            else:
+            except (ValueError, IndexError):
+                # Fallback if visit_number format is unexpected
                 today_count = 1
+        else:
+            today_count = 1
 
         return f"OPD/{date_str}/{today_count:03d}"
+
+    @staticmethod
+    def generate_visit_number():
+        """Deprecated: Use generate_visit_number_for_tenant() instead.
+
+        This method is kept for backward compatibility but should not be used.
+        It doesn't properly handle tenant_id filtering.
+        """
+        raise NotImplementedError(
+            "Use generate_visit_number_for_tenant(tenant_id, visit_date) instead"
+        )
     
     def calculate_waiting_time(self):
         """Calculate time spent in waiting queue."""
