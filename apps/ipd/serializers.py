@@ -68,9 +68,22 @@ class AdmissionSerializer(TenantMixin, serializers.ModelSerializer):
             'created_at', 'updated_at'
         ]
         read_only_fields = [
-            'tenant_id', 'admission_id', 'created_by_user_id',
+            'tenant_id', 'created_by_user_id',
             'discharged_by_user_id', 'created_at', 'updated_at'
         ]
+
+    def validate_admission_id(self, value):
+        """Validate that admission_id is unique."""
+        if value:
+            # Check for duplicates (allow same ID only if updating existing record)
+            existing = Admission.objects.filter(admission_id=value)
+            if self.instance:
+                existing = existing.exclude(pk=self.instance.pk)
+            if existing.exists():
+                raise serializers.ValidationError(
+                    f"Admission ID '{value}' already exists. Please use a unique ID."
+                )
+        return value
 
     def validate_discharge_date(self, value):
         if value is not None:

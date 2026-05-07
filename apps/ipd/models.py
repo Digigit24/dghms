@@ -321,7 +321,11 @@ class Admission(models.Model):
         return f"{self.admission_id} - {self.patient}"
 
     def save(self, *args, **kwargs):
-        """Auto-generate admission_id if not set and handle bed occupancy."""
+        """Auto-generate admission_id if not set and handle bed occupancy.
+
+        Note: admission_id is now editable. It will auto-generate only if not provided.
+        This allows users to manually set custom admission numbers if needed.
+        """
         if not self.admission_id:
             self.admission_id = self.generate_admission_id()
 
