@@ -613,12 +613,32 @@ class DoctorProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
                 except SuperAdminAPIException as e:
                     logger.error(f"SuperAdmin API error: {e.message}")
-                    return Response({
+
+                    # Extract and format error messages from response_data
+                    error_details = e.message
+                    validation_errors = {}
+
+                    if e.response_data and isinstance(e.response_data, dict):
+                        if 'error' in e.response_data:
+                            error_details = e.response_data['error']
+                        # Extract field-level validation errors
+                        for key, value in e.response_data.items():
+                            if key != 'error' and isinstance(value, (list, dict)):
+                                if isinstance(value, list) and value:
+                                    validation_errors[key] = value[0] if isinstance(value[0], str) else str(value[0])
+                                elif isinstance(value, dict):
+                                    validation_errors[key] = value
+
+                    response_body = {
                         'success': False,
                         'error': 'User creation failed in SuperAdmin',
-                        'details': e.message,
-                        'response_data': e.response_data
-                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                        'details': error_details
+                    }
+
+                    if validation_errors:
+                        response_body['validation_errors'] = validation_errors
+
+                    return Response(response_body, status=status.HTTP_400_BAD_REQUEST)
 
                 except Exception as e:
                     logger.error(f"Error creating user: {str(e)}", exc_info=True)
@@ -626,7 +646,7 @@ class DoctorProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                         'success': False,
                         'error': 'User creation failed',
                         'details': str(e)
-                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                    }, status=status.HTTP_400_BAD_REQUEST)
 
             # ===== STEP 2: Create doctor profile with user_id =====
             try:
