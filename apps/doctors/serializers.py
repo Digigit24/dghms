@@ -205,13 +205,26 @@ class DoctorProfileCreateUpdateSerializer(serializers.ModelSerializer):
         return doctor
 
     def update(self, instance, validated_data):
-        """Update doctor profile"""
+        """Update doctor profile - properly handles partial updates.
+
+        For PATCH requests (partial updates), only updates fields that are:
+        1. Actually provided in the request (not all fields)
+        2. Have non-empty values (doesn't overwrite with empty strings)
+
+        This prevents accidental clearing of fields when only updating specific fields like charges.
+        """
         specialty_ids = validated_data.pop('specialty_ids', None)
         validated_data.pop('user_id', None)  # Don't allow user_id change
         validated_data.pop('tenant_id', None)  # Don't allow tenant_id change
 
+        # Only update fields that have non-empty values
+        # This prevents empty strings from overwriting existing data during partial updates
         for attr, value in validated_data.items():
+            # Skip empty strings for text fields - they should preserve existing values
+            if value == '' or (value is None and getattr(instance, attr, None) is not None):
+                continue
             setattr(instance, attr, value)
+
         instance.save()
 
         # Update specialties if provided
