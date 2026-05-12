@@ -176,12 +176,19 @@ class Visit(models.Model):
             max_retries = 5
             for attempt in range(max_retries):
                 try:
-                    # Pass tenant_id to generation method
-                    self.visit_number = self.generate_visit_number_for_tenant(
-                        self.tenant_id,
-                        self.visit_date
-                    )
-                    super().save(*args, **kwargs)
+                    with transaction.atomic():
+                        # Lock any existing records for this tenant/date to prevent race conditions
+                        Visit.objects.select_for_update().filter(
+                            tenant_id=self.tenant_id,
+                            visit_date=self.visit_date
+                        ).exists()
+
+                        # Generate visit number with guaranteed isolation
+                        self.visit_number = self.generate_visit_number_for_tenant(
+                            self.tenant_id,
+                            self.visit_date
+                        )
+                        super().save(*args, **kwargs)
                     return
                 except IntegrityError:
                     if attempt == max_retries - 1:
@@ -197,8 +204,8 @@ class Visit(models.Model):
     def generate_visit_number_for_tenant(tenant_id, visit_date):
         """Generate unique visit number per tenant: OPD/YYYYMMDD/###
 
-        Uses database-level ordering to ensure correct numeric sequence.
-        Prevents duplicate generation even with concurrent requests.
+        Fetches all matching visit_numbers and sorts in Python to ensure
+        correct numeric sequence regardless of database or string sorting issues.
         """
         from datetime import date
         from django.db import connection
@@ -207,32 +214,27 @@ class Visit(models.Model):
         date_str = visit_date_obj.strftime('%Y%m%d')
         visit_prefix = f"OPD/{date_str}/"
 
-        # Use raw SQL to properly extract and order by numeric sequence
-        # This prevents string-based sorting issues with visit_number
-        # Format: OPD/YYYYMMDD/### → extract ### as integer for sorting
+        # Query without ORDER BY to avoid string-based sorting issues
+        # Sort in Python to ensure numeric ordering (001 < 010 < 100)
         with connection.cursor() as cursor:
             cursor.execute(
                 """
                 SELECT visit_number FROM opd_visits
                 WHERE tenant_id = %s AND visit_date = %s
                 AND visit_number LIKE %s
-                ORDER BY CAST(SUBSTRING(visit_number, CHAR_LENGTH(visit_number) - 2) AS INTEGER) DESC
-                LIMIT 1
                 """,
                 [str(tenant_id), visit_date_obj, f"{visit_prefix}%"]
             )
-            result = cursor.fetchone()
+            results = cursor.fetchall()
 
-        if result:
-            last_visit_number = result[0]
+        today_count = 1
+        for row in results:
             try:
-                # Extract the numeric part: OPD/20260511/001 → 001 → 1
-                last_sequence = int(last_visit_number.split('/')[-1])
-                today_count = last_sequence + 1
+                # Extract numeric part: OPD/20260511/001 → 001 → 1
+                sequence = int(row[0].split('/')[-1])
+                today_count = max(today_count, sequence + 1)
             except (ValueError, IndexError):
-                today_count = 1
-        else:
-            today_count = 1
+                continue
 
         return f"{visit_prefix}{today_count:03d}"
 
