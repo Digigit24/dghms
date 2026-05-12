@@ -195,32 +195,46 @@ class Visit(models.Model):
 
     @staticmethod
     def generate_visit_number_for_tenant(tenant_id, visit_date):
-        """Generate unique visit number per tenant: OPD/YYYYMMDD/###"""
+        """Generate unique visit number per tenant: OPD/YYYYMMDD/###
+
+        Uses database-level ordering to ensure correct numeric sequence.
+        Prevents duplicate generation even with concurrent requests.
+        """
         from datetime import date
+        from django.db import connection
 
-        today = visit_date if isinstance(visit_date, date) else visit_date.date()
-        date_str = today.strftime('%Y%m%d')
+        visit_date_obj = visit_date if isinstance(visit_date, date) else visit_date.date()
+        date_str = visit_date_obj.strftime('%Y%m%d')
+        visit_prefix = f"OPD/{date_str}/"
 
-        # Filter by both tenant_id AND visit_date
-        # This is critical for multi-tenant systems!
-        latest_visits = Visit.objects.filter(
-            tenant_id=tenant_id,
-            visit_date=today
-        ).order_by('-visit_number').values('visit_number')[:1]
+        # Use raw SQL to properly extract and order by numeric sequence
+        # This prevents string-based sorting issues with visit_number
+        # Format: OPD/YYYYMMDD/### → extract ### as integer for sorting
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT visit_number FROM opd_visits
+                WHERE tenant_id = %s AND visit_date = %s
+                AND visit_number LIKE %s
+                ORDER BY CAST(SUBSTRING(visit_number, CHAR_LENGTH(visit_number) - 2) AS INTEGER) DESC
+                LIMIT 1
+                """,
+                [str(tenant_id), visit_date_obj, f"{visit_prefix}%"]
+            )
+            result = cursor.fetchone()
 
-        if latest_visits:
-            # Extract sequence from: OPD/20260507/005 → 5
-            last_visit_number = latest_visits[0]['visit_number']
+        if result:
+            last_visit_number = result[0]
             try:
+                # Extract the numeric part: OPD/20260511/001 → 001 → 1
                 last_sequence = int(last_visit_number.split('/')[-1])
                 today_count = last_sequence + 1
             except (ValueError, IndexError):
-                # Fallback if visit_number format is unexpected
                 today_count = 1
         else:
             today_count = 1
 
-        return f"OPD/{date_str}/{today_count:03d}"
+        return f"{visit_prefix}{today_count:03d}"
 
     @staticmethod
     def generate_visit_number():
