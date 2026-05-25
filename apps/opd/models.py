@@ -46,7 +46,6 @@ class Visit(models.Model):
     tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
     visit_number = models.CharField(
         max_length=50,
-        unique=True,
         help_text="Unique visit identifier (e.g., OPD/20231223/001)"
     )
     
@@ -156,6 +155,7 @@ class Visit(models.Model):
         ordering = ['-visit_date', '-entry_time']
         verbose_name = 'OPD Visit'
         verbose_name_plural = 'OPD Visits'
+        unique_together = [['tenant_id', 'visit_number']]
         indexes = [
             models.Index(fields=['tenant_id']),
             models.Index(fields=['tenant_id', 'visit_date']),
@@ -327,7 +327,6 @@ class OPDBill(models.Model):
     )
     bill_number = models.CharField(
         max_length=50,
-        unique=True,
         help_text="Unique bill identifier (e.g., OPD-BILL/20231223/001)"
     )
     bill_date = models.DateTimeField(auto_now_add=True)
@@ -431,6 +430,7 @@ class OPDBill(models.Model):
         ordering = ['-bill_date']
         verbose_name = 'OPD Bill'
         verbose_name_plural = 'OPD Bills'
+        unique_together = [['tenant_id', 'bill_number']]
         indexes = [
             models.Index(fields=['tenant_id']),
             models.Index(fields=['tenant_id', 'bill_date']),
@@ -458,7 +458,7 @@ class OPDBill(models.Model):
                     is_new_instance = self.pk is None
 
                     if not self.bill_number:
-                        self.bill_number = self.generate_bill_number()
+                        self.bill_number = self.generate_bill_number(self.tenant_id)
 
                     # Check if this is a signal-triggered save (has explicit update_fields)
                     is_signal_save = 'update_fields' in save_kwargs
@@ -496,7 +496,7 @@ class OPDBill(models.Model):
             except IntegrityError as exc:
                 last_exception = exc
                 # Retry if the bill_number collided due to a concurrent create
-                if 'opd_bills_bill_number_key' in str(exc):
+                if 'bill_number' in str(exc):
                     self.bill_number = None
                     continue
                 raise
@@ -506,36 +506,36 @@ class OPDBill(models.Model):
             raise last_exception
 
     @staticmethod
-    def generate_bill_number():
-        """Generate unique bill number: OPD-BILL/YYYYMMDD/###"""
+    def generate_bill_number(tenant_id):
+        """Generate unique bill number per tenant: OPD-BILL/YYYYMMDD/###"""
         from datetime import date
+        from django.db import connection
+
         today = date.today()
         date_str = today.strftime('%Y%m%d')
-        
-        # Lock today's bills to avoid race conditions while fetching the next sequence
-        last_bill = (
-            OPDBill.objects
-            .filter(bill_date__date=today)
-            .select_for_update()
-            .order_by('-bill_number')
-            .first()
-        )
+        bill_prefix = f"OPD-BILL/{date_str}/"
 
-        last_sequence = 0
-        if last_bill:
+        # Query this tenant's bills for today, sort in Python for correct numeric order
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT bill_number FROM opd_bills
+                WHERE tenant_id = %s AND bill_date::date = %s
+                AND bill_number LIKE %s
+                """,
+                [str(tenant_id), today, f"{bill_prefix}%"]
+            )
+            results = cursor.fetchall()
+
+        today_count = 1
+        for row in results:
             try:
-                last_sequence = int(last_bill.bill_number.split('/')[-1])
-            except (ValueError, AttributeError):
-                last_sequence = OPDBill.objects.filter(bill_date__date=today).count()
+                sequence = int(row[0].split('/')[-1])
+                today_count = max(today_count, sequence + 1)
+            except (ValueError, IndexError):
+                continue
 
-        next_sequence = last_sequence + 1
-
-        # Ensure uniqueness even if there are gaps or manual entries
-        while True:
-            candidate = f"OPD-BILL/{date_str}/{next_sequence:03d}"
-            if not OPDBill.objects.filter(bill_number=candidate).exists():
-                return candidate
-            next_sequence += 1
+        return f"{bill_prefix}{today_count:03d}"
         
     def _calculate_derived_totals(self):
         """
@@ -606,8 +606,7 @@ class ProcedureMaster(models.Model):
     name = models.CharField(max_length=200)
     code = models.CharField(
         max_length=50,
-        unique=True,
-        help_text="Unique procedure code"
+        help_text="Unique procedure code per tenant"
     )
     category = models.CharField(
         max_length=50,
@@ -634,6 +633,7 @@ class ProcedureMaster(models.Model):
         ordering = ['category', 'name']
         verbose_name = 'Procedure Master'
         verbose_name_plural = 'Procedure Masters'
+        unique_together = [['tenant_id', 'code']]
         indexes = [
             models.Index(fields=['tenant_id']),
             models.Index(fields=['tenant_id', 'category']),
@@ -661,10 +661,9 @@ class ProcedurePackage(models.Model):
     name = models.CharField(max_length=200)
     code = models.CharField(
         max_length=50,
-        unique=True,
-        help_text="Unique package code"
+        help_text="Unique package code per tenant"
     )
-    
+
     # Procedures
     procedures = models.ManyToManyField(
         ProcedureMaster,
@@ -697,6 +696,7 @@ class ProcedurePackage(models.Model):
         ordering = ['name']
         verbose_name = 'Procedure Package'
         verbose_name_plural = 'Procedure Packages'
+        unique_together = [['tenant_id', 'code']]
         indexes = [
             models.Index(fields=['tenant_id']),
             models.Index(fields=['tenant_id', 'is_active']),

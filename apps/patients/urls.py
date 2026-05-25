@@ -6,7 +6,16 @@ from .views import PatientProfileViewSet
 router = DefaultRouter()
 router.register(r'profiles', PatientProfileViewSet, basename='patient')
 
+import logging as _log
+_log.getLogger(__name__).warning('[PATIENTS URLS] Loading urls.py v2 with explicit export paths')
+
+_export_view           = PatientProfileViewSet.as_view({'get': 'export'})
+_available_cols_view   = PatientProfileViewSet.as_view({'get': 'available_columns'})
+
 urlpatterns = [
+    # Explicit paths for export endpoints (must come before router include)
+    path('profiles/export/',            _export_view,         name='patient-export'),
+    path('profiles/available_columns/', _available_cols_view, name='patient-available-columns'),
     path('', include(router.urls)),
 ]
 
@@ -30,3 +39,5 @@ urlpatterns = [
 # POST   /api/patients/profiles/{id}/update_visit/           - Update visit info
 # POST   /api/patients/profiles/{id}/activate/               - Activate patient
 # POST   /api/patients/profiles/{id}/mark_deceased/          - Mark as deceased
+# GET    /api/patients/profiles/available_columns/           - List exportable column keys & labels
+# GET    /api/patients/profiles/export/                      - Bulk export (CSV/XLSX, flexible columns)

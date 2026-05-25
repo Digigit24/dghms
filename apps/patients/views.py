@@ -1,4 +1,9 @@
+import csv
+import io
+from collections import OrderedDict
+
 from django.db.models import Q, Avg, Sum
+from django.http import HttpResponse, StreamingHttpResponse
 from django.utils import timezone
 from django.db import transaction
 from django.contrib.auth.models import Group
@@ -28,6 +33,57 @@ from .serializers import (
     PatientAllergyCreateUpdateSerializer,
     PatientStatisticsSerializer
 )
+
+# --------------------------------------------------------------------------------------
+# Export: all columns available for patient bulk export
+# Each entry: column_key -> (header_label, value_getter_fn)
+# --------------------------------------------------------------------------------------
+
+EXPORTABLE_COLUMNS = OrderedDict([
+    ('patient_id',                 ('Patient ID',                  lambda p: p.patient_id or '')),
+    ('full_name',                  ('Full Name',                   lambda p: p.full_name or '')),
+    ('first_name',                 ('First Name',                  lambda p: p.first_name or '')),
+    ('middle_name',                ('Middle Name',                 lambda p: p.middle_name or '')),
+    ('last_name',                  ('Last Name',                   lambda p: p.last_name or '')),
+    ('date_of_birth',              ('Date of Birth',               lambda p: str(p.date_of_birth) if p.date_of_birth else '')),
+    ('age',                        ('Age',                         lambda p: str(p.age) if p.age is not None else '')),
+    ('gender',                     ('Gender',                      lambda p: p.get_gender_display() if p.gender else '')),
+    ('mobile_primary',             ('Mobile (Primary)',            lambda p: p.mobile_primary or '')),
+    ('mobile_secondary',           ('Mobile (Secondary)',          lambda p: p.mobile_secondary or '')),
+    ('email',                      ('Email',                       lambda p: p.email or '')),
+    ('address_line1',              ('Address Line 1',             lambda p: p.address_line1 or '')),
+    ('address_line2',              ('Address Line 2',             lambda p: p.address_line2 or '')),
+    ('city',                       ('City',                        lambda p: p.city or '')),
+    ('state',                      ('State',                       lambda p: p.state or '')),
+    ('country',                    ('Country',                     lambda p: p.country or '')),
+    ('pincode',                    ('Pincode',                     lambda p: p.pincode or '')),
+    ('full_address',               ('Full Address',                lambda p: p.full_address or '')),
+    ('blood_group',                ('Blood Group',                 lambda p: p.blood_group or '')),
+    ('height',                     ('Height (cm)',                 lambda p: str(p.height) if p.height is not None else '')),
+    ('weight',                     ('Weight (kg)',                 lambda p: str(p.weight) if p.weight is not None else '')),
+    ('bmi',                        ('BMI',                         lambda p: str(round(float(p.bmi), 2)) if p.bmi is not None else '')),
+    ('marital_status',             ('Marital Status',              lambda p: p.get_marital_status_display() if p.marital_status else '')),
+    ('occupation',                 ('Occupation',                  lambda p: p.occupation or '')),
+    ('emergency_contact_name',     ('Emergency Contact Name',      lambda p: p.emergency_contact_name or '')),
+    ('emergency_contact_phone',    ('Emergency Contact Phone',     lambda p: p.emergency_contact_phone or '')),
+    ('emergency_contact_relation', ('Emergency Contact Relation',  lambda p: p.emergency_contact_relation or '')),
+    ('insurance_provider',         ('Insurance Provider',          lambda p: p.insurance_provider or '')),
+    ('insurance_policy_number',    ('Insurance Policy Number',     lambda p: p.insurance_policy_number or '')),
+    ('insurance_expiry_date',      ('Insurance Expiry Date',       lambda p: str(p.insurance_expiry_date) if p.insurance_expiry_date else '')),
+    ('is_insurance_valid',         ('Insurance Valid',             lambda p: 'Yes' if p.is_insurance_valid else 'No')),
+    ('registration_date',          ('Registration Date',           lambda p: p.registration_date.strftime('%Y-%m-%d %H:%M') if p.registration_date else '')),
+    ('last_visit_date',            ('Last Visit Date',             lambda p: p.last_visit_date.strftime('%Y-%m-%d %H:%M') if p.last_visit_date else '')),
+    ('total_visits',               ('Total Visits',                lambda p: str(p.total_visits))),
+    ('status',                     ('Status',                      lambda p: p.get_status_display() if p.status else '')),
+    ('created_at',                 ('Registered On',               lambda p: p.created_at.strftime('%Y-%m-%d %H:%M') if p.created_at else '')),
+])
+
+
+class _EchoBuffer:
+    """Minimal write-only pseudo-buffer for streaming CSV rows."""
+    def write(self, value):
+        return value
+
 
 # --------------------------------------------------------------------------------------
 # HMS Permission Configuration for Patients Module
@@ -132,6 +188,7 @@ class PatientProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         'activate': 'edit',
         'mark_deceased': 'edit',
         'export': 'export',
+        'available_columns': 'view',
     }
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -600,3 +657,128 @@ class PatientProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         patient.save()
         return Response({'success': True, 'message': 'Patient marked as deceased',
                          'data': PatientProfileDetailSerializer(patient).data})
+
+    # =========================
+    # Export
+    # =========================
+
+    @extend_schema(
+        summary="List available export columns",
+        description="Returns all column keys and their display labels that can be requested in the export endpoint.",
+        responses={200: OpenApiResponse(description="Column list")},
+        tags=['Patients'],
+    )
+    @action(detail=False, methods=['get'])
+    def available_columns(self, request):
+        data = [{'key': key, 'label': header} for key, (header, _) in EXPORTABLE_COLUMNS.items()]
+        return Response({'success': True, 'data': data})
+
+    @extend_schema(
+        summary="Bulk export patients",
+        description=(
+            "Export all patients matching the given filters as a downloadable CSV or XLSX file.\n\n"
+            "**Column selection** – pass a comma-separated list of column keys via `columns`. "
+            "Omit the parameter to export every column. Call `available_columns` first to discover valid keys.\n\n"
+            "**Filters** – all the same query parameters accepted by the patient list endpoint work here too."
+        ),
+        parameters=[
+            OpenApiParameter(name='file_format', type=str, description='csv (default) or xlsx'),
+            OpenApiParameter(name='columns',    type=str, description='Comma-separated column keys, e.g. patient_id,full_name,mobile_primary'),
+            OpenApiParameter(name='status',     type=str, description='Filter by status'),
+            OpenApiParameter(name='gender',     type=str, description='Filter by gender'),
+            OpenApiParameter(name='blood_group',type=str, description='Filter by blood group'),
+            OpenApiParameter(name='city',       type=str, description='Filter by city'),
+            OpenApiParameter(name='age_min',    type=int, description='Minimum age'),
+            OpenApiParameter(name='age_max',    type=int, description='Maximum age'),
+            OpenApiParameter(name='has_insurance', type=bool, description='Filter by insurance status'),
+            OpenApiParameter(name='date_from',  type=str, description='Registration date from (YYYY-MM-DD)'),
+            OpenApiParameter(name='date_to',    type=str, description='Registration date to (YYYY-MM-DD)'),
+            OpenApiParameter(name='search',     type=str, description='Search by name, patient ID, or phone'),
+        ],
+        tags=['Patients'],
+    )
+    @action(detail=False, methods=['get'])
+    def export(self, request):
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            '[EXPORT DEBUG] export() called | action=%s | params=%s | user=%s',
+            getattr(self, 'action', '?'), dict(request.query_params), getattr(request.user, 'email', '?')
+        )
+        export_format = request.query_params.get('file_format', 'csv').lower()
+        if export_format not in ('csv', 'xlsx'):
+            return Response(
+                {'success': False, 'error': "file_format must be 'csv' or 'xlsx'"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Resolve requested columns
+        columns_param = request.query_params.get('columns', '').strip()
+        if columns_param:
+            requested_keys = [k.strip() for k in columns_param.split(',') if k.strip()]
+            invalid = [k for k in requested_keys if k not in EXPORTABLE_COLUMNS]
+            if invalid:
+                return Response(
+                    {
+                        'success': False,
+                        'error': f'Unknown column(s): {invalid}',
+                        'available_columns': list(EXPORTABLE_COLUMNS.keys()),
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            selected = OrderedDict((k, EXPORTABLE_COLUMNS[k]) for k in requested_keys)
+        else:
+            selected = EXPORTABLE_COLUMNS
+
+        # Build queryset: reuse all existing filters but skip prefetch (not needed here)
+        qs = self.filter_queryset(self.get_queryset().prefetch_related(None))
+
+        timestamp = timezone.now().strftime('%Y%m%d_%H%M%S')
+        filename = f'patients_export_{timestamp}'
+
+        if export_format == 'csv':
+            return self._stream_csv(qs, selected, filename)
+        return self._build_xlsx(qs, selected, filename)
+
+    @staticmethod
+    def _stream_csv(queryset, columns, filename):
+        headers = [header for header, _ in columns.values()]
+        getters = [getter for _, getter in columns.values()]
+
+        def _rows():
+            writer = csv.writer(_EchoBuffer())
+            yield writer.writerow(headers)
+            for patient in queryset.iterator(chunk_size=500):
+                yield writer.writerow([getter(patient) for getter in getters])
+
+        response = StreamingHttpResponse(_rows(), content_type='text/csv; charset=utf-8')
+        response['Content-Disposition'] = f'attachment; filename="{filename}.csv"'
+        return response
+
+    @staticmethod
+    def _build_xlsx(queryset, columns, filename):
+        import openpyxl
+        from openpyxl.styles import Font
+
+        headers = [header for header, _ in columns.values()]
+        getters = [getter for _, getter in columns.values()]
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = 'Patients'
+        ws.append(headers)
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+
+        for patient in queryset.iterator(chunk_size=500):
+            ws.append([getter(patient) for getter in getters])
+
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+
+        response = HttpResponse(
+            buffer.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        response['Content-Disposition'] = f'attachment; filename="{filename}.xlsx"'
+        return response

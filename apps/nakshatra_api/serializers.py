@@ -12,6 +12,8 @@ class NakshatraLeadSerializer(serializers.ModelSerializer):
 
     full_name = serializers.ReadOnlyField()
     is_successfully_processed = serializers.ReadOnlyField()
+    # Explicit CharField prevents DRF 3.14 / Django 5.x ip_address_validators incompatibility
+    ip_address = serializers.CharField(allow_blank=True, allow_null=True, required=False)
 
     class Meta:
         model = NakshatraLead
@@ -74,6 +76,8 @@ class NakshatraLeadCreateSerializer(serializers.ModelSerializer):
     Serializer for creating Nakshatra leads.
     Used internally when saving form submissions.
     """
+
+    ip_address = serializers.CharField(allow_blank=True, allow_null=True, required=False)
 
     class Meta:
         model = NakshatraLead
