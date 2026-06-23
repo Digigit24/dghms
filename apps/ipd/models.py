@@ -1,5 +1,5 @@
 # ipd/models.py
-from django.db import models
+from django.db import models, transaction, IntegrityError, connection
 from django.contrib.contenttypes.fields import GenericRelation, GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.core.validators import MinValueValidator, MaxValueValidator
@@ -323,33 +323,93 @@ class Admission(models.Model):
     def save(self, *args, **kwargs):
         """Auto-generate admission_id if not set and handle bed occupancy.
 
-        Note: admission_id is now editable. It will auto-generate only if not provided.
-        This allows users to manually set custom admission numbers if needed.
+        admission_id is always backend-generated, scoped per tenant and per day
+        (IPD/YYYYMMDD/###). Generation is race-safe: it locks existing rows for the
+        tenant/date and retries on the rare unique-constraint collision, so every
+        tenant gets its own clash-free sequence without the frontend sending an ID.
         """
-        if not self.admission_id:
-            self.admission_id = self.generate_admission_id()
-
         is_new = self.pk is None
 
-        super().save(*args, **kwargs)
+        if not self.admission_id:
+            max_retries = 5
+            for attempt in range(max_retries):
+                try:
+                    with transaction.atomic():
+                        # Lock existing rows for this tenant/date to avoid races
+                        admission_day = self._admission_day()
+                        Admission.objects.select_for_update().filter(
+                            tenant_id=self.tenant_id,
+                            admission_date__date=admission_day
+                        ).exists()
+
+                        self.admission_id = self.generate_admission_id_for_tenant(
+                            self.tenant_id,
+                            admission_day
+                        )
+                        super().save(*args, **kwargs)
+                    break
+                except IntegrityError:
+                    if attempt == max_retries - 1:
+                        raise
+                    import time
+                    time.sleep(0.1 * (2 ** attempt))
+                    self.admission_id = None
+                    continue
+        else:
+            super().save(*args, **kwargs)
 
         # Mark bed as occupied on new admission
         if is_new and self.bed and self.status == 'admitted':
             self.bed.mark_occupied()
 
+    def _admission_day(self):
+        """Return the date portion of admission_date (defaults to today)."""
+        value = self.admission_date or timezone.now()
+        return value.date() if hasattr(value, 'date') else value
+
+    @staticmethod
+    def generate_admission_id_for_tenant(tenant_id, admission_day):
+        """Generate a unique admission ID per tenant: IPD/YYYYMMDD/###
+
+        Fetches matching IDs for this tenant/date and sorts in Python to ensure
+        correct numeric sequencing (001 < 010 < 100) regardless of DB string sort.
+        """
+        from datetime import date
+
+        admission_day = admission_day if isinstance(admission_day, date) else admission_day.date()
+        date_str = admission_day.strftime('%Y%m%d')
+        prefix = f"IPD/{date_str}/"
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT admission_id FROM ipd_admissions
+                WHERE tenant_id = %s AND admission_date::date = %s
+                AND admission_id LIKE %s
+                """,
+                [str(tenant_id), admission_day, f"{prefix}%"]
+            )
+            results = cursor.fetchall()
+
+        next_seq = 1
+        for row in results:
+            try:
+                sequence = int(row[0].split('/')[-1])
+                next_seq = max(next_seq, sequence + 1)
+            except (ValueError, IndexError):
+                continue
+
+        return f"{prefix}{next_seq:03d}"
+
     @staticmethod
     def generate_admission_id():
-        """Generate unique admission ID: IPD/YYYYMMDD/###"""
-        from datetime import date
-        today = date.today()
-        date_str = today.strftime('%Y%m%d')
+        """Deprecated: use generate_admission_id_for_tenant(tenant_id, admission_day).
 
-        # Get count of admissions for today
-        today_count = Admission.objects.filter(
-            admission_date__date=today
-        ).count() + 1
-
-        return f"IPD/{date_str}/{today_count:03d}"
+        Kept for backward compatibility; it does not isolate by tenant.
+        """
+        raise NotImplementedError(
+            "Use generate_admission_id_for_tenant(tenant_id, admission_day) instead"
+        )
 
     def calculate_length_of_stay(self):
         """Calculate length of stay in days."""
