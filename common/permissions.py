@@ -61,6 +61,16 @@ def check_permission(request, permission_key, resource_owner_id=None, resource_t
     permissions = request.permissions
     permission_value = permissions.get(permission_key)
 
+    if permission_value is None:
+        parts = permission_key.split('.')
+        nested_value = permissions
+        for part in parts:
+            if not isinstance(nested_value, dict) or part not in nested_value:
+                nested_value = None
+                break
+            nested_value = nested_value[part]
+        permission_value = nested_value
+
     # If permission not found, deny access
     if permission_value is None:
         return False
@@ -127,6 +137,16 @@ def get_queryset_for_permission(queryset, request, view_permission_key, owner_fi
 
     permissions = request.permissions
     permission_value = permissions.get(view_permission_key)
+
+    if permission_value is None:
+        parts = view_permission_key.split('.')
+        nested_value = permissions
+        for part in parts:
+            if not isinstance(nested_value, dict) or part not in nested_value:
+                nested_value = None
+                break
+            nested_value = nested_value[part]
+        permission_value = nested_value
 
     # Always filter by tenant_id first
     base_queryset = queryset.filter(tenant_id=request.tenant_id)

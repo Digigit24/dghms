@@ -36,7 +36,8 @@ class VisitListSerializer(serializers.ModelSerializer):
             'id', 'visit_number', 'patient', 'patient_name', 'patient_id',
             'doctor', 'doctor_name', 'visit_date', 'visit_type', 'status',
             'queue_position', 'payment_status', 'total_amount', 'balance_amount',
-            'waiting_time', 'entry_time', 'is_follow_up'
+            'waiting_time', 'entry_time', 'is_follow_up',
+            'follow_up_required', 'follow_up_date', 'follow_up_notes',
         ]
         read_only_fields = ['visit_number', 'visit_date', 'entry_time']
     
@@ -56,12 +57,13 @@ class VisitDetailSerializer(serializers.ModelSerializer):
     waiting_time = serializers.SerializerMethodField()
     has_opd_bill = serializers.SerializerMethodField()
     has_clinical_note = serializers.SerializerMethodField()
-    
+    active_ipd_admission = serializers.SerializerMethodField()
+
     class Meta:
         model = Visit
         fields = '__all__'
         read_only_fields = [
-            'visit_number', 'visit_date', 'entry_time', 
+            'visit_number', 'visit_date', 'entry_time',
             'created_at', 'updated_at'
         ]
     
@@ -99,6 +101,19 @@ class VisitDetailSerializer(serializers.ModelSerializer):
     def get_has_clinical_note(self, obj):
         """Check if visit has clinical note"""
         return hasattr(obj, 'clinical_note')
+
+    def get_active_ipd_admission(self, obj):
+        """Return minimal active IPD admission data so the frontend avoids a separate API call."""
+        try:
+            from apps.ipd.models import Admission
+            admission = Admission.objects.filter(
+                patient_id=obj.patient_id,
+                tenant_id=obj.tenant_id,
+                status='admitted',
+            ).values('id', 'admission_id', 'status', 'ward_id').first()
+            return admission  # None if no active admission
+        except Exception:
+            return None
 
 
 class VisitCreateUpdateSerializer(serializers.ModelSerializer):

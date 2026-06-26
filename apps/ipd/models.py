@@ -200,6 +200,17 @@ class Admission(models.Model):
         ('death', 'Death'),
     ]
 
+    CLAIM_STATUS_CHOICES = [
+        ('not_applicable', 'Not Applicable'),
+        ('not_started', 'Not Started'),
+        ('documents_pending', 'Documents Pending'),
+        ('submitted', 'Submitted'),
+        ('under_review', 'Under Review'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+        ('settled', 'Settled'),
+    ]
+
     # Primary Fields
     id = models.AutoField(primary_key=True)
     tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
@@ -251,6 +262,32 @@ class Admission(models.Model):
     final_diagnosis = models.TextField(
         blank=True,
         help_text="Final diagnosis at discharge"
+    )
+
+    # Insurance / Mediclaim Information
+    has_mediclaim = models.BooleanField(
+        default=False,
+        help_text="Whether the patient has Mediclaim/TPA coverage for this admission"
+    )
+    tpa_name = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Selected or entered TPA/insurance provider name"
+    )
+    claim_status = models.CharField(
+        max_length=30,
+        choices=CLAIM_STATUS_CHOICES,
+        default='not_applicable',
+        help_text="Manual claim processing status"
+    )
+    claim_reference_number = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="TPA claim/pre-auth/reference number"
+    )
+    claim_notes = models.TextField(
+        blank=True,
+        help_text="Manual notes for claim processing"
     )
 
     # Discharge Information
@@ -315,6 +352,8 @@ class Admission(models.Model):
             models.Index(fields=['patient', 'admission_date'], name='ipd_patient_date_idx'),
             models.Index(fields=['doctor_id', 'admission_date'], name='ipd_doctor_date_idx'),
             models.Index(fields=['status'], name='ipd_status_idx'),
+            models.Index(fields=['tenant_id', 'has_mediclaim']),
+            models.Index(fields=['tenant_id', 'claim_status']),
         ]
 
     def __str__(self):

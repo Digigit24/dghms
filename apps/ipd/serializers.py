@@ -7,17 +7,35 @@ from .models import Ward, Bed, Admission, BedTransfer, IPDBilling, IPDBillItem
 class WardSerializer(TenantMixin, serializers.ModelSerializer):
     """Serializer for Ward model."""
 
-    available_beds_count = serializers.ReadOnlyField(source='get_available_beds_count')
-    occupied_beds_count = serializers.ReadOnlyField(source='get_occupied_beds_count')
+    # These are read from DB annotations in WardViewSet.get_queryset() (no extra query).
+    # Fall back to Python methods when used outside the viewset (admin, tests, etc.)
+    available_beds_count = serializers.SerializerMethodField()
+    occupied_beds_count = serializers.SerializerMethodField()
+    total_active_beds_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Ward
         fields = [
             'id', 'tenant_id', 'name', 'type', 'floor', 'total_beds',
             'description', 'is_active', 'available_beds_count',
-            'occupied_beds_count', 'created_at', 'updated_at'
+            'occupied_beds_count', 'total_active_beds_count', 'created_at', 'updated_at'
         ]
         read_only_fields = ['tenant_id', 'created_at', 'updated_at']
+
+    def get_available_beds_count(self, obj):
+        if hasattr(obj, 'available_beds_count') and not callable(getattr(Ward, 'available_beds_count', None)):
+            return obj.available_beds_count
+        return obj.get_available_beds_count()
+
+    def get_occupied_beds_count(self, obj):
+        if hasattr(obj, 'occupied_beds_count') and not callable(getattr(Ward, 'occupied_beds_count', None)):
+            return obj.occupied_beds_count
+        return obj.get_occupied_beds_count()
+
+    def get_total_active_beds_count(self, obj):
+        if hasattr(obj, 'total_active_beds_count') and not callable(getattr(Ward, 'total_active_beds_count', None)):
+            return obj.total_active_beds_count
+        return obj.beds.filter(is_active=True).count()
 
 
 class BedSerializer(TenantMixin, serializers.ModelSerializer):
@@ -63,6 +81,8 @@ class AdmissionSerializer(TenantMixin, serializers.ModelSerializer):
             'id', 'tenant_id', 'admission_id', 'patient', 'patient_name',
             'doctor_id', 'ward', 'ward_name', 'bed', 'bed_number',
             'admission_date', 'reason', 'provisional_diagnosis', 'final_diagnosis',
+            'has_mediclaim', 'tpa_name', 'claim_status',
+            'claim_reference_number', 'claim_notes',
             'discharge_date', 'discharge_summary', 'discharge_type', 'status',
             'length_of_stay', 'created_by_user_id', 'discharged_by_user_id',
             'created_at', 'updated_at'
@@ -91,13 +111,24 @@ class AdmissionListSerializer(TenantMixin, serializers.ModelSerializer):
     patient_name = serializers.ReadOnlyField(source='patient.full_name')
     ward_name = serializers.ReadOnlyField(source='ward.name')
     bed_number = serializers.ReadOnlyField(source='bed.bed_number')
+    # los_days is populated by DB annotation in AdmissionViewSet.get_queryset() - no extra query
+    los_days = serializers.IntegerField(read_only=True, default=None)
+    length_of_stay = serializers.SerializerMethodField()
 
     class Meta:
         model = Admission
         fields = [
             'id', 'admission_id', 'patient', 'patient_name', 'doctor_id',
-            'ward_name', 'bed_number', 'admission_date', 'status'
+            'ward_name', 'bed_number', 'admission_date', 'discharge_date',
+            'status', 'has_mediclaim', 'tpa_name', 'claim_status',
+            'claim_reference_number', 'los_days', 'length_of_stay'
         ]
+
+    def get_length_of_stay(self, obj):
+        """Return los_days annotation if present, else fall back to model method."""
+        if hasattr(obj, 'los_days') and obj.los_days is not None:
+            return obj.los_days
+        return obj.calculate_length_of_stay()
 
 
 class BedTransferSerializer(TenantMixin, serializers.ModelSerializer):

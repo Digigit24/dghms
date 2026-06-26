@@ -296,6 +296,126 @@ class SuperAdminClient:
             logger.error(f"Network error assigning roles: {str(e)}")
             raise SuperAdminAPIException(f"Network error: {str(e)}")
 
+    # ==================== ROLE CRUD OPERATIONS ====================
+
+    def list_roles(self, tenant_id: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """List roles for a tenant."""
+        url = f"{self.base_url}/api/roles/"
+        query_params = params or {}
+        query_params['tenant'] = tenant_id
+
+        try:
+            response = requests.get(
+                url,
+                params=query_params,
+                headers=self._get_headers(),
+                timeout=self.timeout
+            )
+            return self._handle_response(response)
+        except requests.RequestException as e:
+            logger.error(f"Network error listing roles: {str(e)}")
+            raise SuperAdminAPIException(f"Network error: {str(e)}")
+
+    def get_role(self, role_id: str) -> Dict[str, Any]:
+        """Get role details."""
+        url = f"{self.base_url}/api/roles/{role_id}/"
+
+        try:
+            response = requests.get(
+                url,
+                headers=self._get_headers(),
+                timeout=self.timeout
+            )
+            return self._handle_response(response)
+        except requests.RequestException as e:
+            logger.error(f"Network error fetching role: {str(e)}")
+            raise SuperAdminAPIException(f"Network error: {str(e)}")
+
+    def create_role(self, role_data: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
+        """Create a role in SuperAdmin for the current tenant."""
+        url = f"{self.base_url}/api/roles/"
+        payload = {
+            **role_data,
+            'tenant': tenant_id,
+        }
+
+        try:
+            response = requests.post(
+                url,
+                json=payload,
+                headers=self._get_headers(),
+                timeout=self.timeout
+            )
+            return self._handle_response(response)
+        except requests.RequestException as e:
+            logger.error(f"Network error creating role: {str(e)}")
+            raise SuperAdminAPIException(f"Network error: {str(e)}")
+
+    def update_role(self, role_id: str, role_data: Dict[str, Any], partial: bool = True) -> Dict[str, Any]:
+        """Update a role in SuperAdmin."""
+        url = f"{self.base_url}/api/roles/{role_id}/"
+        request_method = requests.patch if partial else requests.put
+
+        try:
+            response = request_method(
+                url,
+                json=role_data,
+                headers=self._get_headers(),
+                timeout=self.timeout
+            )
+            return self._handle_response(response)
+        except requests.RequestException as e:
+            logger.error(f"Network error updating role: {str(e)}")
+            raise SuperAdminAPIException(f"Network error: {str(e)}")
+
+    def delete_role(self, role_id: str) -> bool:
+        """Delete a role in SuperAdmin."""
+        url = f"{self.base_url}/api/roles/{role_id}/"
+
+        try:
+            response = requests.delete(
+                url,
+                headers=self._get_headers(),
+                timeout=self.timeout
+            )
+            if response.status_code == 204:
+                return True
+            self._handle_response(response)
+            return True
+        except requests.RequestException as e:
+            logger.error(f"Network error deleting role: {str(e)}")
+            raise SuperAdminAPIException(f"Network error: {str(e)}")
+
+    def get_role_members(self, role_id: str) -> Dict[str, Any]:
+        """Get users assigned to a role."""
+        url = f"{self.base_url}/api/roles/{role_id}/members/"
+
+        try:
+            response = requests.get(
+                url,
+                headers=self._get_headers(),
+                timeout=self.timeout
+            )
+            return self._handle_response(response)
+        except requests.RequestException as e:
+            logger.error(f"Network error fetching role members: {str(e)}")
+            raise SuperAdminAPIException(f"Network error: {str(e)}")
+
+    def get_permissions_schema(self) -> Dict[str, Any]:
+        """Fetch SuperAdmin permission schema."""
+        url = f"{self.base_url}/api/roles/permissions_schema/"
+
+        try:
+            response = requests.get(
+                url,
+                headers=self._get_headers(),
+                timeout=self.timeout
+            )
+            return self._handle_response(response)
+        except requests.RequestException as e:
+            logger.error(f"Network error fetching permission schema: {str(e)}")
+            raise SuperAdminAPIException(f"Network error: {str(e)}")
+
     # ==================== AUTHENTICATION OPERATIONS ====================
 
     def login(self, email: str, password: str) -> Dict[str, Any]:

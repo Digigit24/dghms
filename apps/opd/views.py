@@ -140,7 +140,9 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     }
     
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['patient', 'doctor', 'status', 'payment_status', 'visit_type', 'visit_date']
+    def get_filterset_class(self):
+        from .filters import VisitFilter
+        return VisitFilter
     search_fields = ['visit_number', 'patient__first_name', 'patient__last_name']
     ordering_fields = ['visit_date', 'entry_time', 'queue_position', 'total_amount']
     def get_permissions(self):
@@ -309,34 +311,211 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     )
     @action(detail=False, methods=['get'])
     def statistics(self, request):
-        """Get visit statistics"""
-        period = request.query_params.get('period', 'day')
+        """
+        Get visit statistics.
+
+        Query params:
+          period   — 'day' (default) | 'week' | 'month'
+          date     — specific date YYYY-MM-DD (overrides period)
+          date_from / date_to — explicit date range (overrides period)
+        """
         today = date.today()
 
-        if period == 'day':
-            start_date = today
-        elif period == 'week':
-            start_date = today - timedelta(days=7)
-        elif period == 'month':
-            start_date = today - timedelta(days=30)
+        # Allow an explicit date range or a specific date
+        date_from_str = request.query_params.get('date_from')
+        date_to_str = request.query_params.get('date_to')
+        specific_date_str = request.query_params.get('date')
+
+        if specific_date_str:
+            try:
+                from datetime import datetime
+                specific_date = datetime.strptime(specific_date_str, '%Y-%m-%d').date()
+                start_date = specific_date
+                end_date = specific_date
+            except ValueError:
+                start_date = today
+                end_date = today
+        elif date_from_str or date_to_str:
+            from datetime import datetime
+            start_date = datetime.strptime(date_from_str, '%Y-%m-%d').date() if date_from_str else today
+            end_date = datetime.strptime(date_to_str, '%Y-%m-%d').date() if date_to_str else today
         else:
-            start_date = today
+            period = request.query_params.get('period', 'day')
+            if period == 'week':
+                start_date = today - timedelta(days=7)
+            elif period == 'month':
+                start_date = today - timedelta(days=30)
+            else:
+                start_date = today
+            end_date = today
 
-        visits = self.get_queryset().filter(visit_date__gte=start_date)
+        visits = self.get_queryset().filter(
+            visit_date__gte=start_date,
+            visit_date__lte=end_date
+        )
 
-        stats = {
-            'total_visits': visits.count(),
-            'by_status': visits.values('status').annotate(count=Count('id')),
-            'by_type': visits.values('visit_type').annotate(count=Count('id')),
-            'total_revenue': visits.aggregate(Sum('total_amount'))['total_amount__sum'] or 0,
-            'paid_revenue': visits.filter(payment_status='paid').aggregate(Sum('paid_amount'))['paid_amount__sum'] or 0,
-            'pending_amount': visits.aggregate(Sum('balance_amount'))['balance_amount__sum'] or 0,
-        }
+        # Single aggregation query for all monetary stats
+        agg = visits.aggregate(
+            total_visits=Count('id'),
+            waiting=Count('id', filter=Q(status='waiting')),
+            in_consultation=Count('id', filter=Q(status='in_consultation')),
+            completed=Count('id', filter=Q(status='completed')),
+            cancelled=Count('id', filter=Q(status='cancelled')),
+            total_revenue=Sum('total_amount'),
+            paid_revenue=Sum('paid_amount', filter=Q(payment_status='paid')),
+            pending_amount=Sum('balance_amount'),
+        )
+
+        # Breakdown queries (separate but lightweight)
+        by_type = list(visits.values('visit_type').annotate(count=Count('id')))
 
         return Response({
             'success': True,
-            'period': period,
-            'data': stats
+            'period': request.query_params.get('period', 'day'),
+            'date_from': str(start_date),
+            'date_to': str(end_date),
+            'data': {
+                'total_visits': agg['total_visits'] or 0,
+                'by_status': {
+                    'waiting': agg['waiting'] or 0,
+                    'in_consultation': agg['in_consultation'] or 0,
+                    'completed': agg['completed'] or 0,
+                    'cancelled': agg['cancelled'] or 0,
+                },
+                'by_type': by_type,
+                'total_revenue': agg['total_revenue'] or 0,
+                'paid_revenue': agg['paid_revenue'] or 0,
+                'pending_amount': agg['pending_amount'] or 0,
+            }
+        })
+
+    @action(detail=False, methods=['get'])
+    def doctor_stats(self, request):
+        """
+        Per-doctor aggregation of visit statistics for admin dashboard.
+
+        Query params:
+          date_from — YYYY-MM-DD  (range start; default: today)
+          date_to   — YYYY-MM-DD  (range end;   default: date_from)
+          date      — YYYY-MM-DD  (single day shortcut, backward compat)
+
+        If date_from/date_to are provided they take priority over date.
+        """
+        from django.db.models import ExpressionWrapper, DurationField
+        import datetime as dt
+
+        today = dt.date.today()
+
+        def _parse(s):
+            try:
+                return dt.date.fromisoformat(s)
+            except (ValueError, TypeError):
+                return None
+
+        date_from_str = request.query_params.get('date_from')
+        date_to_str   = request.query_params.get('date_to')
+        date_str      = request.query_params.get('date')
+
+        if date_from_str:
+            date_from = _parse(date_from_str) or today
+            date_to   = _parse(date_to_str)   or date_from
+        elif date_str:
+            date_from = _parse(date_str) or today
+            date_to   = date_from
+        else:
+            date_from = today
+            date_to   = today
+
+        # Ensure from <= to
+        if date_from > date_to:
+            date_from, date_to = date_to, date_from
+
+        is_single_day = date_from == date_to
+
+        # Base queryset for the date range
+        qs = self.get_queryset().filter(
+            visit_date__gte=date_from,
+            visit_date__lte=date_to,
+        )
+
+        doctor_rows = list(
+            qs.values(
+                'doctor',
+                doctor_name=F('doctor__first_name'),
+                doctor_last_name=F('doctor__last_name'),
+            ).annotate(
+                visits_count=Count('id'),
+                waiting=Count('id', filter=Q(status='waiting')),
+                in_consultation=Count('id', filter=Q(status='in_consultation')),
+                completed=Count('id', filter=Q(status='completed')),
+                revenue=Sum('total_amount'),
+            ).order_by('-visits_count')
+        )
+
+        # Compute avg consultation minutes from consultation_start/end
+        for row in doctor_rows:
+            doc_visits = qs.filter(
+                doctor=row['doctor'],
+                consultation_start_time__isnull=False,
+                consultation_end_time__isnull=False,
+            ).annotate(
+                duration=ExpressionWrapper(
+                    F('consultation_end_time') - F('consultation_start_time'),
+                    output_field=DurationField()
+                )
+            )
+            durations = [
+                v.duration.total_seconds() / 60
+                for v in doc_visits
+                if v.duration is not None and v.duration.total_seconds() > 0
+            ]
+            row['avg_consultation_mins'] = round(sum(durations) / len(durations), 1) if durations else None
+
+            # Compose full name
+            fn = row.pop('doctor_name', '') or ''
+            ln = row.pop('doctor_last_name', '') or ''
+            row['doctor_name'] = f"{fn} {ln}".strip() or f"Doctor #{row['doctor']}"
+
+            # Normalise revenue — keep both new and legacy field names
+            raw_rev = row.get('revenue')
+            row['revenue_today'] = str(raw_rev or '0.00')   # legacy
+            row['revenue']       = str(raw_rev or '0.00')
+
+            # Backward-compat alias
+            row['visits_today'] = row['visits_count']
+
+        # IPD active admissions per doctor (always current, independent of range)
+        try:
+            from apps.ipd.models import Admission
+            ipd_rows = (
+                Admission.objects
+                .filter(tenant_id=request.tenant_id, status='admitted')
+                .values('doctor_id')
+                .annotate(ipd_count=Count('id'))
+            )
+            ipd_map = {str(r['doctor_id']): r['ipd_count'] for r in ipd_rows}
+        except Exception:
+            ipd_map = {}
+
+        for row in doctor_rows:
+            from apps.doctors.models import DoctorProfile
+            try:
+                doc = DoctorProfile.objects.get(id=row['doctor'], tenant_id=request.tenant_id)
+                row['ipd_admissions'] = ipd_map.get(str(doc.user_id), 0)
+                row['doctor_specialty'] = ', '.join(s.name for s in doc.specialties.all()) or None
+            except DoctorProfile.DoesNotExist:
+                row['ipd_admissions'] = 0
+                row['doctor_specialty'] = None
+
+        return Response({
+            'success': True,
+            # legacy
+            'date': str(date_from),
+            # new
+            'date_from': str(date_from),
+            'date_to':   str(date_to),
+            'is_single_day': is_single_day,
+            'data': doctor_rows,
         })
 
     @extend_schema(
@@ -593,9 +772,11 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                 opd_bill = OPDBill.objects.create(
                     visit=visit,
                     tenant_id=request.tenant_id,
-                    doctor=doctor_to_assign, # Assign doctor from visit or None
-                    billed_by_id=request.user.id,
-                    # Other fields will be set by _calculate_derived_totals or have defaults
+                    doctor=doctor_to_assign,
+                    billed_by_id=request.user_id,
+                    # Start at zero — signals/recalculation will update these once items are added
+                    total_amount=Decimal('0.00'),
+                    received_amount=Decimal('0.00'),
                 )
 
             # Get ContentType for OPDBillItem
@@ -1073,100 +1254,6 @@ class ProcedurePackageViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             return ProcedurePackageCreateUpdateSerializer
         return ProcedurePackageDetailSerializer
 
-
-# ============================================================================
-# PROCEDURE BILL VIEWSET (DEPRECATED)
-# ============================================================================
-
-# @extend_schema_view(
-#     list=extend_schema(
-#         summary="List Procedure Bills",
-#         description="Get list of procedure/investigation bills",
-#         parameters=[
-#             OpenApiParameter(name='visit', type=int, description='Filter by visit ID'),
-#             OpenApiParameter(name='doctor', type=int, description='Filter by doctor ID'),
-#             OpenApiParameter(name='payment_status', type=str, description='Filter by payment status (paid, partial, unpaid)'),
-#             OpenApiParameter(name='bill_type', type=str, description='Filter by bill type (procedure, investigation)'),
-#             OpenApiParameter(name='search', type=str, description='Search by bill number or visit number'),
-#         ],
-#         tags=['OPD - Bills']
-#     ),
-#     retrieve=extend_schema(
-#         summary="Get Procedure Bill Details",
-#         description="Retrieve procedure bill with line items",
-#         tags=['OPD - Bills']
-#     ),
-#     create=extend_schema(
-#         summary="Create Procedure Bill",
-#         description="Create a new procedure bill with items",
-#         tags=['OPD - Bills']
-#     )
-# )
-# class ProcedureBillViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
-#     """
-#     Procedure Bill Management
-    
-#     Handles billing for procedures and investigations.
-#     Uses Django model permissions for access control.
-#     """
-#     queryset = ProcedureBill.objects.select_related(
-#         'visit__patient', 'doctor'
-#     ).prefetch_related('items__procedure')
-#     permission_classes = [HMSPermission]
-#     hms_module = 'opd'
-
-#     action_permission_map = {
-#         'list': 'view_procedure_bills',
-#         'retrieve': 'view_procedure_bills',
-#         'create': 'create_procedure_bill',
-#         'update': 'edit_visit',
-#         'partial_update': 'edit_visit',
-#         'destroy': 'edit_visit',
-#     }
-    
-#     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-#     filterset_fields = ['visit', 'doctor', 'payment_status', 'bill_type']
-#     search_fields = ['bill_number', 'visit__visit_number']
-#     ordering_fields = ['bill_date', 'total_amount']
-#     ordering = ['-bill_date']
-    
-#     def get_serializer_class(self):
-#         """Return appropriate serializer"""
-#         if self.action == 'list':
-#             return ProcedureBillListSerializer
-#         elif self.action in ['create', 'update', 'partial_update']:
-#             return ProcedureBillCreateUpdateSerializer
-#         return ProcedureBillDetailSerializer
-    
-#     @extend_schema(
-#         summary="Record Payment",
-#         description="Record a payment for a procedure bill",
-#         tags=['OPD - Bills']
-#     )
-#     @action(detail=True, methods=['post'])
-#     def record_payment(self, request, pk=None):
-#         """Record payment for a procedure bill"""
-#         bill = self.get_object()
-        
-#         amount = request.data.get('amount')
-#         payment_mode = request.data.get('payment_mode', 'cash')
-#         payment_details = request.data.get('payment_details', {})
-        
-#         if not amount:
-#             return Response(
-#                 {'success': False, 'error': 'Amount is required'},
-#                 status=status.HTTP_400_BAD_REQUEST
-#             )
-        
-#         # Record payment
-#         bill.record_payment(amount, payment_mode, payment_details)
-        
-#         serializer = ProcedureBillDetailSerializer(bill)
-#         return Response({
-#             'success': True,
-#             'message': 'Payment recorded',
-#             'data': serializer.data
-#         })
 
 
 # ============================================================================
@@ -1734,7 +1821,7 @@ class ClinicalNoteTemplateResponseViewSet(TenantViewSetMixin, viewsets.ModelView
     """
     queryset = ClinicalNoteTemplateResponse.objects.select_related(
         'template', 'content_type'
-    ).prefetch_related('field_responses__field')
+    ).prefetch_related('field_responses__field__options')
     permission_classes = [HMSPermission]
     hms_module = 'opd'
     parser_classes = [MultiPartParser, FormParser, JSONParser]  # For file upload support and JSON
@@ -1766,24 +1853,44 @@ class ClinicalNoteTemplateResponseViewSet(TenantViewSetMixin, viewsets.ModelView
             return ClinicalNoteTemplateResponseCreateUpdateSerializer
         return ClinicalNoteTemplateResponseDetailSerializer
 
+    def create(self, request, *args, **kwargs):
+        """Create a template response and return full detail (including id)."""
+        write_serializer = self.get_serializer(data=request.data)
+        write_serializer.is_valid(raise_exception=True)
+        self.perform_create(write_serializer)
+        # Return the full detail serializer so the client always gets an `id`
+        read_serializer = ClinicalNoteTemplateResponseDetailSerializer(
+            write_serializer.instance,
+            context=self.get_serializer_context()
+        )
+        headers = self.get_success_headers(write_serializer.data)
+        return Response(read_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
     def get_queryset(self):
         """Filter by encounter if provided"""
         queryset = super().get_queryset()
 
-        # Filter by encounter type and ID if provided
+        # Support two filtering styles:
+        # 1. encounter_type + encounter_id  (legacy)
+        # 2. encounter_type + object_id     (preferred, matches DRF filterset_fields)
         encounter_type = self.request.query_params.get('encounter_type')
-        encounter_id = self.request.query_params.get('encounter_id')
+        encounter_id = (
+            self.request.query_params.get('encounter_id')
+            or self.request.query_params.get('object_id')
+        )
 
         if encounter_type and encounter_id:
             from django.contrib.contenttypes.models import ContentType
 
-            # Map encounter type to content type
-            if encounter_type.lower() == 'opd':
+            # Normalise aliases so both frontend conventions work:
+            # 'visit' / 'opd'      → opd.visit
+            # 'admission' / 'ipd'  → ipd.admission
+            et = encounter_type.lower()
+            if et in ('opd', 'visit'):
                 content_type = ContentType.objects.get(app_label='opd', model='visit')
-            elif encounter_type.lower() == 'ipd':
+            elif et in ('ipd', 'admission'):
                 content_type = ContentType.objects.get(app_label='ipd', model='admission')
             else:
-                # Invalid encounter type, return empty queryset
                 return queryset.none()
 
             queryset = queryset.filter(

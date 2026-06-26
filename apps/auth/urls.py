@@ -11,6 +11,7 @@ app_name = 'auth'
 # Router for User CRUD operations
 router = DefaultRouter()
 router.register(r'users', views.UserViewSet, basename='user')
+router.register(r'roles', views.RoleViewSet, basename='role')
 
 urlpatterns = [
     # Authentication endpoints
@@ -28,5 +29,13 @@ urlpatterns = [
     # PATCH  /api/auth/users/{id}/               - Partial update user
     # DELETE /api/auth/users/{id}/               - Delete user
     # POST   /api/auth/users/{id}/assign_roles/  - Assign roles to user
+    # GET    /api/auth/roles/                    - List roles
+    # POST   /api/auth/roles/                    - Create role
+    # GET    /api/auth/roles/{id}/               - Get role details
+    # PUT    /api/auth/roles/{id}/               - Update role
+    # PATCH  /api/auth/roles/{id}/               - Partial update role
+    # DELETE /api/auth/roles/{id}/               - Delete role
+    # GET    /api/auth/roles/{id}/members/       - Role members
+    # GET    /api/auth/roles/permissions_schema/ - HMS permission schema
     path('', include(router.urls)),
 ]

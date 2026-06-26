@@ -1,9 +1,14 @@
 # ipd/views.py
+import datetime
 from rest_framework import viewsets, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied
 from django_filters.rest_framework import DjangoFilterBackend
+from django.utils import timezone
+from django.db.models import ExpressionWrapper, F, IntegerField, DateField, Value, Count, Q, Avg, Sum
+from django.db.models.expressions import RawSQL
+from django.db.models.functions import Coalesce, Cast
 from common.mixins import TenantViewSetMixin
 from common.drf_auth import HMSPermission
 from .models import Ward, Bed, Admission, BedTransfer, IPDBilling, IPDBillItem
@@ -72,10 +77,35 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     permission_classes = [HMSPermission]
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['status', 'ward', 'doctor_id', 'patient']
-    search_fields = ['admission_id', 'patient__first_name', 'patient__last_name']
-    ordering_fields = ['admission_date', 'discharge_date', 'created_at']
+    search_fields = [
+        'admission_id',
+        'patient__first_name',
+        'patient__last_name',
+        'patient__mobile_primary',
+        'provisional_diagnosis',
+    ]
+    ordering_fields = ['admission_date', 'discharge_date', 'created_at', 'los_days']
     ordering = ['-admission_date']
+
+    def get_filterset_class(self):
+        from .filters import AdmissionFilter
+        return AdmissionFilter
+
+    def get_queryset(self):
+        """Select related + annotate length-of-stay at DB level."""
+        today = timezone.now().date()
+        return Admission.objects.filter(
+            tenant_id=self.request.tenant_id
+        ).select_related('patient', 'ward', 'bed').annotate(
+            # Use RawSQL so the PostgreSQL cast is unambiguous:
+            # discharge_date::date and admission_date::date are both DATE,
+            # so date - date → integer (days), never an interval/timedelta.
+            los_days=RawSQL(
+                "COALESCE(discharge_date::date, %s) - admission_date::date",
+                (today,),
+                output_field=IntegerField(),
+            )
+        )
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -88,6 +118,61 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             tenant_id=self.request.tenant_id,
             created_by_user_id=self.request.user_id
         )
+
+    def _parse_date_range(self, request):
+        today = datetime.date.today()
+
+        def parse(value):
+            try:
+                return datetime.date.fromisoformat(value)
+            except (TypeError, ValueError):
+                return None
+
+        date_from_str = request.query_params.get('date_from')
+        date_to_str = request.query_params.get('date_to')
+        date_str = request.query_params.get('date')
+
+        if date_from_str:
+            date_from = parse(date_from_str) or today
+            date_to = parse(date_to_str) or date_from
+        elif date_str:
+            date_from = parse(date_str) or today
+            date_to = date_from
+        else:
+            date_from = today
+            date_to = today
+
+        if date_from > date_to:
+            date_from, date_to = date_to, date_from
+
+        return date_from, date_to
+
+    def _enrich_doctor_rows(self, rows):
+        from apps.doctors.models import DoctorProfile
+
+        doctor_ids = [row['doctor_id'] for row in rows if row.get('doctor_id')]
+        profiles = (
+            DoctorProfile.objects
+            .filter(tenant_id=self.request.tenant_id, user_id__in=doctor_ids)
+            .prefetch_related('specialties')
+        )
+        profile_map = {str(profile.user_id): profile for profile in profiles}
+
+        for row in rows:
+            doctor_key = str(row.get('doctor_id') or '')
+            profile = profile_map.get(doctor_key)
+            if profile:
+                row['doctor_name'] = profile.full_name
+                row['doctor_specialty'] = ', '.join(s.name for s in profile.specialties.all()) or None
+            else:
+                row['doctor_name'] = f"Doctor {doctor_key[:8]}" if doctor_key else "Unassigned"
+                row['doctor_specialty'] = None
+
+            avg_stay = row.get('avg_length_of_stay_days')
+            row['avg_length_of_stay_days'] = round(float(avg_stay), 1) if avg_stay is not None else None
+            row['doctor'] = doctor_key
+
+        return rows
 
     @action(detail=True, methods=['post'])
     def discharge(self, request, pk=None):
@@ -146,6 +231,111 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         admissions = self.get_queryset().filter(status='admitted')
         serializer = self.get_serializer(admissions, many=True)
         return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def statistics(self, request):
+        """
+        Aggregate stats for admissions in this tenant.
+        Respects the same filters as the list endpoint.
+        """
+        qs = self.filter_queryset(self.get_queryset())
+        today = datetime.date.today()
+
+        agg = qs.aggregate(
+            total=Count('id'),
+            active=Count('id', filter=Q(status='admitted')),
+            discharged_today=Count(
+                'id',
+                filter=Q(status='discharged', discharge_date__date=today)
+            ),
+            discharged=Count('id', filter=Q(status='discharged')),
+            transferred=Count('id', filter=Q(status='transferred')),
+            absconded=Count('id', filter=Q(status='absconded')),
+            referred=Count('id', filter=Q(status='referred')),
+            death=Count('id', filter=Q(status='death')),
+            mediclaim=Count('id', filter=Q(has_mediclaim=True)),
+            claim_not_started=Count('id', filter=Q(claim_status='not_started')),
+            claim_documents_pending=Count('id', filter=Q(claim_status='documents_pending')),
+            claim_submitted=Count('id', filter=Q(claim_status='submitted')),
+            claim_under_review=Count('id', filter=Q(claim_status='under_review')),
+            claim_approved=Count('id', filter=Q(claim_status='approved')),
+            claim_rejected=Count('id', filter=Q(claim_status='rejected')),
+            claim_settled=Count('id', filter=Q(claim_status='settled')),
+        )
+
+        avg_result = qs.filter(
+            status='discharged',
+            discharge_date__isnull=False,
+            admission_date__isnull=False,
+        ).aggregate(avg_stay=Avg('los_days'))
+
+        return Response({
+            'success': True,
+            'data': {
+                **agg,
+                'avg_length_of_stay_days': (
+                    round(avg_result['avg_stay'], 1)
+                    if avg_result['avg_stay'] else None
+                ),
+                'by_tpa': list(
+                    qs.filter(has_mediclaim=True)
+                    .values('tpa_name')
+                    .annotate(count=Count('id'))
+                    .order_by('-count')
+                ),
+            }
+        })
+
+    @action(detail=False, methods=['get'])
+    def doctor_stats(self, request):
+        """
+        Per-doctor IPD admission statistics for the IPD dashboard.
+
+        Query params:
+          date_from - YYYY-MM-DD range start; default today
+          date_to   - YYYY-MM-DD range end; default date_from
+          date      - single day shortcut
+        """
+        date_from, date_to = self._parse_date_range(request)
+
+        qs = self.get_queryset().filter(
+            admission_date__date__gte=date_from,
+            admission_date__date__lte=date_to,
+        )
+
+        rows = list(
+            qs.values('doctor_id').annotate(
+                admissions_count=Count('id'),
+                active=Count('id', filter=Q(status='admitted')),
+                discharged=Count('id', filter=Q(status='discharged')),
+                transferred=Count('id', filter=Q(status='transferred')),
+                mediclaim_count=Count('id', filter=Q(has_mediclaim=True)),
+                claim_pending=Count(
+                    'id',
+                    filter=Q(claim_status__in=[
+                        'not_started',
+                        'documents_pending',
+                        'submitted',
+                        'under_review',
+                    ])
+                ),
+                claim_approved=Count('id', filter=Q(claim_status='approved')),
+                claim_rejected=Count('id', filter=Q(claim_status='rejected')),
+                claim_settled=Count('id', filter=Q(claim_status='settled')),
+                avg_length_of_stay_days=Avg('los_days'),
+            ).order_by('-admissions_count')
+        )
+
+        rows = self._enrich_doctor_rows(rows)
+
+        return Response({
+            'success': True,
+            'date': str(date_from),
+            'date_from': str(date_from),
+            'date_to': str(date_to),
+            'is_single_day': date_from == date_to,
+            'data': rows,
+        })
 
 
 class BedTransferViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
@@ -261,6 +451,24 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
         serializer = self.get_serializer(billing)
         return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def statistics(self, request):
+        """Aggregate billing stats for this tenant. Respects active filters."""
+        qs = self.filter_queryset(self.get_queryset())
+
+        agg = qs.aggregate(
+            total_bills=Count('id'),
+            total_amount=Sum('total_amount'),
+            paid_amount=Sum('paid_amount', filter=Q(payment_status='paid')),
+            pending_amount=Sum('balance_amount', filter=Q(payment_status__in=['pending', 'partial'])),
+            cancelled_amount=Sum('total_amount', filter=Q(payment_status='cancelled')),
+        )
+        for key in ('total_amount', 'paid_amount', 'pending_amount', 'cancelled_amount'):
+            if agg[key] is None:
+                agg[key] = 0
+
+        return Response({'success': True, 'data': agg})
 
     @action(detail=True, methods=['post'])
     def sync_clinical_charges(self, request, pk=None):

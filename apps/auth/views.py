@@ -361,8 +361,10 @@ from rest_framework.decorators import action
 from apps.auth.superadmin_client import get_superadmin_client, SuperAdminAPIException
 from apps.auth.serializers import (
     UserSerializer, UserCreateSerializer, UserUpdateSerializer,
-    UserListFilterSerializer, RoleAssignmentSerializer
+    UserListFilterSerializer, RoleAssignmentSerializer,
+    RoleSerializer, RoleListFilterSerializer
 )
+from common.hms_permission_schema import HMS_PERMISSION_SCHEMA
 
 
 class UserViewSet(viewsets.ViewSet):
@@ -372,6 +374,44 @@ class UserViewSet(viewsets.ViewSet):
     All operations are proxied to the SuperAdmin API with proper tenant isolation.
     """
     permission_classes = [IsAuthenticated]
+
+    def _has_admin_permission(self, request, action_name):
+        if getattr(request.user, 'is_super_admin', False):
+            return True
+
+        permissions = getattr(request.user, 'permissions', {}) or {}
+        accepted_keys = [
+            'admin.full_access',
+            'admin.full_access.enabled',
+            f'admin.users.{action_name}',
+            f'hms.admin.{action_name}',
+        ]
+
+        for key in accepted_keys:
+            value = permissions.get(key)
+            if value is True:
+                return True
+            if isinstance(value, str) and value in ['own', 'team', 'all']:
+                return True
+
+        return False
+
+    def check_permissions(self, request):
+        super().check_permissions(request)
+        action = getattr(self, 'action', None)
+        permission_action = {
+            'list': 'view',
+            'retrieve': 'view',
+            'create': 'create',
+            'update': 'edit',
+            'partial_update': 'edit',
+            'destroy': 'delete',
+            'assign_roles': 'edit',
+        }.get(action)
+
+        if permission_action and not self._has_admin_permission(request, permission_action):
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("You don't have permission to manage users")
 
     def list(self, request):
         """
@@ -695,4 +735,169 @@ class UserViewSet(viewsets.ViewSet):
             return Response(
                 {'error': 'Failed to assign roles'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class RoleViewSet(viewsets.ViewSet):
+    """
+    ViewSet for Role CRUD operations via SuperAdmin API.
+
+    Role JSON remains centralized in SuperAdmin while HMS exposes a local
+    schema endpoint tailored for the HMS permissions UI.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def _has_admin_permission(self, request, action_name):
+        if getattr(request.user, 'is_super_admin', False):
+            return True
+
+        permissions = getattr(request.user, 'permissions', {}) or {}
+        accepted_keys = [
+            'admin.full_access',
+            'admin.full_access.enabled',
+            f'admin.roles.{action_name}',
+            f'hms.admin.{action_name}',
+        ]
+
+        for key in accepted_keys:
+            value = permissions.get(key)
+            if value is True:
+                return True
+            if isinstance(value, str) and value in ['own', 'team', 'all']:
+                return True
+
+        return False
+
+    def check_permissions(self, request):
+        super().check_permissions(request)
+        action = getattr(self, 'action', None)
+        permission_action = {
+            'list': 'view',
+            'retrieve': 'view',
+            'create': 'create',
+            'update': 'edit',
+            'partial_update': 'edit',
+            'destroy': 'delete',
+            'members': 'view',
+        }.get(action)
+
+        if permission_action and not self._has_admin_permission(request, permission_action):
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("You don't have permission to manage roles")
+
+    def _ensure_same_tenant(self, request, role):
+        if getattr(request.user, 'is_super_admin', False):
+            return True
+        return str(role.get('tenant')) == str(request.tenant_id)
+
+    def list(self, request):
+        filter_serializer = RoleListFilterSerializer(data=request.query_params)
+        if not filter_serializer.is_valid():
+            return Response(filter_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            client = get_superadmin_client(request)
+            result = client.list_roles(
+                tenant_id=request.tenant_id,
+                params=filter_serializer.validated_data
+            )
+            return Response(result, status=status.HTTP_200_OK)
+        except SuperAdminAPIException as e:
+            return Response(
+                {'error': e.message, 'details': e.response_data},
+                status=e.status_code or status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def create(self, request):
+        serializer = RoleSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            client = get_superadmin_client(request)
+            result = client.create_role(
+                role_data=serializer.to_superadmin_payload(),
+                tenant_id=request.tenant_id
+            )
+            return Response(result, status=status.HTTP_201_CREATED)
+        except SuperAdminAPIException as e:
+            return Response(
+                {'error': e.message, 'details': e.response_data},
+                status=e.status_code or status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def retrieve(self, request, pk=None):
+        try:
+            client = get_superadmin_client(request)
+            result = client.get_role(role_id=pk)
+            if not self._ensure_same_tenant(request, result):
+                return Response({'error': 'Role not found in your tenant'}, status=status.HTTP_404_NOT_FOUND)
+            return Response(result, status=status.HTTP_200_OK)
+        except SuperAdminAPIException as e:
+            return Response(
+                {'error': e.message, 'details': e.response_data},
+                status=e.status_code or status.HTTP_404_NOT_FOUND
+            )
+
+    def update(self, request, pk=None):
+        return self._update(request, pk, partial=False)
+
+    def partial_update(self, request, pk=None):
+        return self._update(request, pk, partial=True)
+
+    def _update(self, request, pk=None, partial=True):
+        serializer = RoleSerializer(data=request.data, partial=partial)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            client = get_superadmin_client(request)
+            role = client.get_role(role_id=pk)
+            if not self._ensure_same_tenant(request, role):
+                return Response({'error': 'Role not found in your tenant'}, status=status.HTTP_404_NOT_FOUND)
+
+            result = client.update_role(
+                role_id=pk,
+                role_data=serializer.to_superadmin_payload(),
+                partial=partial
+            )
+            return Response(result, status=status.HTTP_200_OK)
+        except SuperAdminAPIException as e:
+            return Response(
+                {'error': e.message, 'details': e.response_data},
+                status=e.status_code or status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def destroy(self, request, pk=None):
+        try:
+            client = get_superadmin_client(request)
+            role = client.get_role(role_id=pk)
+            if not self._ensure_same_tenant(request, role):
+                return Response({'error': 'Role not found in your tenant'}, status=status.HTTP_404_NOT_FOUND)
+
+            client.delete_role(role_id=pk)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except SuperAdminAPIException as e:
+            return Response(
+                {'error': e.message, 'details': e.response_data},
+                status=e.status_code or status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=['get'])
+    def permissions_schema(self, request):
+        return Response(HMS_PERMISSION_SCHEMA, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['get'])
+    def members(self, request, pk=None):
+        try:
+            client = get_superadmin_client(request)
+            role = client.get_role(role_id=pk)
+            if not self._ensure_same_tenant(request, role):
+                return Response({'error': 'Role not found in your tenant'}, status=status.HTTP_404_NOT_FOUND)
+            result = client.get_role_members(role_id=pk)
+            return Response(result, status=status.HTTP_200_OK)
+        except SuperAdminAPIException as e:
+            return Response(
+                {'error': e.message, 'details': e.response_data},
+                status=e.status_code or status.HTTP_500_INTERNAL_SERVER_ERROR
             )

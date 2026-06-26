@@ -43,8 +43,7 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
         '/api/redoc',     # ReDoc documentation
         '/api/schema',    # OpenAPI schema
         '/admin',         # Allow all admin paths - custom admin site handles auth
-        '/auth/',         # Allow all auth endpoints (login, logout, etc.)
-        '/api/auth/',     # Allow all API auth endpoints
+        '/auth/',         # Allow browser auth endpoints (login, logout, etc.)
         '/api/nuviformsubmit',  # Nuvi form submission (no auth required)
         '/api/nakshatra/',    # Nakshatra integration endpoint (no auth required)
         '/api/orders/webhooks/razorpay/',  # Razorpay webhook (verified by signature)
@@ -56,6 +55,9 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
     # Exact match paths (must match exactly, not just startswith)
     EXACT_PUBLIC_PATHS = [
         '/',  # Root URL only (not all paths starting with /)
+        '/api/auth/login/',
+        '/api/auth/token/refresh/',
+        '/api/auth/token/verify/',
     ]
 
     def process_request(self, request):
@@ -224,14 +226,20 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
         tenant_token_header = request.META.get('HTTP_TENANTTOKEN')
         x_tenant_id_header = request.META.get('HTTP_X_TENANT_ID')
         x_tenant_slug_header = request.META.get('HTTP_X_TENANT_SLUG')
+        requested_tenant_id = x_tenant_id_header or tenant_token_header
 
-        # If tenanttoken header is provided, use it to override tenant_id
-        if tenant_token_header:
-            request.tenant_id = tenant_token_header
-
-        # If x-tenant-id header is provided, use it to override tenant_id
-        if x_tenant_id_header:
-            request.tenant_id = x_tenant_id_header
+        if requested_tenant_id:
+            if request.is_super_admin or str(request.tenant_id) == str(requested_tenant_id):
+                request.tenant_id = requested_tenant_id
+            else:
+                logger.warning(
+                    f"Tenant override denied - User: {request.email}, "
+                    f"Token tenant: {request.tenant_id}, Requested tenant: {requested_tenant_id}"
+                )
+                return JsonResponse(
+                    {'error': 'You can only access your own tenant'},
+                    status=403
+                )
 
         # If x-tenant-slug header is provided, use it to override tenant_slug
         if x_tenant_slug_header:
@@ -242,7 +250,10 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
 
         # CRITICAL: Create TenantUser and set request.user for DRF authentication
         from .auth_backends import TenantUser
-        request.user = TenantUser(payload)
+        user_payload = payload.copy()
+        user_payload['tenant_id'] = request.tenant_id
+        user_payload['tenant_slug'] = request.tenant_slug
+        request.user = TenantUser(user_payload)
         request._cached_user = request.user  # Cache to prevent re-authentication
 
         print(f"[JWT MIDDLEWARE] ✅ AUTH SUCCESS - User: {request.email}, Tenant: {request.tenant_id}")

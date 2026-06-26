@@ -239,9 +239,19 @@ class HMSPermission(permissions.BasePermission):
         if not hasattr(request.user, 'permissions'):
             return None
 
-        # Navigate through nested permissions structure
-        # permissions -> hms -> module -> permission_name
         user_permissions = request.user.permissions
+
+        # SuperAdmin merges role permissions into flat JWT keys:
+        # {"hms.patients.view": "all"}. Older/session code may still carry
+        # nested JSON: {"hms": {"patients": {"view": "all"}}}. Support both.
+        flat_key = f"hms.{module}.{permission_name}"
+        if flat_key in user_permissions:
+            return user_permissions.get(flat_key)
+
+        legacy_admin_key = f"admin.{module}.{permission_name}"
+        if legacy_admin_key in user_permissions:
+            return user_permissions.get(legacy_admin_key)
+
         hms_perms = user_permissions.get('hms', {})
         module_perms = hms_perms.get(module, {})
 

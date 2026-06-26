@@ -90,7 +90,24 @@ class Visit(models.Model):
     )
     entry_time = models.DateTimeField(auto_now_add=True)
     is_follow_up = models.BooleanField(default=False)
-    
+
+    # Follow-up scheduling (canonical source of truth for follow-up date)
+    follow_up_required = models.BooleanField(
+        default=False,
+        help_text="Whether a follow-up visit is required"
+    )
+    follow_up_date = models.DateField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Scheduled follow-up date (migrated from ClinicalNote.next_followup_date)"
+    )
+    follow_up_notes = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Notes or instructions for the follow-up visit"
+    )
+
     # Queue Management
     status = models.CharField(
         max_length=20,
@@ -448,7 +465,7 @@ class OPDBill(models.Model):
         """
         Save OPDBill with safeguards against duplicate bill numbers (race conditions).
         """
-        max_retries = 3
+        max_retries = 10
         last_exception = None
 
         for _ in range(max_retries):
@@ -507,30 +524,41 @@ class OPDBill(models.Model):
 
     @staticmethod
     def generate_bill_number(tenant_id):
-        """Generate unique bill number per tenant: OPD-BILL/YYYYMMDD/###"""
+        """Generate unique bill number per tenant: OPD-BILL/YYYYMMDD/###
+
+        Uses select_for_update() to serialise concurrent bill creation for
+        the same tenant+date, eliminating the race condition that caused
+        duplicate key violations.  Must be called inside a transaction.atomic()
+        block (which save() already provides).
+
+        Uses Django ORM (not a raw cursor) so Django's connection management
+        calls ensure_connection() automatically — preventing InterfaceError
+        when the underlying psycopg2 connection has been dropped.
+        """
         from datetime import date
-        from django.db import connection
 
         today = date.today()
         date_str = today.strftime('%Y%m%d')
         bill_prefix = f"OPD-BILL/{date_str}/"
 
-        # Query this tenant's bills for today, sort in Python for correct numeric order
-        with connection.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT bill_number FROM opd_bills
-                WHERE tenant_id = %s AND bill_date::date = %s
-                AND bill_number LIKE %s
-                """,
-                [str(tenant_id), today, f"{bill_prefix}%"]
+        # select_for_update() acquires row-level locks on every matching row —
+        # same semantics as the old "SELECT ... FOR UPDATE" raw query.
+        existing_numbers = (
+            OPDBill.objects
+            .filter(
+                tenant_id=tenant_id,
+                bill_date__date=today,
+                bill_number__startswith=bill_prefix,
             )
-            results = cursor.fetchall()
+            .order_by('bill_number')
+            .select_for_update()
+            .values_list('bill_number', flat=True)
+        )
 
         today_count = 1
-        for row in results:
+        for bill_number in existing_numbers:
             try:
-                sequence = int(row[0].split('/')[-1])
+                sequence = int(bill_number.split('/')[-1])
                 today_count = max(today_count, sequence + 1)
             except (ValueError, IndexError):
                 continue

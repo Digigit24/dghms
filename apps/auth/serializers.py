@@ -164,6 +164,38 @@ class RoleAssignmentSerializer(serializers.Serializer):
     )
 
 
+class RoleSerializer(serializers.Serializer):
+    """Serializer for roles proxied from SuperAdmin."""
+    id = serializers.UUIDField(read_only=True)
+    tenant = serializers.UUIDField(read_only=True)
+    name = serializers.CharField(max_length=255)
+    description = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    permissions = serializers.DictField(required=False, default=dict)
+    is_active = serializers.BooleanField(required=False, default=True)
+    created_by = serializers.UUIDField(read_only=True)
+    created_by_email = serializers.EmailField(read_only=True, required=False)
+    member_count = serializers.IntegerField(read_only=True, required=False)
+    created_at = serializers.DateTimeField(read_only=True, required=False)
+    updated_at = serializers.DateTimeField(read_only=True, required=False)
+
+    def validate_permissions(self, value):
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("Permissions must be a JSON object")
+        return value
+
+    def to_superadmin_payload(self) -> Dict[str, Any]:
+        return self.validated_data.copy()
+
+
+class RoleListFilterSerializer(serializers.Serializer):
+    """Serializer for role list filtering and pagination."""
+    page = serializers.IntegerField(min_value=1, required=False)
+    page_size = serializers.IntegerField(min_value=1, max_value=100, required=False, default=20)
+    search = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    is_active = serializers.BooleanField(required=False)
+    ordering = serializers.CharField(max_length=50, required=False)
+
+
 class PasswordChangeSerializer(serializers.Serializer):
     """
     Serializer for changing user password
