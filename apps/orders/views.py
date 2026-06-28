@@ -6,7 +6,6 @@ from django_filters.rest_framework import DjangoFilterBackend
 
 from django.db.models import Q, Sum, Avg, Count
 from django.db import transaction as db_transaction
-from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from django.http import HttpResponse
@@ -775,7 +774,6 @@ class RazorpayWebhookView(APIView):
 
     def _handle_payment_captured(self, order, event_data):
         """Handle payment.captured event"""
-        payment = event_data['payload']['payment']['entity']
 
         # Mark order as paid
         if not order.is_paid:

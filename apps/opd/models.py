@@ -24,6 +24,14 @@ class Visit(models.Model):
         ('new', 'New Visit'),
         ('follow_up', 'Follow-up'),
         ('emergency', 'Emergency'),
+        ('referral', 'Referral'),
+    ]
+
+    PRIORITY_CHOICES = [
+        ('low', 'Low'),
+        ('normal', 'Normal'),
+        ('high', 'High'),
+        ('urgent', 'Urgent'),
     ]
     
     STATUS_CHOICES = [
@@ -90,6 +98,13 @@ class Visit(models.Model):
     )
     entry_time = models.DateTimeField(auto_now_add=True)
     is_follow_up = models.BooleanField(default=False)
+    priority = models.CharField(
+        max_length=16,
+        choices=PRIORITY_CHOICES,
+        default='normal',
+        db_index=True,
+        help_text="Visit priority: low, normal, high, urgent"
+    )
 
     # Follow-up scheduling (canonical source of truth for follow-up date)
     follow_up_required = models.BooleanField(

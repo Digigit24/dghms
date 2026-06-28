@@ -1,7 +1,6 @@
 # apps/nakshatra_api/tests.py
 
 from django.test import TestCase, Client
-from django.urls import reverse
 from unittest.mock import patch, MagicMock
 import json
 

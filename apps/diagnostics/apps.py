@@ -9,4 +9,4 @@ class DiagnosticsConfig(AppConfig):
 
     def ready(self):
         # Import signal handlers
-        import apps.diagnostics.signals
+        pass

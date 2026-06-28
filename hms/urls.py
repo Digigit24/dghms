@@ -1,4 +1,3 @@
-from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
@@ -8,7 +7,7 @@ from django.views.generic import RedirectView
 from common.admin_site import hms_admin_site
 
 # Import authentication views
-from common.views import superadmin_proxy_login_view, admin_logout_view
+from common.views import superadmin_proxy_login_view, admin_logout_view, HealthCheckView
 
 # ✅ Import drf-spectacular views
 from drf_spectacular.views import (
@@ -20,6 +19,9 @@ from drf_spectacular.views import (
 urlpatterns = [
     # Root redirect to admin
     path('', RedirectView.as_view(url='/admin/', permanent=False), name='index'),
+
+    # Health check (must be public)
+    path('health/', HealthCheckView.as_view(), name='health-check'),
 
     # Admin panel - Using custom HMS admin site
     path('admin/', hms_admin_site.urls),
@@ -43,6 +45,10 @@ urlpatterns = [
     path('api/ipd/', include('apps.ipd.urls')),
     path('api/diagnostics/', include('apps.diagnostics.urls')),
     path('api/panchakarma/', include('apps.panchakarma.urls')),
+
+    # Phase 1 APIs
+    path('api/clinical/', include('apps.clinical.urls')),
+    path('api/webhooks/', include('apps.webhooks.urls')),
 
     # Nuvi API (No authentication required)
     path('api/', include('apps.nuviapi.urls')),

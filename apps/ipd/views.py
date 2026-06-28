@@ -11,6 +11,7 @@ from django.db.models.expressions import RawSQL
 from django.db.models.functions import Coalesce, Cast
 from common.mixins import TenantViewSetMixin
 from common.drf_auth import HMSPermission
+from common.responses import error_response, action_response
 from .models import Ward, Bed, Admission, BedTransfer, IPDBilling, IPDBillItem
 from .serializers import (
     WardSerializer, BedSerializer, BedListSerializer,
@@ -69,6 +70,8 @@ class BedViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
+from .filters import AdmissionFilter
+
 class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """ViewSet for IPD Admission management."""
 
@@ -87,9 +90,7 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     ordering_fields = ['admission_date', 'discharge_date', 'created_at', 'los_days']
     ordering = ['-admission_date']
 
-    def get_filterset_class(self):
-        from .filters import AdmissionFilter
-        return AdmissionFilter
+    filterset_class = AdmissionFilter
 
     def get_queryset(self):
         """Select related + annotate length-of-stay at DB level."""
@@ -194,7 +195,11 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
         discharge_type = request.data.get('discharge_type', 'Normal')
         discharge_summary = request.data.get('discharge_summary', '')
+        final_diagnosis = request.data.get('final_diagnosis', '')
         discharge_date = request.data.get('discharge_date')
+
+        if final_diagnosis:
+            admission.final_diagnosis = final_diagnosis
 
         # Validate discharge_date if provided
         if discharge_date:
@@ -235,15 +240,40 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def statistics(self, request):
         """
-        Aggregate stats for admissions in this tenant.
-        Respects the same filters as the list endpoint.
+        Aggregate stats for IPD admissions.
+
+        Query params:
+          date_from  - YYYY-MM-DD  (filter admissions admitted on or after)
+          date_to    - YYYY-MM-DD  (filter admissions admitted on or before)
+
+        When no date params are given, returns all-time admission counts
+        plus live bed occupancy. When dates are given, admission counts are
+        scoped to that range (bed occupancy is always live / real-time).
         """
-        qs = self.filter_queryset(self.get_queryset())
         today = datetime.date.today()
 
+        # --- Date range (optional, no default to today) ---
+        def _parse(val):
+            try:
+                return datetime.date.fromisoformat(val)
+            except (TypeError, ValueError):
+                return None
+
+        date_from_str = request.query_params.get('date_from')
+        date_to_str   = request.query_params.get('date_to')
+        date_from = _parse(date_from_str)
+        date_to   = _parse(date_to_str)
+
+        # --- Admission queryset (scoped to tenant, optionally by date) ---
+        qs = self.get_queryset()
+        if date_from:
+            qs = qs.filter(admission_date__date__gte=date_from)
+        if date_to:
+            qs = qs.filter(admission_date__date__lte=date_to)
+
         agg = qs.aggregate(
-            total=Count('id'),
-            active=Count('id', filter=Q(status='admitted')),
+            total_admissions=Count('id'),
+            currently_admitted=Count('id', filter=Q(status='admitted')),
             discharged_today=Count(
                 'id',
                 filter=Q(status='discharged', discharge_date__date=today)
@@ -269,14 +299,34 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             admission_date__isnull=False,
         ).aggregate(avg_stay=Avg('los_days'))
 
+        # --- Live bed occupancy (never date-filtered) ---
+        bed_agg = Bed.objects.filter(
+            tenant_id=request.tenant_id, is_active=True
+        ).aggregate(
+            total_beds=Count('id'),
+            occupied_beds=Count('id', filter=Q(is_occupied=True)),
+            available_beds=Count('id', filter=Q(is_occupied=False, status='available')),
+        )
+        total_beds    = bed_agg['total_beds']    or 0
+        occupied_beds = bed_agg['occupied_beds'] or 0
+        available_beds = bed_agg['available_beds'] or 0
+        occupancy_rate = round(occupied_beds / total_beds * 100, 1) if total_beds > 0 else 0
+
         return Response({
             'success': True,
+            'date_from': str(date_from) if date_from else None,
+            'date_to':   str(date_to)   if date_to   else None,
             'data': {
-                **agg,
+                **{k: (v or 0) for k, v in agg.items()},
                 'avg_length_of_stay_days': (
                     round(avg_result['avg_stay'], 1)
-                    if avg_result['avg_stay'] else None
+                    if avg_result.get('avg_stay') else None
                 ),
+                # Live bed stats
+                'total_beds':     total_beds,
+                'occupied_beds':  occupied_beds,
+                'available_beds': available_beds,
+                'occupancy_rate': occupancy_rate,
                 'by_tpa': list(
                     qs.filter(has_mediclaim=True)
                     .values('tpa_name')
@@ -427,12 +477,10 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         """Add a payment to the bill."""
         billing = self.get_object()
         amount = request.data.get('amount')
+        payment_mode = request.data.get('payment_mode', 'cash')
 
         if not amount:
-            return Response(
-                {'error': 'Amount is required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return error_response("AMOUNT_REQUIRED", "Amount is required.", status=400)
 
         try:
             from decimal import Decimal
@@ -440,17 +488,14 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             if amount <= 0:
                 raise ValueError()
         except (ValueError, TypeError):
-            return Response(
-                {'error': 'Invalid amount'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return error_response("INVALID_AMOUNT", "Invalid amount.", status=400)
 
-        billing.paid_amount += amount
-        billing.calculate_totals()
+        billing.received_amount += amount
+        billing.payment_mode = payment_mode
         billing.save()
 
         serializer = self.get_serializer(billing)
-        return Response(serializer.data)
+        return action_response("Payment recorded successfully.", data=serializer.data)
 
     @action(detail=False, methods=['get'])
     def statistics(self, request):
@@ -460,7 +505,7 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         agg = qs.aggregate(
             total_bills=Count('id'),
             total_amount=Sum('total_amount'),
-            paid_amount=Sum('paid_amount', filter=Q(payment_status='paid')),
+            paid_amount=Sum('received_amount', filter=Q(payment_status='paid')),
             pending_amount=Sum('balance_amount', filter=Q(payment_status__in=['pending', 'partial'])),
             cancelled_amount=Sum('total_amount', filter=Q(payment_status='cancelled')),
         )

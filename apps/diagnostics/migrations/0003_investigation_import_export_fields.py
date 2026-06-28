@@ -2,8 +2,6 @@
 Migration: add specimen_type, reported_by to Investigation;
            expand CATEGORY_CHOICES; make code blank=True.
 """
-import django.core.validators
-from decimal import Decimal
 from django.db import migrations, models
 
 

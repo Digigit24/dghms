@@ -49,7 +49,7 @@ def nuvi_form_submit_api(request):
         form_data = request.POST.copy()
 
         # Log received form data (excluding sensitive info in production)
-        logger.debug(f"[NUVI API] Form data received:")
+        logger.debug("[NUVI API] Form data received:")
         logger.debug(f"  - fname: {form_data.get('fname', 'N/A')}")
         logger.debug(f"  - lname: {form_data.get('lname', 'N/A')}")
         logger.debug(f"  - email: {form_data.get('email', 'N/A')[:3]}***") # Partial for privacy
@@ -158,10 +158,10 @@ def nuvi_form_submit_api(request):
     except Exception as e:
         # Catch any unexpected errors
         logger.critical("="*80)
-        logger.critical(f"[NUVI API] ❌ CRITICAL ERROR in form submission")
+        logger.critical("[NUVI API] ❌ CRITICAL ERROR in form submission")
         logger.critical(f"[NUVI API] Error Type: {type(e).__name__}")
         logger.critical(f"[NUVI API] Error Message: {str(e)}")
-        logger.critical(f"[NUVI API] Error Details:", exc_info=True)
+        logger.critical("[NUVI API] Error Details:", exc_info=True)
         logger.critical("="*80)
 
         return JsonResponse({

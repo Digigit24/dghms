@@ -1,313 +1,357 @@
-import jwt
-import json
-import logging
+"""Authentication and activity middleware for DigiHMS.
+
+``JWTAuthenticationMiddleware`` validates Bearer tokens issued by
+admin.celiyo.com and attaches JWT claims to the request.
+
+``ActivityLogMiddleware`` asynchronously records requests to sensitive
+endpoints for audit purposes.
+"""
+
 import threading
+
+import jwt
+import structlog
 from django.conf import settings
-from django.http import JsonResponse
 from django.utils.deprecation import MiddlewareMixin
 
-logger = logging.getLogger(__name__)
+from .auth_backends import TenantUser
+from .responses import error_response
+from . import error_codes
 
-# Thread-local storage for tenant_id and request (for future database routing)
+logger = structlog.get_logger(__name__)
+
+# Thread-local storage for tenant_id and request (used by auth backends and
+# any code that needs request context outside of a view).
 _thread_locals = threading.local()
 
 
 def get_current_tenant_id():
-    """Get the current tenant_id from thread-local storage"""
-    return getattr(_thread_locals, 'tenant_id', None)
+    """Get the current tenant_id from thread-local storage."""
+    return getattr(_thread_locals, "tenant_id", None)
 
 
 def set_current_tenant_id(tenant_id):
-    """Set the current tenant_id in thread-local storage"""
+    """Set the current tenant_id in thread-local storage."""
     _thread_locals.tenant_id = tenant_id
 
 
 def get_current_request():
-    """Get the current request from thread-local storage"""
-    return getattr(_thread_locals, 'request', None)
+    """Get the current request from thread-local storage."""
+    return getattr(_thread_locals, "request", None)
 
 
 def set_current_request(request):
-    """Set the current request in thread-local storage"""
+    """Set the current request in thread-local storage."""
     _thread_locals.request = request
 
 
-class JWTAuthenticationMiddleware(MiddlewareMixin):
-    """
-    Middleware to validate JWT tokens from SuperAdmin and set request attributes
-    """
+def _clean_public_path(path, public_prefixes, exact_paths):
+    """Return True if ``path`` is public and should skip JWT validation."""
+    if path in exact_paths:
+        return True
+    return any(path.startswith(prefix) for prefix in public_prefixes)
 
-    # Public paths that don't require authentication
+
+class JWTAuthenticationMiddleware(MiddlewareMixin):
+    """Validates SuperAdmin JWT tokens and attaches claims to the request."""
+
+    # Public paths that don't require authentication (prefix match).
     PUBLIC_PATHS = [
-        '/api/docs',      # API documentation (Swagger/ReDoc)
-        '/api/redoc',     # ReDoc documentation
-        '/api/schema',    # OpenAPI schema
-        '/admin',         # Allow all admin paths - custom admin site handles auth
-        '/auth/',         # Allow browser auth endpoints (login, logout, etc.)
-        '/api/nuviformsubmit',  # Nuvi form submission (no auth required)
-        '/api/nakshatra/',    # Nakshatra integration endpoint (no auth required)
-        '/api/orders/webhooks/razorpay/',  # Razorpay webhook (verified by signature)
-        '/static/',       # Allow static files (CSS, JS, images)
-        '/media/',        # Allow media files
-        '/health/',       # Health check endpoint
+        "/api/docs",
+        "/api/redoc",
+        "/api/schema",
+        "/admin",
+        "/auth/",
+        "/api/nuviformsubmit",
+        "/api/nakshatra/",
+        "/api/orders/webhooks/razorpay/",
+        "/static/",
+        "/media/",
+        "/health/",
     ]
 
-    # Exact match paths (must match exactly, not just startswith)
+    # Exact match paths (must match exactly, not just startswith).
     EXACT_PUBLIC_PATHS = [
-        '/',  # Root URL only (not all paths starting with /)
-        '/api/auth/login/',
-        '/api/auth/token/refresh/',
-        '/api/auth/token/verify/',
+        "/",
+        "/api/auth/login/",
+        "/api/auth/token/refresh/",
+        "/api/auth/token/verify/",
     ]
 
     def process_request(self, request):
-        """Process incoming request and validate JWT token"""
-
-        # TEMP: Force print to console to verify middleware is running
-        print(f"[JWT MIDDLEWARE] Processing: {request.method} {request.path}")
-
-        # Store request in thread-local storage for authentication backends
         set_current_request(request)
 
-        # Skip validation for exact match public paths
-        if request.path in self.EXACT_PUBLIC_PATHS:
-            print(f"[JWT MIDDLEWARE] Skipping exact public path: {request.path}")
+        if _clean_public_path(
+            request.path, self.PUBLIC_PATHS, self.EXACT_PUBLIC_PATHS
+        ):
             return None
 
-        # Skip validation for public paths (startswith check)
-        if any(request.path.startswith(path) for path in self.PUBLIC_PATHS):
-            print(f"[JWT MIDDLEWARE] Skipping public path: {request.path}")
-            return None
-
-        # Debug: Log all incoming request details
-        print(f"[JWT MIDDLEWARE] Starting authentication for {request.path}")
-        logger.debug("="*80)
-        logger.debug(f"Incoming Request: {request.method} {request.path}")
-        logger.debug(f"Request Headers:")
-        for key, value in request.META.items():
-            if key.startswith('HTTP_'):
-                # Truncate token for security
-                display_value = value[:50] + '...' if key == 'HTTP_AUTHORIZATION' and len(value) > 50 else value
-                logger.debug(f"  {key}: {display_value}")
-
-        # Get Authorization header
-        auth_header = request.META.get('HTTP_AUTHORIZATION')
+        auth_header = request.META.get("HTTP_AUTHORIZATION")
         if not auth_header:
-            print(f"[JWT MIDDLEWARE] ❌ NO AUTHORIZATION HEADER - Path: {request.path}")
-            logger.warning(f"Missing Authorization header - Path: {request.path}, Method: {request.method}")
-            return JsonResponse(
-                {'error': 'Authorization header required'},
-                status=401
+            logger.warning(
+                "jwt_missing_header",
+                path=request.path,
+                method=request.method,
+            )
+            return error_response(
+                code=error_codes.JWT_MISSING,
+                message="Authorization header required.",
+                status=401,
             )
 
-        # Extract token from "Bearer <token>" format
-        logger.debug(f"Authorization header present: {auth_header[:50]}...")
         try:
-            scheme, token = auth_header.split(' ', 1)
-            logger.debug(f"Auth scheme: {scheme}")
-            logger.debug(f"Token length: {len(token)} characters")
-
-            if scheme.lower() != 'bearer':
-                logger.warning(f"Invalid auth scheme '{scheme}' - Path: {request.path}")
-                return JsonResponse(
-                    {'error': 'Invalid authorization scheme. Use Bearer token'},
-                    status=401
-                )
+            scheme, token = auth_header.split(" ", 1)
         except ValueError:
-            logger.warning(f"Malformed Authorization header - Path: {request.path}")
-            return JsonResponse(
-                {'error': 'Invalid authorization header format'},
-                status=401
+            logger.warning(
+                "jwt_malformed_header",
+                path=request.path,
+            )
+            return error_response(
+                code=error_codes.JWT_MALFORMED,
+                message="Invalid authorization header format. Use 'Bearer <token>'.",
+                status=401,
             )
 
-        # Decode and validate JWT token
+        if scheme.lower() != "bearer":
+            logger.warning(
+                "jwt_invalid_scheme",
+                path=request.path,
+                scheme=scheme,
+            )
+            return error_response(
+                code=error_codes.JWT_MALFORMED,
+                message="Invalid authorization scheme. Use Bearer token.",
+                status=401,
+            )
+
+        secret_key = getattr(settings, "JWT_SECRET_KEY", None)
+        algorithm = getattr(settings, "JWT_ALGORITHM", "HS256")
+        leeway = getattr(settings, "JWT_LEEWAY", 30)
+
+        if not secret_key:
+            logger.error("jwt_secret_not_configured")
+            return error_response(
+                code=error_codes.INTERNAL_SERVER_ERROR,
+                message="JWT secret not configured.",
+                status=500,
+            )
+
         try:
-            # Get JWT settings from Django settings
-            secret_key = getattr(settings, 'JWT_SECRET_KEY', None)
-            algorithm = getattr(settings, 'JWT_ALGORITHM', 'HS256')
-            leeway = getattr(settings, 'JWT_LEEWAY', 30)
-
-            logger.debug(f"JWT Configuration:")
-            logger.debug(f"  Algorithm: {algorithm}")
-            logger.debug(f"  Leeway: {leeway}s")
-            logger.debug(f"  Secret key configured: {'Yes' if secret_key else 'No'}")
-            logger.debug(f"  Secret key length: {len(secret_key) if secret_key else 0} chars")
-
-            if not secret_key:
-                return JsonResponse(
-                    {'error': 'JWT_SECRET_KEY not configured'},
-                    status=500
-                )
-
-            # Decode JWT token
-            logger.debug("Attempting to decode JWT token...")
             payload = jwt.decode(
                 token,
                 secret_key,
                 algorithms=[algorithm],
-                leeway=leeway  # Tolerate clock skew between servers
+                leeway=leeway,
             )
-            logger.debug(f"JWT decoded successfully!")
-            logger.debug(f"JWT Payload keys: {list(payload.keys())}")
-            logger.debug(f"JWT Payload: {json.dumps(payload, indent=2)}")
-
-        except jwt.ExpiredSignatureError as e:
-            logger.warning(f"Expired JWT token - Path: {request.path}")
-            logger.debug(f"Token expiry details: {str(e)}")
-            return JsonResponse(
-                {'error': 'Token has expired'},
-                status=401
-            )
-        except jwt.InvalidTokenError as e:
-            print(f"[JWT MIDDLEWARE] ❌ INVALID TOKEN: {str(e)}")
-            print(f"[JWT MIDDLEWARE] Algorithm used: {algorithm}")
-            print(f"[JWT MIDDLEWARE] Token preview: {token[:100]}...")
-            logger.error(f"Invalid JWT token: {str(e)} - Path: {request.path}, Algorithm: {algorithm}")
-            logger.debug(f"Full token error: {repr(e)}")
-            logger.debug(f"Token (first 100 chars): {token[:100]}...")
-            return JsonResponse(
-                {'error': f'Invalid token: {str(e)}'},
-                status=401
-            )
-
-        # Validate required fields in payload
-        required_fields = [
-            'user_id', 'email', 'tenant_id', 'tenant_slug',
-            'is_super_admin', 'permissions', 'enabled_modules'
-        ]
-
-        logger.debug(f"Validating required fields: {required_fields}")
-        for field in required_fields:
-            if field not in payload:
-                print(f"[JWT MIDDLEWARE] ❌ MISSING FIELD: '{field}'")
-                print(f"[JWT MIDDLEWARE] Available fields: {list(payload.keys())}")
-                print(f"[JWT MIDDLEWARE] Full payload: {json.dumps(payload, indent=2)}")
-                logger.error(
-                    f"Missing JWT field '{field}' - Path: {request.path}, "
-                    f"Available fields: {list(payload.keys())}"
-                )
-                logger.debug(f"Full payload: {json.dumps(payload, indent=2)}")
-                return JsonResponse(
-                    {'error': f'Missing required field in token: {field}'},
-                    status=401
-                )
-            else:
-                logger.debug(f"  [OK] {field}: {payload[field]}")
-
-        # Check if HMS module is enabled
-        enabled_modules = payload.get('enabled_modules', [])
-        if 'hms' not in enabled_modules:
-            print(f"[JWT MIDDLEWARE] ❌ HMS MODULE NOT ENABLED")
-            print(f"[JWT MIDDLEWARE] User: {payload.get('email')}")
-            print(f"[JWT MIDDLEWARE] Enabled modules: {enabled_modules}")
+        except jwt.ExpiredSignatureError:
             logger.warning(
-                f"HMS module not enabled - Path: {request.path}, "
-                f"User: {payload.get('email')}, Enabled modules: {enabled_modules}"
+                "jwt_expired",
+                path=request.path,
             )
-            return JsonResponse(
-                {'error': 'HMS module not enabled for this user'},
-                status=403
+            return error_response(
+                code=error_codes.JWT_EXPIRED,
+                message="Token has expired.",
+                status=401,
+            )
+        except jwt.InvalidTokenError as exc:
+            logger.warning(
+                "jwt_invalid",
+                path=request.path,
+                error=str(exc),
+            )
+            return error_response(
+                code=error_codes.JWT_INVALID,
+                message=f"Invalid token: {exc}",
+                status=401,
             )
 
-        # Set request attributes from JWT payload
-        request.user_id = payload['user_id']
-        request.email = payload['email']
-        request.tenant_id = payload['tenant_id']
-        request.tenant_slug = payload['tenant_slug']
-        request.is_super_admin = payload['is_super_admin']
-        request.permissions = payload['permissions']
-        request.enabled_modules = payload['enabled_modules']
+        required_fields = [
+            "user_id",
+            "email",
+            "tenant_id",
+            "tenant_slug",
+            "is_super_admin",
+            "permissions",
+            "enabled_modules",
+        ]
+        missing = [field for field in required_fields if field not in payload]
+        if missing:
+            logger.error(
+                "jwt_missing_claims",
+                path=request.path,
+                missing=missing,
+            )
+            return error_response(
+                code=error_codes.JWT_INVALID,
+                message=f"Missing required token claims: {', '.join(missing)}",
+                status=401,
+            )
 
-        # Set user type and patient flag
-        request.user_type = payload.get('user_type', 'staff')
-        request.is_patient = payload.get('is_patient', False)
+        enabled_modules = payload.get("enabled_modules", [])
+        if "hms" not in enabled_modules:
+            logger.warning(
+                "module_not_enabled",
+                path=request.path,
+                email=payload.get("email"),
+                modules=enabled_modules,
+            )
+            return error_response(
+                code=error_codes.MODULE_NOT_ENABLED,
+                message="HMS module not enabled for this user.",
+                status=403,
+            )
 
-        # Check for additional tenant headers as fallback/override
-        tenant_token_header = request.META.get('HTTP_TENANTTOKEN')
-        x_tenant_id_header = request.META.get('HTTP_X_TENANT_ID')
-        x_tenant_slug_header = request.META.get('HTTP_X_TENANT_SLUG')
-        requested_tenant_id = x_tenant_id_header or tenant_token_header
+        # Attach JWT claims to the request.
+        request.user_id = payload["user_id"]
+        request.email = payload["email"]
+        request.tenant_id = payload["tenant_id"]
+        request.tenant_slug = payload["tenant_slug"]
+        request.is_super_admin = bool(payload["is_super_admin"])
+        request.permissions = payload["permissions"]
+        request.enabled_modules = enabled_modules
+        request.roles = payload.get("roles", [])
+        request.user_type = payload.get("user_type", "staff")
+        request.is_patient = bool(payload.get("is_patient", False))
 
+        # Optional tenant override headers (super-admin only or same tenant).
+        requested_tenant_id = (
+            request.META.get("HTTP_X_TENANT_ID")
+            or request.META.get("HTTP_TENANTTOKEN")
+        )
         if requested_tenant_id:
-            if request.is_super_admin or str(request.tenant_id) == str(requested_tenant_id):
+            if request.is_super_admin or str(request.tenant_id) == str(
+                requested_tenant_id
+            ):
                 request.tenant_id = requested_tenant_id
             else:
                 logger.warning(
-                    f"Tenant override denied - User: {request.email}, "
-                    f"Token tenant: {request.tenant_id}, Requested tenant: {requested_tenant_id}"
+                    "tenant_override_denied",
+                    email=request.email,
+                    token_tenant=str(request.tenant_id),
+                    requested_tenant=str(requested_tenant_id),
                 )
-                return JsonResponse(
-                    {'error': 'You can only access your own tenant'},
-                    status=403
+                return error_response(
+                    code=error_codes.TENANT_MISMATCH,
+                    message="You can only access your own tenant.",
+                    status=403,
                 )
 
-        # If x-tenant-slug header is provided, use it to override tenant_slug
-        if x_tenant_slug_header:
-            request.tenant_slug = x_tenant_slug_header
+        x_tenant_slug = request.META.get("HTTP_X_TENANT_SLUG")
+        if x_tenant_slug:
+            request.tenant_slug = x_tenant_slug
 
-        # Store tenant_id in thread-local storage for database routing
         set_current_tenant_id(request.tenant_id)
 
-        # CRITICAL: Create TenantUser and set request.user for DRF authentication
-        from .auth_backends import TenantUser
+        # Intentional: set request.user to a TenantUser so that DRF's
+        # authentication pipeline and the legacy Django admin site work without
+        # a local User model. New clinical/webhook code must use request.user_id
+        # and request.tenant_id (from JWT) — never request.user — for business
+        # logic. See AGENTS.md Rule 2 and architecture decision D-01.
         user_payload = payload.copy()
-        user_payload['tenant_id'] = request.tenant_id
-        user_payload['tenant_slug'] = request.tenant_slug
+        user_payload["tenant_id"] = request.tenant_id
+        user_payload["tenant_slug"] = request.tenant_slug
         request.user = TenantUser(user_payload)
-        request._cached_user = request.user  # Cache to prevent re-authentication
+        request._cached_user = request.user
 
-        print(f"[JWT MIDDLEWARE] ✅ AUTH SUCCESS - User: {request.email}, Tenant: {request.tenant_id}")
         logger.info(
-            f"JWT auth successful - Path: {request.path}, User: {request.email}, "
-            f"Tenant: {request.tenant_id}, Modules: {request.enabled_modules}"
+            "jwt_auth_success",
+            path=request.path,
+            email=request.email,
+            tenant_id=str(request.tenant_id),
+            user_type=request.user_type,
         )
-        logger.debug("="*80)
-
         return None
 
 
 class CustomAuthenticationMiddleware(MiddlewareMixin):
-    """
-    Custom authentication middleware that runs AFTER Django's AuthenticationMiddleware
-    Sets additional request attributes (tenant_id, permissions, etc.) from session data
+    """Supplement middleware that copies TenantUser attributes onto the request.
 
-    NOTE: This middleware runs AFTER both JWTAuthenticationMiddleware and Django's
-    AuthenticationMiddleware. It supplements the authenticated user with HMS-specific
-    attributes.
+    This runs after Django's ``AuthenticationMiddleware`` and ensures that
+    requests authenticated via session (Django admin) carry the same JWT-style
+    attributes as API requests.
     """
 
     def process_request(self, request):
-        """Set additional HMS-specific attributes on the request"""
-        from .auth_backends import TenantUser
         from django.contrib.auth.models import AnonymousUser
 
-        # Check if user is authenticated (either by JWT or Django's auth)
-        if hasattr(request, 'user') and request.user is not None:
-            if not isinstance(request.user, AnonymousUser):
-                # User is authenticated - check if it's a TenantUser
-                if isinstance(request.user, TenantUser):
-                    # TenantUser already has all necessary attributes
-                    # Just ensure request attributes are set
-                    request.user_id = getattr(request.user, '_original_id', request.user.id)
-                    request.email = request.user.email
-                    request.tenant_id = request.user.tenant_id
-                    request.tenant_slug = request.user.tenant_slug
-                    request.is_super_admin = request.user.is_super_admin
-                    request.permissions = request.user.permissions
-                    request.enabled_modules = request.user.enabled_modules
-                    request.user_type = request.user.user_type
-                    request.is_patient = request.user.is_patient
+        user = getattr(request, "user", None)
+        if user is None or isinstance(user, AnonymousUser):
+            return None
 
-                    # Store tenant_id in thread-local storage
-                    set_current_tenant_id(request.tenant_id)
+        if isinstance(user, TenantUser):
+            request.user_id = getattr(user, "_original_id", user.id)
+            request.email = user.email
+            request.tenant_id = user.tenant_id
+            request.tenant_slug = user.tenant_slug
+            request.is_super_admin = user.is_super_admin
+            request.permissions = user.permissions
+            request.enabled_modules = user.enabled_modules
+            request.roles = getattr(user, "roles", [])
+            request.user_type = user.user_type
+            request.is_patient = user.is_patient
+            set_current_tenant_id(request.tenant_id)
+            logger.debug(
+                "custom_auth_session_ok",
+                email=request.email,
+                tenant_id=str(request.tenant_id),
+            )
 
-                    print(f"[CUSTOM AUTH] ✅ User authenticated: {request.user.email} (tenant: {request.tenant_id})")
-                else:
-                    # User is authenticated but not a TenantUser (shouldn't happen)
-                    print(f"[CUSTOM AUTH] ⚠️ User is authenticated but not TenantUser: {type(request.user)}")
-
-                return None
-
-        # If we get here, user is not authenticated
-        print(f"[CUSTOM AUTH] ⚠️ No authenticated user for {request.path}")
         return None
+
+
+class ActivityLogMiddleware(MiddlewareMixin):
+    """Asynchronously log requests to sensitive endpoints.
+
+    Logs requests whose path contains ``/clinical/``, ``/knowledge/``,
+    ``/webhooks/``, or ``/activity/``.  The actual write is delegated to the
+    Celery task ``apps.activity.tasks.write_activity_log_entry`` so the request
+    path is never blocked by audit IO.
+    """
+
+    LOGGED_PREFIXES = (
+        "/api/clinical/",
+        "/api/knowledge/",
+        "/api/webhooks/",
+        "/api/activity/",
+    )
+
+    def process_response(self, request, response):
+        path = getattr(request, "path", "")
+        if not any(path.startswith(prefix) for prefix in self.LOGGED_PREFIXES):
+            return response
+
+        # Avoid logging activity requests themselves to prevent loops.
+        if path.startswith("/api/activity/"):
+            return response
+
+        user_id = getattr(request, "user_id", None)
+        tenant_id = getattr(request, "tenant_id", None)
+
+        # Lazy import to avoid circular dependencies at startup.
+        try:
+            from apps.activity.tasks import write_activity_log_entry
+
+            write_activity_log_entry.delay(
+                tenant_id=str(tenant_id) if tenant_id else None,
+                user_id=str(user_id) if user_id else None,
+                method=request.method,
+                path=path,
+                status_code=response.status_code,
+                ip_address=self._get_client_ip(request),
+                user_agent=request.META.get("HTTP_USER_AGENT", "")[:255],
+            )
+        except Exception as exc:
+            logger.warning(
+                "activity_log_enqueue_failed",
+                path=path,
+                error=str(exc),
+            )
+
+        return response
+
+    @staticmethod
+    def _get_client_ip(request):
+        x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
+        if x_forwarded_for:
+            return x_forwarded_for.split(",")[0].strip()
+        return request.META.get("REMOTE_ADDR", "")

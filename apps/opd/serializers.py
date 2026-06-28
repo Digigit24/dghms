@@ -34,7 +34,7 @@ class VisitListSerializer(serializers.ModelSerializer):
         model = Visit
         fields = [
             'id', 'visit_number', 'patient', 'patient_name', 'patient_id',
-            'doctor', 'doctor_name', 'visit_date', 'visit_type', 'status',
+            'doctor', 'doctor_name', 'visit_date', 'visit_type', 'priority', 'status',
             'queue_position', 'payment_status', 'total_amount', 'balance_amount',
             'waiting_time', 'entry_time', 'is_follow_up',
             'follow_up_required', 'follow_up_date', 'follow_up_notes',
@@ -96,7 +96,7 @@ class VisitDetailSerializer(serializers.ModelSerializer):
     
     def get_has_opd_bill(self, obj):
         """Check if visit has OPD bill"""
-        return hasattr(obj, 'opd_bill')
+        return obj.opd_bills.exists()
     
     def get_has_clinical_note(self, obj):
         """Check if visit has clinical note"""
@@ -174,9 +174,9 @@ class OPDBillItemSerializer(serializers.ModelSerializer):
 class OPDBillListSerializer(serializers.ModelSerializer):
     """Serializer for listing OPD bills"""
     
-    patient_name = serializers.CharField(source='visit.patient.full_name', read_only=True)
-    doctor_name = serializers.CharField(source='doctor.full_name', read_only=True)
-    visit_number = serializers.CharField(source='visit.visit_number', read_only=True)
+    patient_name = serializers.CharField(source='visit.patient.full_name', read_only=True, allow_null=True, default=None)
+    doctor_name = serializers.CharField(source='doctor.full_name', read_only=True, allow_null=True, default=None)
+    visit_number = serializers.CharField(source='visit.visit_number', read_only=True, allow_null=True, default=None)
     items = OPDBillItemSerializer(many=True, read_only=True)
     
     class Meta:
@@ -193,9 +193,9 @@ class OPDBillListSerializer(serializers.ModelSerializer):
 class OPDBillDetailSerializer(serializers.ModelSerializer):
     """Detailed OPD bill serializer"""
     
-    patient_name = serializers.CharField(source='visit.patient.full_name', read_only=True)
-    doctor_name = serializers.CharField(source='doctor.full_name', read_only=True)
-    visit_number = serializers.CharField(source='visit.visit_number', read_only=True)
+    patient_name = serializers.CharField(source='visit.patient.full_name', read_only=True, allow_null=True, default=None)
+    doctor_name = serializers.CharField(source='doctor.full_name', read_only=True, allow_null=True, default=None)
+    visit_number = serializers.CharField(source='visit.visit_number', read_only=True, allow_null=True, default=None)
     items = OPDBillItemSerializer(many=True, read_only=True)
 
     class Meta:
@@ -209,7 +209,7 @@ class OPDBillDetailSerializer(serializers.ModelSerializer):
 
 class OPDBillCreateUpdateSerializer(serializers.ModelSerializer):
     """Serializer for creating/updating OPD bills"""
-    
+
     class Meta:
         model = OPDBill
         fields = [
@@ -218,6 +218,12 @@ class OPDBillCreateUpdateSerializer(serializers.ModelSerializer):
             'payment_mode', 'payment_details', 'received_amount'
         ]
         read_only_fields = ['id']
+        extra_kwargs = {
+            # On create, items haven't been added yet so totals start at 0.
+            # The post_save signal on OPDBillItem recalculates these automatically.
+            'total_amount': {'required': False, 'default': Decimal('0.00')},
+            'received_amount': {'required': False, 'default': Decimal('0.00')},
+        }
     
     def validate(self, data):
         """Validate bill data"""

@@ -3,7 +3,7 @@ Signal handlers for the payments app.
 
 Automatically creates transaction records when bills are marked as paid.
 """
-from django.db.models.signals import post_save, pre_save
+from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.contrib.contenttypes.models import ContentType
 from django.db.models import Sum

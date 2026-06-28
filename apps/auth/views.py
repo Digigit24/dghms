@@ -15,7 +15,16 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
 
-from common.auth_backends import TenantUser
+from rest_framework import viewsets
+from rest_framework.decorators import action
+from apps.auth.superadmin_client import get_superadmin_client, SuperAdminAPIException
+from apps.auth.serializers import (
+    UserCreateSerializer, UserUpdateSerializer,
+    UserListFilterSerializer, RoleAssignmentSerializer,
+    RoleSerializer, RoleListFilterSerializer
+)
+from common.hms_permission_schema import HMS_PERMISSION_SCHEMA
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -347,7 +356,7 @@ def verify_token_view(request):
             'valid': False,
             'error': 'Token has expired'
         }, status=status.HTTP_401_UNAUTHORIZED)
-    except jwt.InvalidTokenError as e:
+    except jwt.InvalidTokenError:
         return Response({
             'valid': False,
             'error': 'Invalid token'
@@ -355,16 +364,6 @@ def verify_token_view(request):
 
 
 # ==================== USER CRUD OPERATIONS ====================
-
-from rest_framework import viewsets
-from rest_framework.decorators import action
-from apps.auth.superadmin_client import get_superadmin_client, SuperAdminAPIException
-from apps.auth.serializers import (
-    UserSerializer, UserCreateSerializer, UserUpdateSerializer,
-    UserListFilterSerializer, RoleAssignmentSerializer,
-    RoleSerializer, RoleListFilterSerializer
-)
-from common.hms_permission_schema import HMS_PERMISSION_SCHEMA
 
 
 class UserViewSet(viewsets.ViewSet):

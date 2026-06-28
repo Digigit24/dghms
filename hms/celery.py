@@ -1,9 +1,11 @@
-"""
-Celery Configuration for DigiHMS
-"""
+"""Celery configuration for DigiHMS."""
+
 import os
+
+import structlog
 from celery import Celery
-from decouple import config
+
+logger = structlog.get_logger(__name__)
 
 # Set default Django settings module
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'hms.settings')
@@ -28,5 +30,5 @@ app.conf.beat_schedule = {
 
 @app.task(bind=True, ignore_result=True)
 def debug_task(self):
-    """Debug task to test Celery is working"""
-    print(f'Request: {self.request!r}')
+    """Debug task to verify Celery is running."""
+    logger.info("celery_debug_task", request_id=self.request.id)

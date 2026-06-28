@@ -3,7 +3,6 @@ from .views import (
     SuperAdminLoginView,
     TokenLoginView,
     superadmin_proxy_login_view,
-    SuperAdminProxyLoginView,
     AdminHealthView,
     admin_logout_view,
 )

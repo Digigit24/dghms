@@ -1,7 +1,9 @@
 import os
 from pathlib import Path
-from decouple import config, Csv
+
 import dj_database_url
+import structlog
+from decouple import config, Csv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -111,19 +113,27 @@ INSTALLED_APPS = [
     'apps.panchakarma',
     'apps.nuviapi',
     'apps.nakshatra_api',
+
+    # Phase 1 apps
+    'apps.clinical',
+    'apps.webhooks',
+    'apps.activity',
 ]
 
 # --- Middleware ---
+# Order matters: JWT auth runs after SecurityMiddleware but before SessionMiddleware
+# so that authenticated context is available to the session/admin layers.
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     # 'whitenoise.middleware.WhiteNoiseMiddleware',  # Temporarily disabled
     'corsheaders.middleware.CorsMiddleware',
+    'common.middleware.JWTAuthenticationMiddleware',  # JWT authentication for API requests
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
-    'common.middleware.JWTAuthenticationMiddleware',  # JWT authentication for API requests
     'django.contrib.auth.middleware.AuthenticationMiddleware',  # Required by Django admin
     'common.middleware.CustomAuthenticationMiddleware',  # Fallback auth and sets additional attributes
+    'common.middleware.ActivityLogMiddleware',  # Async audit logging for sensitive endpoints
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -176,6 +186,19 @@ else:
         }
     }
 
+# --- Redis Cache (application cache, db=0; separate from Celery broker/results) ---
+REDIS_HOST = config('REDIS_HOST', default='localhost')
+REDIS_PORT = config('REDIS_PORT', default=6379, cast=int)
+REDIS_CACHE_DB = config('REDIS_CACHE_DB', default=0, cast=int)
+
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+        'LOCATION': f'redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_CACHE_DB}',
+        'KEY_PREFIX': 'digihms',
+    }
+}
+
 # --- Auth / Passwords ---
 # NO LOCAL USER MODEL - Using SuperAdmin exclusively
 # User authentication is handled via JWT tokens from SuperAdmin
@@ -202,6 +225,10 @@ JWT_LEEWAY = config('JWT_LEEWAY', default=30, cast=int)  # Clock skew tolerance 
 # --- SuperAdmin Integration ---
 SUPERADMIN_URL = config('SUPERADMIN_URL')
 
+# --- OpenAI / Clinical Form AI Wizard ---
+OPENAI_API_KEY = config('OPENAI_API_KEY', default='')
+OPENAI_FORM_MODEL = config('OPENAI_FORM_MODEL', default='gpt-4o-mini')
+
 # --- Razorpay Payment Gateway ---
 RAZORPAY_KEY_ID = config('RAZORPAY_KEY_ID', default='')
 RAZORPAY_KEY_SECRET = config('RAZORPAY_KEY_SECRET', default='')
@@ -227,13 +254,13 @@ REST_FRAMEWORK = {
         'rest_framework.filters.SearchFilter',
         'rest_framework.filters.OrderingFilter',
     ],
-    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 100,
+    'DEFAULT_PAGINATION_CLASS': 'common.pagination.StandardPagination',
     'DEFAULT_RENDERER_CLASSES': [
         'rest_framework.renderers.JSONRenderer',
         'rest_framework.renderers.BrowsableAPIRenderer',
     ],
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'EXCEPTION_HANDLER': 'common.exceptions.custom_exception_handler',
 }
 
 # --- drf-spectacular Settings ---
@@ -320,9 +347,29 @@ NAKSHATRA_API_ENDPOINT = config('NAKSHATRA_API_ENDPOINT', default='https://forms
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+# --- Structured Logging (structlog) ---
+structlog.configure(
+    processors=[
+        structlog.stdlib.filter_by_level,
+        structlog.stdlib.add_logger_name,
+        structlog.stdlib.add_log_level,
+        structlog.stdlib.PositionalArgumentsFormatter(),
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.StackInfoRenderer(),
+        structlog.processors.format_exc_info,
+        structlog.processors.UnicodeDecoder(),
+        structlog.processors.JSONRenderer(),
+    ],
+    context_class=dict,
+    logger_factory=structlog.stdlib.LoggerFactory(),
+    wrapper_class=structlog.stdlib.BoundLogger,
+    cache_logger_on_first_use=True,
+)
+
 # --- Celery Settings ---
-CELERY_BROKER_URL = config('CELERY_BROKER_URL', default='redis://localhost:6379/0')
-CELERY_RESULT_BACKEND = config('CELERY_RESULT_BACKEND', default='redis://localhost:6379/0')
+# Broker uses Redis db=1; results use Redis db=2. Application cache stays on db=0.
+CELERY_BROKER_URL = config('CELERY_BROKER_URL', default='redis://localhost:6379/1')
+CELERY_RESULT_BACKEND = config('CELERY_RESULT_BACKEND', default='redis://localhost:6379/2')
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
@@ -330,3 +377,4 @@ CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes max per task
 CELERY_RESULT_EXPIRES = 3600  # Results expire after 1 hour
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True

@@ -115,7 +115,7 @@ class SuperAdminClient:
 
             # EXPLICIT DEBUG - Also print to console
             print(f"\n{'='*60}")
-            print(f"SUPERADMIN CLIENT DEBUG")
+            print("SUPERADMIN CLIENT DEBUG")
             print(f"{'='*60}")
             print(f"URL: {url}")
             print(f"Status: {response.status_code}")

@@ -1,7 +1,6 @@
 # diagnostics/signals.py
 from django.db.models.signals import post_save
 from django.dispatch import receiver
-from django.contrib.contenttypes.models import ContentType
 from decimal import Decimal
 
 from .models import DiagnosticOrder, LabReport, MedicineOrder, ProcedureOrder, PackageOrder

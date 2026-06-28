@@ -1,4 +1,3 @@
-from django.contrib import admin
 from django.utils.html import format_html
 from common.admin_site import TenantModelAdmin, hms_admin_site
 from .models import PaymentCategory, Transaction, AccountingPeriod

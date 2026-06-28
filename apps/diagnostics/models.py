@@ -4,7 +4,6 @@ from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.core.validators import MinValueValidator
 from decimal import Decimal
-from django.utils import timezone
 from common.mixins import TenantModelMixin, EncounterMixin
 
 class Investigation(TenantModelMixin):

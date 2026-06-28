@@ -71,6 +71,8 @@ class AdmissionSerializer(TenantMixin, serializers.ModelSerializer):
     """Serializer for Admission model."""
 
     patient_name = serializers.ReadOnlyField(source='patient.full_name')
+    patient_id_display = serializers.ReadOnlyField(source='patient.patient_id')
+    doctor_name = serializers.SerializerMethodField()
     ward_name = serializers.ReadOnlyField(source='ward.name')
     bed_number = serializers.ReadOnlyField(source='bed.bed_number')
     length_of_stay = serializers.SerializerMethodField()
@@ -79,7 +81,8 @@ class AdmissionSerializer(TenantMixin, serializers.ModelSerializer):
         model = Admission
         fields = [
             'id', 'tenant_id', 'admission_id', 'patient', 'patient_name',
-            'doctor_id', 'ward', 'ward_name', 'bed', 'bed_number',
+            'patient_id_display', 'doctor_id', 'doctor_name',
+            'ward', 'ward_name', 'bed', 'bed_number',
             'admission_date', 'reason', 'provisional_diagnosis', 'final_diagnosis',
             'has_mediclaim', 'tpa_name', 'claim_status',
             'claim_reference_number', 'claim_notes',
@@ -91,6 +94,13 @@ class AdmissionSerializer(TenantMixin, serializers.ModelSerializer):
             'tenant_id', 'admission_id', 'created_by_user_id',
             'discharged_by_user_id', 'created_at', 'updated_at'
         ]
+
+    def get_doctor_name(self, obj):
+        """Return doctor full name from the doctor FK if it exists."""
+        try:
+            return obj.doctor.full_name if obj.doctor else None
+        except Exception:
+            return None
 
     def validate_discharge_date(self, value):
         if value is not None:
@@ -109,6 +119,7 @@ class AdmissionListSerializer(TenantMixin, serializers.ModelSerializer):
     """Minimal serializer for listing admissions."""
 
     patient_name = serializers.ReadOnlyField(source='patient.full_name')
+    patient_id_display = serializers.ReadOnlyField(source='patient.patient_id')
     ward_name = serializers.ReadOnlyField(source='ward.name')
     bed_number = serializers.ReadOnlyField(source='bed.bed_number')
     # los_days is populated by DB annotation in AdmissionViewSet.get_queryset() - no extra query
@@ -118,8 +129,8 @@ class AdmissionListSerializer(TenantMixin, serializers.ModelSerializer):
     class Meta:
         model = Admission
         fields = [
-            'id', 'admission_id', 'patient', 'patient_name', 'doctor_id',
-            'ward_name', 'bed_number', 'admission_date', 'discharge_date',
+            'id', 'admission_id', 'patient', 'patient_name', 'patient_id_display',
+            'doctor_id', 'ward_name', 'bed_number', 'admission_date', 'discharge_date',
             'status', 'has_mediclaim', 'tpa_name', 'claim_status',
             'claim_reference_number', 'los_days', 'length_of_stay'
         ]

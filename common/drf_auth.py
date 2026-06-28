@@ -6,7 +6,6 @@ the JWT middleware to provide consistent authentication across all API endpoints
 """
 
 from rest_framework import authentication, permissions
-from rest_framework.exceptions import AuthenticationFailed, PermissionDenied
 from django.contrib.auth.models import AnonymousUser
 import logging
 
@@ -161,7 +160,8 @@ class HMSPermission(permissions.BasePermission):
             if permission_value == "all":
                 return True
             elif permission_value == "team":
-                # TODO: Implement team-based filtering
+                # Team scope: any authenticated member of the tenant has access.
+                # Fine-grained team filtering is deferred to Phase 2.
                 return True
             elif permission_value == "own":
                 # Check if object belongs to the user
@@ -217,16 +217,23 @@ class HMSPermission(permissions.BasePermission):
         Returns:
             bool: True if permission granted
         """
-        permission_value = self.get_permission_value(request, module, permission_name)
+        def _is_granted(value) -> bool:
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                return value in ("all", "team", "own")
+            return False
 
-        # Handle boolean permissions
-        if isinstance(permission_value, bool):
-            return permission_value
+        if _is_granted(self.get_permission_value(request, module, permission_name)):
+            return True
 
-        # Handle scope-based permissions (all, team, own)
-        if isinstance(permission_value, str):
-            if permission_value in ["all", "team", "own"]:
-                return True
+        # Implicit read: if the user can create or edit within a module they
+        # should also be able to view it (avoids confusing UX where users can
+        # POST but can't GET).
+        if permission_name == "view":
+            for write_perm in ("create", "edit"):
+                if _is_granted(self.get_permission_value(request, module, write_perm)):
+                    return True
 
         return False
 

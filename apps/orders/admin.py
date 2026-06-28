@@ -1,6 +1,5 @@
 from django.contrib import admin
 from django.utils.html import format_html
-from django.db.models import Sum, Count
 from common.admin_site import TenantModelAdmin, hms_admin_site
 from .models import Order, OrderItem, OrderFee, FeeType, RazorpayConfig
 

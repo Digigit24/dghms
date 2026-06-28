@@ -133,7 +133,9 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         'destroy': 'edit_visit',
         'today': 'view_visits',
         'queue': 'manage_queue',
+        'start': 'edit_visit',
         'stats': 'view_visits',
+        'statistics': 'view_visits',
         'template_responses': 'view_visits',  # GET/POST template responses
         'unbilled_requisitions': 'view_visits',
         'sync_clinical_charges': 'edit_visit',
@@ -162,22 +164,11 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         return VisitDetailSerializer
     
     def get_queryset(self):
-        """Filter queryset based on user permissions and role"""
+        """Filter queryset based on JWT roles"""
         queryset = super().get_queryset()
-        user = self.request.user
-        
-        # Patients can only see their own visits
-        if user.groups.filter(name='Patient').exists():
-            if hasattr(user, 'patient_profile'):
-                queryset = queryset.filter(patient=user.patient_profile)
-            else:
-                queryset = queryset.none()
-        
-        # Doctors can see their assigned visits
-        elif user.groups.filter(name='Doctor').exists():
-            if hasattr(user, 'doctor_profile'):
-                queryset = queryset.filter(doctor=user.doctor_profile)
-        
+        # JWT auth: use request.roles, never request.user.groups
+        # TenantViewSetMixin already scopes by tenant_id.
+        # HMSPermission gates action access — no queryset-level role filter needed.
         return queryset
     
     @extend_schema(
@@ -270,6 +261,34 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         })
     
     @extend_schema(
+        summary="Start Consultation",
+        description="Mark visit as in-consultation (doctor starts seeing the patient)",
+        tags=['OPD - Visits']
+    )
+    @action(detail=True, methods=['post'])
+    def start(self, request, pk=None):
+        """Start consultation for a visit"""
+        visit = self.get_object()
+
+        if visit.status == 'in_consultation':
+            serializer = VisitDetailSerializer(visit)
+            return Response({'success': True, 'message': 'Already in consultation', 'data': serializer.data})
+
+        if visit.status == 'completed':
+            return Response(
+                {'success': False, 'error': {'code': 'VISIT_ALREADY_COMPLETED', 'message': 'Visit is already completed.'}},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY
+            )
+
+        visit.status = 'in_consultation'
+        if not visit.consultation_start_time:
+            visit.consultation_start_time = timezone.now()
+        visit.save(update_fields=['status', 'consultation_start_time'])
+
+        serializer = VisitDetailSerializer(visit)
+        return Response({'success': True, 'message': 'Consultation started', 'data': serializer.data})
+
+    @extend_schema(
         summary="Complete Visit",
         description="Mark visit as completed",
         tags=['OPD - Visits']
@@ -287,6 +306,19 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         
         visit.status = 'completed'
         visit.consultation_end_time = timezone.now()
+
+        diagnosis = request.data.get('diagnosis', '')
+        if diagnosis:
+            visit.diagnosis = diagnosis
+
+        follow_up_date = request.data.get('follow_up_date')
+        if follow_up_date:
+            visit.follow_up_date = follow_up_date
+
+        follow_up_notes = request.data.get('notes', '')
+        if follow_up_notes:
+            visit.follow_up_notes = follow_up_notes
+
         visit.save()
         
         # Update patient's last visit date
@@ -911,6 +943,7 @@ class OPDBillViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         'partial_update': 'edit_bill',
         'destroy': 'edit_bill',
         'statistics': 'view_bills',
+        'record_payment': 'edit_bill',
     }
     
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -979,9 +1012,10 @@ class OPDBillViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def statistics(self, request):
         """Get OPD bill statistics"""
-        # Allow superadmins or Administrators
-        is_superadmin = getattr(request.user, 'is_super_admin', False)
-        is_administrator = request.user.groups.filter(name='Administrator').exists()
+        # Allow superadmins or admins — JWT roles
+        roles = getattr(request, 'roles', [])
+        is_superadmin = getattr(request, 'is_super_admin', False)
+        is_administrator = 'admin' in roles or 'administrator' in roles
 
         if not (is_superadmin or is_administrator):
             return Response({'success': False, 'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
@@ -1314,25 +1348,8 @@ class ClinicalNoteViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         return ClinicalNoteDetailSerializer
     
     def get_queryset(self):
-        """Filter by doctor if not admin"""
-        queryset = super().get_queryset()
-        user = self.request.user
-        
-        # Doctors can only see their own clinical notes
-        if user.groups.filter(name='Doctor').exists():
-            if hasattr(user, 'doctor_profile'):
-                queryset = queryset.filter(
-                    visit__doctor=user.doctor_profile
-                )
-        
-        # Patients can see their own clinical notes
-        elif user.groups.filter(name='Patient').exists():
-            if hasattr(user, 'patient_profile'):
-                queryset = queryset.filter(
-                    visit__patient=user.patient_profile
-                )
-        
-        return queryset
+        """Filter clinical notes — JWT auth, tenant already scoped by mixin"""
+        return super().get_queryset()
 
 
 # ============================================================================

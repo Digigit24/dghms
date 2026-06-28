@@ -1,6 +1,6 @@
 import jwt
 import requests
-from django.shortcuts import render, redirect
+from django.shortcuts import redirect
 from django.contrib.auth import authenticate, login
 from django.contrib.auth.views import LoginView
 from django.contrib import messages
@@ -377,3 +377,50 @@ def admin_logout_view(request):
     logout(request)
     messages.success(request, 'Successfully logged out')
     return redirect('/admin/login/')
+
+
+
+class HealthCheckView(View):
+    """Project health endpoint covering DB, Redis, and Celery broker."""
+
+    def get(self, request):
+        from django.db import connection
+        from django.conf import settings
+        import redis
+
+        status = {"success": True, "service": "DigiHMS", "checks": {}}
+        overall_status = 200
+
+        # Database check
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT 1")
+                cursor.fetchone()
+            status["checks"]["database"] = {"status": "ok"}
+        except Exception as exc:
+            status["checks"]["database"] = {"status": "error", "message": str(exc)}
+            overall_status = 503
+
+        # Redis check
+        try:
+            broker_url = getattr(settings, "CELERY_BROKER_URL", "redis://localhost:6379/1")
+            client = redis.from_url(broker_url)
+            client.ping()
+            status["checks"]["redis"] = {"status": "ok"}
+        except Exception as exc:
+            status["checks"]["redis"] = {"status": "error", "message": str(exc)}
+            overall_status = 503
+
+        # Celery broker check
+        try:
+            from celery_app import celery_app
+            celery_app.broker_connection().ensure_connection(max_retries=1)
+            status["checks"]["celery"] = {"status": "ok"}
+        except Exception as exc:
+            status["checks"]["celery"] = {"status": "error", "message": str(exc)}
+            overall_status = 503
+
+        if overall_status != 200:
+            status["success"] = False
+
+        return JsonResponse(status, status=overall_status)

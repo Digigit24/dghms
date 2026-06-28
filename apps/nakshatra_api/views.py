@@ -8,7 +8,7 @@ from django.conf import settings
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
-from rest_framework import viewsets, filters, status as drf_status
+from rest_framework import viewsets, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
@@ -17,8 +17,7 @@ from .utils import create_meta_user_data_payload
 from .models import NakshatraLead
 from .serializers import (
     NakshatraLeadSerializer,
-    NakshatraLeadListSerializer,
-    NakshatraLeadCreateSerializer
+    NakshatraLeadListSerializer
 )
 
 # Set up logger
@@ -60,7 +59,7 @@ def nakshatra_form_submit_api(request):
         form_data = request.POST.copy()
 
         # Log received form data (excluding sensitive info in production)
-        logger.debug(f"[NAKSHATRA API] Form data received:")
+        logger.debug("[NAKSHATRA API] Form data received:")
         logger.debug(f"  - fname: {form_data.get('fname', 'N/A')}")
         logger.debug(f"  - lname: {form_data.get('lname', 'N/A')}")
         logger.debug(f"  - email: {form_data.get('email', 'N/A')[:3]}***") # Partial for privacy
@@ -230,10 +229,10 @@ def nakshatra_form_submit_api(request):
     except Exception as e:
         # Catch any unexpected errors
         logger.critical("="*80)
-        logger.critical(f"[NAKSHATRA API] ❌ CRITICAL ERROR in form submission")
+        logger.critical("[NAKSHATRA API] ❌ CRITICAL ERROR in form submission")
         logger.critical(f"[NAKSHATRA API] Error Type: {type(e).__name__}")
         logger.critical(f"[NAKSHATRA API] Error Message: {str(e)}")
-        logger.critical(f"[NAKSHATRA API] Error Details:", exc_info=True)
+        logger.critical("[NAKSHATRA API] Error Details:", exc_info=True)
         logger.critical("="*80)
 
         return JsonResponse({
