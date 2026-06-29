@@ -1,5 +1,4 @@
 from django.db import models
-from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from decimal import Decimal
@@ -25,7 +24,7 @@ class AppointmentType(models.Model):
             models.Index(fields=['tenant_id']),
             models.Index(fields=['tenant_id', 'name']),
         ]
-    
+
     def __str__(self):
         return self.name
 
@@ -64,7 +63,7 @@ class Appointment(models.Model):
         related_name='appointments'
     )
     doctor = models.ForeignKey(
-        'doctors.DoctorProfile', 
+        'doctors.DoctorProfile',
         on_delete=models.PROTECT,
         related_name='appointments'
     )
@@ -85,8 +84,8 @@ class Appointment(models.Model):
 
     # Status and Priority
     status = models.CharField(
-        max_length=20, 
-        choices=StatusChoices.choices, 
+        max_length=20,
+        choices=StatusChoices.choices,
         default=StatusChoices.SCHEDULED
     )
     priority = models.CharField(
@@ -103,17 +102,17 @@ class Appointment(models.Model):
     # Follow-up and Referencing
     is_follow_up = models.BooleanField(default=False)
     original_appointment = models.ForeignKey(
-        'self', 
-        null=True, 
-        blank=True, 
-        on_delete=models.SET_NULL, 
+        'self',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
         related_name='follow_ups'
     )
 
     # Financial Details - Removed payment method
     consultation_fee = models.DecimalField(
-        max_digits=10, 
-        decimal_places=2, 
+        max_digits=10,
+        decimal_places=2,
         default=Decimal('0.00')
     )
 
@@ -126,7 +125,7 @@ class Appointment(models.Model):
     help_text="Associated OPD visit when patient checks in"
 )
 
-    
+
     # Check-in tracking (NEW)
     check_in_time = models.DateTimeField(
         null=True,
@@ -193,7 +192,7 @@ class Appointment(models.Model):
         if not self.consultation_fee and self.appointment_type:
             # Prefer doctor's consultation fee, fallback to appointment type's base fee
             self.consultation_fee = (
-                self.doctor.consultation_fee if hasattr(self.doctor, 'consultation_fee') 
+                self.doctor.consultation_fee if hasattr(self.doctor, 'consultation_fee')
                 else self.appointment_type.base_consultation_fee
             )
 
@@ -222,14 +221,13 @@ class Appointment(models.Model):
     def get_waiting_time(self):
         """Calculate waiting time if check-in and start times are available"""
         if self.checked_in_at and self.actual_start_time:
-            import datetime
             check_in_time = self.checked_in_at.time()
             start_time = self.actual_start_time
-            
+
             # Convert times to total minutes for comparison
             check_in_minutes = check_in_time.hour * 60 + check_in_time.minute
             start_minutes = start_time.hour * 60 + start_time.minute
-            
+
             self.waiting_time_minutes = max(0, start_minutes - check_in_minutes)
             self.save()
 

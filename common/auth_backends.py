@@ -15,7 +15,7 @@ class TenantUser:
     def __init__(self, user_data):
         # Store original UUID for internal use
         self._original_id = user_data.get('user_id')
-        
+
         # Convert UUID to a hash-based integer for Django compatibility
         # This ensures Django's admin system can work with the ID
         import hashlib
@@ -27,7 +27,7 @@ class TenantUser:
         else:
             self.id = None
             self.pk = None
-            
+
         self.username = user_data.get('email', '')
         self.email = user_data.get('email', '')
         self.first_name = user_data.get('first_name', '')
@@ -75,13 +75,13 @@ class TenantUser:
             concrete = False
             proxy = False
             swapped = False
-            
+
             class MockPK:
                 name = 'id'
-                
+
                 def value_to_string(self, obj):
                     return str(getattr(obj, self.name, ''))
-                
+
                 def to_python(self, value):
                     """Convert value to appropriate type for this field"""
                     # Return integer for Django compatibility
@@ -91,7 +91,7 @@ class TenantUser:
                         return int(value)
                     except (ValueError, TypeError):
                         return None
-                
+
                 def get_prep_value(self, value):
                     """Prepare value for database operations"""
                     if value is None:
@@ -100,17 +100,17 @@ class TenantUser:
                         return int(value)
                     except (ValueError, TypeError):
                         return None
-                
+
                 def __str__(self):
                     return self.name
-            
+
             pk = MockPK()
-            
+
             def get_field(self, field_name):
                 if field_name == 'id':
                     return self.pk
                 return None
-                
+
         self._meta = MockMeta()
 
     def __str__(self):
@@ -126,14 +126,14 @@ class TenantUser:
     @property
     def is_authenticated(self):
         return True
-    
+
     def save(self, *args, **kwargs):
         """
         Mock save method required by Django's login function.
         Since this is a virtual user, we don't actually save anything.
         """
         pass
-    
+
     def delete(self, *args, **kwargs):
         """
         Mock delete method for Django compatibility.
@@ -332,14 +332,14 @@ class JWTAuthBackend(BaseBackend):
 
             # Create TenantUser instance
             user = TenantUser(payload)
-            
+
             # Store user data in session for future requests
             if hasattr(request, 'session'):
                 request.session['user_data'] = payload
                 request.session['jwt_token'] = jwt_token
                 request.session['tenant_id'] = payload.get('tenant_id')
                 request.session['tenant_slug'] = payload.get('tenant_slug')
-            
+
             return user
 
         except jwt.InvalidTokenError:

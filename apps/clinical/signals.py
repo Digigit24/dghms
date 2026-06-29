@@ -56,3 +56,4 @@ def field_saved(sender, instance, **kwargs):
 @receiver(post_delete, sender=ClinicalFormField)
 def field_deleted(sender, instance, **kwargs):
     _bust_form_cache(instance)
+

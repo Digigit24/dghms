@@ -118,6 +118,9 @@ INSTALLED_APPS = [
     'apps.clinical',
     'apps.webhooks',
     'apps.activity',
+
+    # Inventory Management
+    'apps.inventory',
 ]
 
 # --- Middleware ---
@@ -373,8 +376,7 @@ CELERY_RESULT_BACKEND = config('CELERY_RESULT_BACKEND', default='redis://localho
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
-CELERY_TIMEZONE = TIME_ZONE
+CELERY_TIMEZONE = 'UTC'
 CELERY_TASK_TRACK_STARTED = True
-CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes max per task
-CELERY_RESULT_EXPIRES = 3600  # Results expire after 1 hour
-CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
+CELERY_WORKER_HIJACK_ROOT_LOGGER = False

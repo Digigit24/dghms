@@ -7,13 +7,15 @@ from .views import (
     CartViewSet,
     PharmacyOrderViewSet
 )
+from .prescription_views import PrescriptionViewSet
 
 router = DefaultRouter()
 router.register(r'categories', ProductCategoryViewSet)
 router.register(r'products', PharmacyProductViewSet)
 router.register(r'cart', CartViewSet)
 router.register(r'orders', PharmacyOrderViewSet)
+router.register(r'prescriptions', PrescriptionViewSet)
 
 urlpatterns = [
-    path('', include(router.urls))
+    path('', include(router.urls)),
 ]

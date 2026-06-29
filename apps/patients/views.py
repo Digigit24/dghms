@@ -5,23 +5,22 @@ from collections import OrderedDict
 from django.db.models import Q, Avg, Sum
 from django.http import HttpResponse, StreamingHttpResponse
 from django.utils import timezone
-from django.db import transaction
-from django.contrib.auth.models import Group
 
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 
-from common.drf_auth import HMSPermission, IsAuthenticated, AllowAny
+from common.drf_auth import HMSPermission, IsAuthenticated
 from common.mixins import TenantViewSetMixin
+from common.cache import CeliyoCache
 
 from drf_spectacular.utils import (
     extend_schema, extend_schema_view,
     OpenApiParameter, OpenApiExample, OpenApiResponse
 )
 
-from .models import PatientProfile, PatientVitals, PatientAllergy
+from .models import PatientProfile, PatientAllergy
 from .serializers import (
     PatientProfileListSerializer,
     PatientProfileDetailSerializer,
@@ -177,12 +176,12 @@ class PatientProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         'update': 'edit',
         'partial_update': 'edit',
         'destroy': 'delete',
-        'record_vitals': 'view_vitals',
-        'vitals': 'view_vitals',
-        'add_allergy': 'manage_allergies',
+        'record_vitals': 'edit',     # recording vitals = editing patient record
+        'vitals': 'view',
+        'add_allergy': 'edit',
         'allergies': 'view',
-        'update_allergy': 'manage_allergies',
-        'delete_allergy': 'manage_allergies',
+        'update_allergy': 'edit',
+        'delete_allergy': 'edit',
         'update_visit': 'edit',
         'statistics': 'view',
         'activate': 'edit',
@@ -222,11 +221,15 @@ class PatientProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         age_min = self.request.query_params.get('age_min')
         age_max = self.request.query_params.get('age_max')
         if age_min:
-            try: qs = qs.filter(age__gte=int(age_min))
-            except ValueError: pass
+            try:
+                qs = qs.filter(age__gte=int(age_min))
+            except ValueError:
+                pass
         if age_max:
-            try: qs = qs.filter(age__lte=int(age_max))
-            except ValueError: pass
+            try:
+                qs = qs.filter(age__lte=int(age_max))
+            except ValueError:
+                pass
 
         # insurance
         has_insurance = self.request.query_params.get('has_insurance')
@@ -378,10 +381,10 @@ class PatientProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         - If can_login=false: Creates PatientProfile only (walk-in)
         """
         serializer = PatientRegistrationSerializer(data=request.data, context={'request': request})
-        
+
         if serializer.is_valid():
             patient = serializer.save()
-            
+
             response_data = {
                 'success': True,
                 'message': 'Patient registered successfully',
@@ -389,15 +392,15 @@ class PatientProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                     'patient': PatientProfileDetailSerializer(patient).data
                 }
             }
-            
+
             # If user was created, generate token
             if patient.user:
                 from rest_framework.authtoken.models import Token
                 token, created = Token.objects.get_or_create(user=patient.user)
                 response_data['data']['token'] = token.key
-            
+
             return Response(response_data, status=status.HTTP_201_CREATED)
-        
+
         return Response({
             'success': False,
             'errors': serializer.errors
@@ -537,6 +540,19 @@ class PatientProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         return Response({'success': True, 'message': 'Allergy deactivated successfully'},
                         status=status.HTTP_204_NO_CONTENT)
 
+    def perform_create(self, serializer):
+        super().perform_create(serializer)
+        CeliyoCache().delete_pattern(f"stats:patients:{self.request.tenant_id}")
+
+    def perform_update(self, serializer):
+        super().perform_update(serializer)
+        CeliyoCache().delete_pattern(f"stats:patients:{self.request.tenant_id}")
+
+    def perform_destroy(self, instance):
+        tenant_id = self.request.tenant_id
+        super().perform_destroy(instance)
+        CeliyoCache().delete_pattern(f"stats:patients:{tenant_id}")
+
     # =========================
     # Visits / Stats / Admin ops
     # =========================
@@ -567,6 +583,10 @@ class PatientProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     )
     @action(detail=False, methods=['get'])
     def statistics(self, request):
+        cache = CeliyoCache()
+        cached = cache.get(f"stats:patients:{request.tenant_id}")
+        if cached is not None:
+            return Response(cached)
         # Allow superadmins or Administrators
         is_superadmin = getattr(request.user, 'is_super_admin', False)
         is_administrator = request.user.groups.filter(name='Administrator').exists()
@@ -614,7 +634,10 @@ class PatientProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         }
 
         s = PatientStatisticsSerializer(data)
-        return Response({'success': True, 'data': s.data})
+        result = {'success': True, 'data': s.data}
+        cache = CeliyoCache()
+        cache.set(f"stats:patients:{request.tenant_id}", result, ttl=300)
+        return Response(result)
 
     @extend_schema(
         summary="Activate patient profile",

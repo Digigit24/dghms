@@ -78,4 +78,4 @@ class WebhookDelivery(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.event_name} -> {self.status} ({self.attempt_count})"
+        return f"Delivery {self.id} [{self.status}] for {self.event_name}"

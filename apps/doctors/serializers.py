@@ -1,12 +1,11 @@
 from rest_framework import serializers
-from django.db import transaction
 from .models import DoctorProfile, Specialty, DoctorAvailability
 
 
 class SpecialtySerializer(serializers.ModelSerializer):
     """Specialty serializer"""
     doctors_count = serializers.SerializerMethodField()
-    
+
     class Meta:
         model = Specialty
         fields = [
@@ -14,7 +13,7 @@ class SpecialtySerializer(serializers.ModelSerializer):
             'is_active', 'doctors_count', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
-    
+
     def get_doctors_count(self, obj):
         """Count active doctors in this specialty"""
         return obj.doctors.filter(status='active').count()
@@ -26,7 +25,7 @@ class DoctorAvailabilitySerializer(serializers.ModelSerializer):
         source='get_day_of_week_display',
         read_only=True
     )
-    
+
     class Meta:
         model = DoctorAvailability
         fields = [
@@ -38,22 +37,22 @@ class DoctorAvailabilitySerializer(serializers.ModelSerializer):
 
 class DoctorAvailabilityCreateUpdateSerializer(serializers.ModelSerializer):
     """Create/Update serializer for doctor availability"""
-    
+
     class Meta:
         model = DoctorAvailability
         exclude = ['doctor', 'created_at', 'updated_at']
-    
+
     def validate(self, attrs):
         """Validate time range"""
         start_time = attrs.get('start_time')
         end_time = attrs.get('end_time')
-        
+
         if start_time and end_time:
             if start_time >= end_time:
                 raise serializers.ValidationError({
                     'end_time': 'End time must be after start time'
                 })
-        
+
         return attrs
 
 
@@ -153,7 +152,7 @@ class DoctorProfileCreateUpdateSerializer(serializers.ModelSerializer):
         # Note: tenant_id and user_id will be auto-populated in create() method
         # We don't require them during validation - they're added later
 
-        request = self.context.get('request')
+        # request = self.context.get('request')  # noqa: F841
 
         # Validate license dates
         issue_date = attrs.get('license_issue_date') or (
@@ -246,7 +245,7 @@ class DoctorRegistrationSerializer(serializers.Serializer):
     """
     # SuperAdmin user ID (required)
     user_id = serializers.UUIDField(required=True)
-    
+
     # Doctor Profile fields (OPTIONAL)
     medical_license_number = serializers.CharField(max_length=64, required=False, allow_blank=True, allow_null=True)
     license_issuing_authority = serializers.CharField(max_length=128, required=False, allow_blank=True, allow_null=True)
@@ -269,20 +268,20 @@ class DoctorRegistrationSerializer(serializers.Serializer):
     )
     signature = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     languages_spoken = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    
+
     def validate_user_id(self, value):
         """Check if user_id already has a doctor profile"""
         if DoctorProfile.objects.filter(user_id=value).exists():
             raise serializers.ValidationError('User already has a doctor profile')
         return value
-    
+
     def validate_medical_license_number(self, value):
         """Check if license number already exists"""
         # Only validate if a value is provided
         if value and DoctorProfile.objects.filter(medical_license_number=value).exists():
             raise serializers.ValidationError('Doctor with this license number already exists')
         return value
-    
+
     def validate(self, attrs):
         """Cross-field validation"""
         # License dates validation (only if both dates are provided)
@@ -302,25 +301,25 @@ class DoctorRegistrationSerializer(serializers.Serializer):
                 raise serializers.ValidationError({
                     'license_expiry_date': 'License expiry date must be in the future'
                 })
-        
+
         # Consultation duration validation
         if attrs['consultation_duration'] < 5:
             raise serializers.ValidationError({
                 'consultation_duration': 'Consultation duration must be at least 5 minutes'
             })
-        
+
         # Consultation fee validation
         if attrs['consultation_fee'] < 0:
             raise serializers.ValidationError({
                 'consultation_fee': 'Consultation fee cannot be negative'
             })
-        
+
         # Years of experience validation
         if attrs['years_of_experience'] < 0:
             raise serializers.ValidationError({
                 'years_of_experience': 'Years of experience cannot be negative'
             })
-        
+
         # Specialty validation
         specialty_ids = attrs.get('specialty_ids', [])
         if specialty_ids:
@@ -329,9 +328,9 @@ class DoctorRegistrationSerializer(serializers.Serializer):
                 raise serializers.ValidationError({
                     'specialty_ids': 'One or more specialty IDs are invalid'
                 })
-        
+
         return attrs
-    
+
     def create(self, validated_data):
         """Create doctor profile"""
         specialty_ids = validated_data.pop('specialty_ids', [])
@@ -455,7 +454,7 @@ class DoctorWithUserCreationSerializer(serializers.Serializer):
             for field in required_fields:
                 if not attrs.get(field):
                     raise serializers.ValidationError({
-                        field: f'This field is required when create_user=True'
+                        field: 'This field is required when create_user=True'
                     })
 
             # Validate password match

@@ -14,6 +14,4 @@ import os
 # Ensure Django settings are available before the Celery app is imported.
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "hms.settings")
 
-from hms.celery import app as celery_app
 
-__all__ = ("celery_app",)

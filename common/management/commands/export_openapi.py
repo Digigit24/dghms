@@ -35,3 +35,4 @@ class Command(BaseCommand):
 
         logger.info("openapi_exported", path=output_path)
         self.stdout.write(self.style.SUCCESS(f"OpenAPI schema exported to {output_path}"))
+

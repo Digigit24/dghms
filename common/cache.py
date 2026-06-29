@@ -82,5 +82,5 @@ class CeliyoCache:
         return bool(self._get_client().exists(key))
 
     def ttl(self, key):
-        """Return remaining TTL in seconds, or -1 / -2 for no expiry / missing."""
+        """Return remaining TTL in seconds."""
         return self._get_client().ttl(key)

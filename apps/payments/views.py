@@ -17,11 +17,12 @@ from drf_spectacular.utils import (
 from common.drf_auth import HMSPermission
 from common.mixins import TenantViewSetMixin
 
-from .models import PaymentCategory, Transaction, AccountingPeriod
+from .models import PaymentCategory, Transaction, AccountingPeriod, BillPayment
 from .serializers import (
     PaymentCategorySerializer,
     TransactionSerializer,
-    AccountingPeriodSerializer
+    AccountingPeriodSerializer,
+    BillPaymentSerializer,
 )
 
 
@@ -49,27 +50,28 @@ class PaymentCategoryViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     permission_classes = [HMSPermission]
     hms_module = 'payments'
 
+    # Maps to PERMISSION_SCHEMA hms.payments actions: view, create, edit, delete
     action_permission_map = {
-        'list': 'view_categories',
-        'retrieve': 'view_categories',
-        'create': 'manage_categories',
-        'update': 'manage_categories',
-        'partial_update': 'manage_categories',
-        'destroy': 'manage_categories',
+        'list': 'view',
+        'retrieve': 'view',
+        'create': 'create',
+        'update': 'edit',
+        'partial_update': 'edit',
+        'destroy': 'delete',
     }
 
     filter_backends = [filters.SearchFilter]
     search_fields = ['name', 'description']
-    
+
     def list(self, request, *args, **kwargs):
         """List categories with optional filtering"""
         queryset = self.filter_queryset(self.get_queryset())
-        
+
         # Optional filtering by category type
         category_type = request.query_params.get('category_type')
         if category_type:
             queryset = queryset.filter(category_type=category_type)
-        
+
         serializer = self.get_serializer(queryset, many=True)
         return Response({
             'success': True,
@@ -113,15 +115,16 @@ class TransactionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     permission_classes = [HMSPermission]
     hms_module = 'payments'
 
+    # Maps to PERMISSION_SCHEMA hms.payments actions: view, create, edit, delete, refund, reconcile
     action_permission_map = {
-        'list': 'view_transactions',
-        'retrieve': 'view_transactions',
-        'create': 'create_transaction',
-        'update': 'edit_transaction',
-        'partial_update': 'edit_transaction',
-        'destroy': 'delete_transaction',
-        'statistics': 'view_reports',
-        'reconcile': 'reconcile_transactions',
+        'list': 'view',
+        'retrieve': 'view',
+        'create': 'create',
+        'update': 'edit',
+        'partial_update': 'edit',
+        'destroy': 'delete',
+        'statistics': 'view',
+        'reconcile': 'reconcile',
     }
 
     filter_backends = [
@@ -147,7 +150,7 @@ class TransactionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         'transaction_type'
     ]
     ordering = ['-created_at']
-    
+
     def get_queryset(self):
         """Custom queryset filtering"""
         queryset = super().get_queryset()
@@ -160,10 +163,10 @@ class TransactionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             if not (hasattr(user, 'is_super_admin') and user.is_super_admin):
                 # Regular users only see their own
                 queryset = queryset.filter(user=user)
-        
+
         # Additional query parameter filtering
         params = self.request.query_params
-        
+
         # Date range filtering
         date_from = params.get('date_from')
         date_to = params.get('date_to')
@@ -171,7 +174,7 @@ class TransactionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             queryset = queryset.filter(created_at__date__gte=date_from)
         if date_to:
             queryset = queryset.filter(created_at__date__lte=date_to)
-        
+
         # Amount range filtering
         min_amount = params.get('min_amount')
         max_amount = params.get('max_amount')
@@ -179,9 +182,9 @@ class TransactionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             queryset = queryset.filter(amount__gte=min_amount)
         if max_amount:
             queryset = queryset.filter(amount__lte=max_amount)
-        
+
         return queryset
-    
+
     @extend_schema(
         summary="Get Transaction Statistics",
         description="Retrieve comprehensive transaction statistics (Admin only)",
@@ -201,19 +204,19 @@ class TransactionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             total_expenses=Sum('amount', filter=Q(transaction_type='expense')),
             total_refunds=Sum('amount', filter=Q(transaction_type='refund'))
         )
-        
+
         # Payment method breakdown
         payment_method_breakdown = Transaction.objects.values('payment_method').annotate(
             count=Count('id'),
             total_amount=Sum('amount')
         )
-        
+
         # Transaction type breakdown
         transaction_type_breakdown = Transaction.objects.values('transaction_type').annotate(
             count=Count('id'),
             total_amount=Sum('amount')
         )
-        
+
         return Response({
             'success': True,
             'data': {
@@ -228,7 +231,7 @@ class TransactionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                 'transaction_type_breakdown': list(transaction_type_breakdown)
             }
         })
-    
+
     @extend_schema(
         summary="Reconcile Transaction",
         description="Mark a transaction as reconciled (Admin only)",
@@ -244,20 +247,20 @@ class TransactionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         # Permission already checked by HMSPermission (reconcile_transactions)
 
         transaction = self.get_object()
-        
+
         # Check if already reconciled
         if transaction.is_reconciled:
             return Response({
                 'success': False,
                 'error': 'Transaction is already reconciled'
             }, status=status.HTTP_400_BAD_REQUEST)
-        
+
         # Mark as reconciled
         transaction.is_reconciled = True
         transaction.reconciled_at = timezone.now()
         transaction.reconciled_by_id = request.user_id
         transaction.save()
-        
+
         serializer = self.get_serializer(transaction)
         return Response({
             'success': True,
@@ -299,15 +302,16 @@ class AccountingPeriodViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     permission_classes = [HMSPermission]
     hms_module = 'payments'
 
+    # Maps to PERMISSION_SCHEMA hms.payments actions: view, edit, reconcile
     action_permission_map = {
-        'list': 'view_periods',
-        'retrieve': 'view_periods',
-        'create': 'manage_periods',
-        'update': 'manage_periods',
-        'partial_update': 'manage_periods',
-        'destroy': 'manage_periods',
-        'recalculate': 'manage_periods',
-        'close': 'close_periods',
+        'list': 'view',
+        'retrieve': 'view',
+        'create': 'create',
+        'update': 'edit',
+        'partial_update': 'edit',
+        'destroy': 'edit',
+        'recalculate': 'edit',
+        'close': 'reconcile',
     }
 
     filter_backends = [
@@ -327,14 +331,14 @@ class AccountingPeriodViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         'total_expenses'
     ]
     ordering = ['-start_date']
-    
+
     def get_queryset(self):
         """Custom queryset filtering"""
         queryset = super().get_queryset()
-        
+
         # Additional query parameter filtering
         params = self.request.query_params
-        
+
         # Date range filtering
         date_from = params.get('date_from')
         date_to = params.get('date_to')
@@ -342,9 +346,9 @@ class AccountingPeriodViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             queryset = queryset.filter(start_date__gte=date_from)
         if date_to:
             queryset = queryset.filter(end_date__lte=date_to)
-        
+
         return queryset
-    
+
     @extend_schema(
         summary="Recalculate Financial Summary",
         description="Force recalculation of financial summary for an accounting period (Admin only)",
@@ -360,10 +364,10 @@ class AccountingPeriodViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         # Permission already checked by HMSPermission (manage_periods)
 
         accounting_period = self.get_object()
-        
+
         # Recalculate financial summary
         summary = accounting_period.calculate_financial_summary()
-        
+
         serializer = self.get_serializer(accounting_period)
         return Response({
             'success': True,
@@ -371,7 +375,7 @@ class AccountingPeriodViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             'data': serializer.data,
             'summary': summary
         })
-    
+
     @extend_schema(
         summary="Close Accounting Period",
         description="Close an accounting period and lock its financial data (Admin only)",
@@ -387,26 +391,139 @@ class AccountingPeriodViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         # Permission already checked by HMSPermission (close_periods)
 
         accounting_period = self.get_object()
-        
+
         # Check if already closed
         if accounting_period.is_closed:
             return Response({
                 'success': False,
                 'error': 'Accounting period is already closed'
             }, status=status.HTTP_400_BAD_REQUEST)
-        
+
         # Close the period
         accounting_period.is_closed = True
         accounting_period.closed_at = timezone.now()
         accounting_period.closed_by = request.user
-        
+
         # Recalculate financial summary before closing
         accounting_period.calculate_financial_summary()
         accounting_period.save()
-        
+
         serializer = self.get_serializer(accounting_period)
         return Response({
-            'success': True,
+           'success': True,
             'message': 'Accounting period closed successfully',
-            'data': serializer.data
+            'data': serializer.data,
+        })
+
+
+class BillPaymentViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
+    """ViewSet for the unified BillPayment ledger."""
+
+    queryset = BillPayment.objects.all()
+    serializer_class = BillPaymentSerializer
+    permission_classes = [HMSPermission]
+    hms_module = 'payments'
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['bill_type', 'payment_mode', 'payment_date']
+    ordering_fields = ['payment_date', 'amount', 'created_at']
+    ordering = ['-created_at']
+
+    def perform_create(self, serializer):
+        serializer.save(
+            tenant_id=self.request.tenant_id,
+            recorded_by_user_id=self.request.user_id,
+        )
+
+    @action(detail=False, methods=['GET'], url_path='stats')
+    def stats(self, request):
+        """
+        Aggregate payment stats for the dashboard.
+        Optional filters: bill_type, date_from (YYYY-MM-DD), date_to (YYYY-MM-DD)
+        """
+        from datetime import date, timedelta
+        from decimal import Decimal
+
+        qs = self.get_queryset()  # already tenant-scoped via TenantViewSetMixin
+
+        bill_type = request.query_params.get('bill_type')
+        date_from = request.query_params.get('date_from')
+        date_to   = request.query_params.get('date_to')
+
+        if bill_type:
+            qs = qs.filter(bill_type=bill_type)
+        if date_from:
+            qs = qs.filter(payment_date__gte=date_from)
+        if date_to:
+            qs = qs.filter(payment_date__lte=date_to)
+
+        today      = date.today()
+        week_start = today - timedelta(days=today.weekday())
+        month_start = today.replace(day=1)
+
+        totals = qs.aggregate(
+            total_collected=Sum('amount'),
+            transaction_count=Count('id'),
+        )
+        today_agg = qs.filter(payment_date=today).aggregate(
+            collected_today=Sum('amount'),
+            count_today=Count('id'),
+        )
+        week_agg = qs.filter(payment_date__gte=week_start).aggregate(
+            collected_this_week=Sum('amount'),
+        )
+        month_agg = qs.filter(payment_date__gte=month_start).aggregate(
+            collected_this_month=Sum('amount'),
+        )
+
+        # By payment mode
+        by_mode = list(
+            qs.values('payment_mode')
+              .annotate(count=Count('id'), total=Sum('amount'))
+              .order_by('-total')
+        )
+
+        # By bill type
+        by_type = list(
+            qs.values('bill_type')
+              .annotate(count=Count('id'), total=Sum('amount'))
+              .order_by('-total')
+        )
+
+        # Daily trend — last 30 days
+        from django.db.models.functions import TruncDate
+        trend_qs = qs.filter(payment_date__gte=today - timedelta(days=29))
+        daily_trend = list(
+            trend_qs.annotate(day=TruncDate('payment_date'))
+                    .values('day')
+                    .annotate(total=Sum('amount'), count=Count('id'))
+                    .order_by('day')
+        )
+
+        def to_float(v):
+            if v is None:
+                return 0.0
+            return float(v)
+
+        return Response({
+            'success': True,
+            'data': {
+                'total_collected':      to_float(totals['total_collected']),
+                'transaction_count':    totals['transaction_count'] or 0,
+                'collected_today':      to_float(today_agg['collected_today']),
+                'count_today':          today_agg['count_today'] or 0,
+                'collected_this_week':  to_float(week_agg['collected_this_week']),
+                'collected_this_month': to_float(month_agg['collected_this_month']),
+                'by_mode': [
+                    {'payment_mode': r['payment_mode'], 'count': r['count'], 'total': to_float(r['total'])}
+                    for r in by_mode
+                ],
+                'by_type': [
+                    {'bill_type': r['bill_type'], 'count': r['count'], 'total': to_float(r['total'])}
+                    for r in by_type
+                ],
+                'daily_trend': [
+                    {'date': str(r['day']), 'total': to_float(r['total']), 'count': r['count']}
+                    for r in daily_trend
+                ],
+            }
         })

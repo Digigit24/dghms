@@ -24,7 +24,7 @@ router.register(r"picklist-items", ClinicalPicklistItemViewSet, basename="clinic
 router.register(r"records", ClinicalRecordViewSet, basename="clinicalrecord")
 router.register(r"preferences", UserFormPreferenceViewSet, basename="userformpreference")
 router.register(r"snapshots", SavedFormSnapshotViewSet, basename="savedformsnapshot")
-router.register(r"ai", ClinicalFormAIWizardViewSet, basename="clinicalformaiwizard")
+router.register(r"ai-wizard", ClinicalFormAIWizardViewSet, basename="clinicalformaiwizard")
 
 urlpatterns = [
     path("", include(router.urls)),

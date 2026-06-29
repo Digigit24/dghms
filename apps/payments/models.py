@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, date
 from django.db import models
 from django.core.validators import MinValueValidator
 from django.contrib.contenttypes.fields import GenericForeignKey
@@ -40,7 +40,7 @@ class PaymentCategory(models.Model):
                 name='unique_payment_category_per_tenant'
             ),
         ]
-    
+
     def __str__(self):
         return self.name
 
@@ -80,43 +80,43 @@ class Transaction(models.Model):
         unique=True,
         editable=False
     )
-    
+
     # Financial Details
     amount = models.DecimalField(
-        max_digits=12, 
-        decimal_places=2, 
+        max_digits=12,
+        decimal_places=2,
         validators=[MinValueValidator(Decimal('0.00'))]
     )
-    
+
     # Categorization
     category = models.ForeignKey(
-        PaymentCategory, 
+        PaymentCategory,
         on_delete=models.PROTECT,
         related_name='transactions'
     )
     transaction_type = models.CharField(
-        max_length=20, 
+        max_length=20,
         choices=TRANSACTION_TYPE_CHOICES
     )
-    
+
     # Payment Method
     payment_method = models.CharField(
-        max_length=20, 
-        choices=PAYMENT_METHOD_CHOICES, 
-        null=True, 
+        max_length=20,
+        choices=PAYMENT_METHOD_CHOICES,
+        null=True,
         blank=True
     )
-    
+
     # Related Models (Generic Foreign Key to support multiple sources)
     content_type = models.ForeignKey(
-        ContentType, 
+        ContentType,
         on_delete=models.SET_NULL,
         null=True,
         blank=True
     )
     object_id = models.PositiveIntegerField(null=True, blank=True)
     related_object = GenericForeignKey('content_type', 'object_id')
-    
+
     # User Information
     user_id = models.UUIDField(null=True, blank=True, help_text="User associated with this transaction")
 
@@ -131,11 +131,11 @@ class Transaction(models.Model):
     is_reconciled = models.BooleanField(default=False)
     reconciled_at = models.DateTimeField(null=True, blank=True)
     reconciled_by_id = models.UUIDField(null=True, blank=True, help_text="User who reconciled this transaction")
-    
+
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         db_table = 'transactions'
         verbose_name = 'Transaction'
@@ -148,7 +148,7 @@ class Transaction(models.Model):
             models.Index(fields=['created_at']),
             models.Index(fields=['category']),
         ]
-    
+
     def save(self, *args, **kwargs):
         """Generate unique transaction number"""
         if not self.transaction_number:
@@ -157,7 +157,7 @@ class Transaction(models.Model):
             last_transaction = Transaction.objects.filter(
                 transaction_number__startswith=f'TRX{year}'
             ).order_by('-created_at').first()
-            
+
             if last_transaction:
                 try:
                     last_num = int(last_transaction.transaction_number[-4:])
@@ -166,11 +166,11 @@ class Transaction(models.Model):
                     num = 1
             else:
                 num = 1
-            
+
             self.transaction_number = f'TRX{year}{num:04d}'
-        
+
         super().save(*args, **kwargs)
-    
+
     def __str__(self):
         return f"{self.transaction_number} - {self.amount} ({self.get_transaction_type_display()})"
 
@@ -189,32 +189,32 @@ class AccountingPeriod(models.Model):
     start_date = models.DateField()
     end_date = models.DateField()
     period_type = models.CharField(
-        max_length=20, 
+        max_length=20,
         choices=PERIOD_TYPE_CHOICES
     )
-    
+
     # Financial Summaries
     total_income = models.DecimalField(
-        max_digits=12, 
-        decimal_places=2, 
+        max_digits=12,
+        decimal_places=2,
         default=Decimal('0.00')
     )
     total_expenses = models.DecimalField(
-        max_digits=12, 
-        decimal_places=2, 
+        max_digits=12,
+        decimal_places=2,
         default=Decimal('0.00')
     )
     net_profit = models.DecimalField(
-        max_digits=12, 
-        decimal_places=2, 
+        max_digits=12,
+        decimal_places=2,
         default=Decimal('0.00')
     )
-    
+
     # Reconciliation Status
     is_closed = models.BooleanField(default=False)
     closed_at = models.DateTimeField(null=True, blank=True)
     closed_by_id = models.UUIDField(null=True, blank=True, help_text="User who closed this period")
-    
+
     class Meta:
         db_table = 'accounting_periods'
         verbose_name = 'Accounting Period'
@@ -226,10 +226,10 @@ class AccountingPeriod(models.Model):
             models.Index(fields=['tenant_id', 'start_date', 'end_date']),
             models.Index(fields=['tenant_id', 'is_closed']),
         ]
-    
+
     def __str__(self):
         return f"{self.name} ({self.start_date} - {self.end_date})"
-    
+
     def calculate_financial_summary(self):
         """
         Calculate total income, expenses, and net profit
@@ -240,22 +240,82 @@ class AccountingPeriod(models.Model):
             created_at__date__gte=self.start_date,
             created_at__date__lte=self.end_date
         )
-        
+
         # Calculate totals by transaction type
         self.total_income = transactions.filter(
             transaction_type='payment'
         ).aggregate(total=models.Sum('amount'))['total'] or Decimal('0.00')
-        
+
         self.total_expenses = transactions.filter(
             transaction_type='expense'
         ).aggregate(total=models.Sum('amount'))['total'] or Decimal('0.00')
-        
+
         # Calculate net profit
         self.net_profit = self.total_income - self.total_expenses
-        
+
         self.save()
         return {
             'total_income': self.total_income,
             'total_expenses': self.total_expenses,
             'net_profit': self.net_profit
         }
+
+
+class BillPayment(models.Model):
+    """Unified payment ledger entry for OPD and IPD bills."""
+
+    BILL_TYPE_CHOICES = [
+        ('opd', 'OPD'),
+        ('ipd', 'IPD'),
+    ]
+    PAYMENT_MODE_CHOICES = [
+        ('cash', 'Cash'),
+        ('card', 'Card'),
+        ('upi', 'UPI'),
+        ('bank', 'Bank Transfer'),
+        ('insurance', 'Insurance'),
+        ('cheque', 'Cheque'),
+        ('razorpay', 'Razorpay'),
+        ('multiple', 'Multiple'),
+        ('other', 'Other'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant_id = models.UUIDField(db_index=True)
+    bill_type = models.CharField(max_length=10, choices=BILL_TYPE_CHOICES)
+    opd_bill = models.ForeignKey(
+        'opd.OPDBill', null=True, blank=True, on_delete=models.SET_NULL, related_name='bill_payments'
+    )
+    ipd_bill = models.ForeignKey(
+        'ipd.IPDBilling', null=True, blank=True, on_delete=models.SET_NULL, related_name='bill_payments'
+    )
+    bill_number = models.CharField(max_length=60, blank=True)
+    patient_name = models.CharField(max_length=255, blank=True)
+    encounter_number = models.CharField(max_length=100, blank=True, help_text="Visit number (OPD) or Admission ID (IPD)")
+    amount = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        validators=[MinValueValidator(Decimal('0.01'))],
+    )
+    payment_mode = models.CharField(max_length=20, choices=PAYMENT_MODE_CHOICES, default='cash')
+    payment_date = models.DateField(default=date.today)
+    notes = models.TextField(blank=True)
+    recorded_by_user_id = models.UUIDField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "bill_payments"
+        verbose_name = "Bill Payment"
+        verbose_name_plural = "Bill Payments"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["tenant_id"], name="billpay_tenant_idx"),
+            models.Index(fields=["tenant_id", "bill_type"], name="billpay_tenant_type_idx"),
+            models.Index(fields=["tenant_id", "payment_date"], name="billpay_tenant_date_idx"),
+            models.Index(fields=["tenant_id", "payment_mode"], name="billpay_tenant_mode_idx"),
+            models.Index(fields=["opd_bill"], name="billpay_opd_bill_idx"),
+            models.Index(fields=["ipd_bill"], name="billpay_ipd_bill_idx"),
+        ]
+
+    def __str__(self):
+        return f"BillPayment {self.id} [{self.bill_type}] {self.amount}"

@@ -6,3 +6,4 @@ router = DefaultRouter()
 router.register(r"webhooks", TenantWebhookViewSet, basename="tenant-webhook")
 
 urlpatterns = router.urls
+

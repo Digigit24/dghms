@@ -19,7 +19,7 @@ class PatientVitalsCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = PatientVitals
         exclude = ['patient', 'recorded_by_user_id']
-    
+
     def validate(self, attrs):
         """Validate vital signs"""
         # Temperature validation (35-43°C)
@@ -29,11 +29,11 @@ class PatientVitalsCreateUpdateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({
                     'temperature': 'Temperature must be between 35°C and 43°C'
                 })
-        
+
         # Blood pressure validation
         systolic = attrs.get('blood_pressure_systolic')
         diastolic = attrs.get('blood_pressure_diastolic')
-        
+
         if systolic and diastolic:
             if systolic <= diastolic:
                 raise serializers.ValidationError({
@@ -47,7 +47,7 @@ class PatientVitalsCreateUpdateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({
                     'blood_pressure_diastolic': 'Diastolic must be between 40 and 150 mmHg'
                 })
-        
+
         # Heart rate validation (30-220 BPM)
         if attrs.get('heart_rate'):
             hr = attrs['heart_rate']
@@ -55,7 +55,7 @@ class PatientVitalsCreateUpdateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({
                     'heart_rate': 'Heart rate must be between 30 and 220 BPM'
                 })
-        
+
         # Oxygen saturation validation (70-100%)
         if attrs.get('oxygen_saturation'):
             spo2 = float(attrs['oxygen_saturation'])
@@ -63,7 +63,7 @@ class PatientVitalsCreateUpdateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({
                     'oxygen_saturation': 'Oxygen saturation must be between 70% and 100%'
                 })
-        
+
         return attrs
 
 
@@ -97,7 +97,7 @@ class PatientProfileListSerializer(serializers.ModelSerializer):
     full_name = serializers.ReadOnlyField()
     age = serializers.ReadOnlyField()
     is_insurance_valid = serializers.ReadOnlyField()
-    
+
     class Meta:
         model = PatientProfile
         fields = [
@@ -265,7 +265,7 @@ class PatientRegistrationSerializer(serializers.Serializer):
     """
     # User ID from SuperAdmin (optional for walk-ins)
     user_id = serializers.UUIDField(required=False, allow_null=True)
-    
+
     # Patient Profile fields (REQUIRED)
     first_name = serializers.CharField(max_length=100, required=True)
     last_name = serializers.CharField(max_length=100, required=True)
@@ -275,11 +275,11 @@ class PatientRegistrationSerializer(serializers.Serializer):
         choices=[('male', 'Male'), ('female', 'Female'), ('other', 'Other')],
         required=True
     )
-    
+
     # Contact (REQUIRED)
     mobile_primary = serializers.CharField(max_length=15, required=True)
     mobile_secondary = serializers.CharField(max_length=15, required=False, allow_blank=True)
-    
+
     # Address (REQUIRED)
     address_line1 = serializers.CharField(max_length=200, required=True)
     address_line2 = serializers.CharField(max_length=200, required=False, allow_blank=True)
@@ -287,7 +287,7 @@ class PatientRegistrationSerializer(serializers.Serializer):
     state = serializers.CharField(max_length=100, required=True)
     country = serializers.CharField(max_length=100, default='India')
     pincode = serializers.CharField(max_length=10, required=True)
-    
+
     # Medical Info (OPTIONAL)
     blood_group = serializers.ChoiceField(
         choices=['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'],
@@ -297,7 +297,7 @@ class PatientRegistrationSerializer(serializers.Serializer):
     )
     height = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)
     weight = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)
-    
+
     # Social Info (OPTIONAL)
     marital_status = serializers.ChoiceField(
         choices=[('single', 'Single'), ('married', 'Married'), ('divorced', 'Divorced'), ('widowed', 'Widowed')],
@@ -305,23 +305,23 @@ class PatientRegistrationSerializer(serializers.Serializer):
         required=False
     )
     occupation = serializers.CharField(max_length=100, required=False, allow_blank=True)
-    
+
     # Emergency Contact (REQUIRED)
     emergency_contact_name = serializers.CharField(max_length=100, required=True)
     emergency_contact_phone = serializers.CharField(max_length=15, required=True)
     emergency_contact_relation = serializers.CharField(max_length=50, required=True)
-    
+
     # Insurance (OPTIONAL)
     insurance_provider = serializers.CharField(max_length=200, required=False, allow_blank=True)
     insurance_policy_number = serializers.CharField(max_length=100, required=False, allow_blank=True)
     insurance_expiry_date = serializers.DateField(required=False, allow_null=True)
-    
+
     def validate_user_id(self, value):
         """Validate user_id (UUID from SuperAdmin)"""
         # Note: Uniqueness check is done in validate() method with tenant awareness
         # This method just validates the format
         return value
-    
+
     def validate_mobile_primary(self, value):
         """Validate mobile number format"""
         import re
@@ -331,20 +331,20 @@ class PatientRegistrationSerializer(serializers.Serializer):
                 'Phone number must be in format: +999999999. Up to 15 digits allowed.'
             )
         return value
-    
+
     def validate_date_of_birth(self, value):
         """Ensure date of birth is in the past"""
         import datetime
         if value > datetime.date.today():
             raise serializers.ValidationError('Date of birth cannot be in the future')
-        
+
         # Calculate age
         age = datetime.date.today().year - value.year
         if age > 150:
             raise serializers.ValidationError('Invalid date of birth - age would be over 150 years')
-        
+
         return value
-    
+
     def validate(self, attrs):
         """Cross-field validation"""
         # Note: tenant_id will be added by create() method from request context

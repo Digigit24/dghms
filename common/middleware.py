@@ -206,10 +206,13 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
         request.email = payload["email"]
         request.tenant_id = payload["tenant_id"]
         request.tenant_slug = payload["tenant_slug"]
-        request.is_super_admin = bool(payload["is_super_admin"])
+        request.roles = payload.get("roles", [])
+        # Treat jwt is_super_admin OR any admin role as a super-admin for permission bypass
+        _admin_roles = {"admin", "superadmin", "hospital_admin", "super_admin"}
+        _is_role_admin = bool(set(r.lower() for r in request.roles) & _admin_roles)
+        request.is_super_admin = bool(payload.get("is_super_admin", False)) or _is_role_admin
         request.permissions = payload["permissions"]
         request.enabled_modules = enabled_modules
-        request.roles = payload.get("roles", [])
         request.user_type = payload.get("user_type", "staff")
         request.is_patient = bool(payload.get("is_patient", False))
 
@@ -337,11 +340,11 @@ class ActivityLogMiddleware(MiddlewareMixin):
                 method=request.method,
                 path=path,
                 status_code=response.status_code,
-                ip_address=self._get_client_ip(request),
-                user_agent=request.META.get("HTTP_USER_AGENT", "")[:255],
+                ip_address=request.META.get("REMOTE_ADDR"),
+                user_agent=request.META.get("HTTP_USER_AGENT", ""),
             )
         except Exception as exc:
-            logger.warning(
+            logger.error(
                 "activity_log_enqueue_failed",
                 path=path,
                 error=str(exc),

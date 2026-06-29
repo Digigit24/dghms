@@ -46,19 +46,19 @@ class BaseService(models.Model):
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True, null=True)
     base_price = models.DecimalField(
-        max_digits=10, 
-        decimal_places=2, 
+        max_digits=10,
+        decimal_places=2,
         validators=[MinValueValidator(Decimal('0.00'))]
     )
     discounted_price = models.DecimalField(
-        max_digits=10, 
-        decimal_places=2, 
-        null=True, 
+        max_digits=10,
+        decimal_places=2,
+        null=True,
         blank=True,
         validators=[MinValueValidator(Decimal('0.00'))]
     )
     category = models.ForeignKey(
-        ServiceCategory, 
+        ServiceCategory,
         on_delete=models.PROTECT,
         related_name='%(class)s_services'
     )
@@ -109,13 +109,13 @@ class DiagnosticTest(BaseService):
     ]
 
     sample_type = models.CharField(
-        max_length=20, 
+        max_length=20,
         choices=SAMPLE_TYPE_CHOICES
     )
     is_home_collection = models.BooleanField(default=False)
     home_collection_fee = models.DecimalField(
-        max_digits=10, 
-        decimal_places=2, 
+        max_digits=10,
+        decimal_places=2,
         default=Decimal('0.00'),
         validators=[MinValueValidator(Decimal('0.00'))]
     )
@@ -124,7 +124,7 @@ class DiagnosticTest(BaseService):
         help_text="Turnaround time in hours"
     )
     reporting_type = models.CharField(
-        max_length=20, 
+        max_length=20,
         choices=REPORTING_TYPE_CHOICES,
         default='digital'
     )
@@ -150,19 +150,19 @@ class NursingCarePackage(BaseService):
     ]
 
     package_type = models.CharField(
-        max_length=20, 
+        max_length=20,
         choices=PACKAGE_TYPE_CHOICES
     )
     included_services = models.JSONField(
-        blank=True, 
-        null=True, 
+        blank=True,
+        null=True,
         help_text="JSON list of included services"
     )
     max_duration = models.PositiveIntegerField(
         help_text="Maximum duration in hours"
     )
     target_group = models.CharField(
-        max_length=20, 
+        max_length=20,
         choices=TARGET_GROUP_CHOICES,
         default='other'
     )
@@ -190,17 +190,17 @@ class HomeHealthcareService(BaseService):
     ]
 
     service_type = models.CharField(
-        max_length=50, 
+        max_length=50,
         choices=SERVICE_TYPE_CHOICES
     )
     staff_type_required = models.CharField(
-        max_length=50, 
+        max_length=50,
         choices=STAFF_TYPE_CHOICES
     )
     equipment_needed = models.TextField(blank=True, null=True)
     max_distance_km = models.DecimalField(
-        max_digits=5, 
-        decimal_places=2, 
+        max_digits=5,
+        decimal_places=2,
         default=Decimal('10.00')
     )
 

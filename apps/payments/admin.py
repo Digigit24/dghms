@@ -94,7 +94,7 @@ class TransactionAdmin(TenantModelAdmin):
             )
         }),
     )
-    
+
     def status_badge(self, obj):
         """Colorful status representation"""
         color_map = {
@@ -110,7 +110,7 @@ class TransactionAdmin(TenantModelAdmin):
             obj.get_transaction_type_display()
         )
     status_badge.short_description = "Transaction Type"
-    
+
     def get_queryset(self, request):
         """Optimize queryset with select_related"""
         return super().get_queryset(request).select_related(
@@ -165,14 +165,14 @@ class AccountingPeriodAdmin(TenantModelAdmin):
     )
 
     actions = ['calculate_financial_summary']
-    
+
     def calculate_financial_summary(self, request, queryset):
         """
         Action to recalculate financial summary for selected accounting periods
         """
         for period in queryset:
             period.calculate_financial_summary()
-        
+
         self.message_user(request, f"{queryset.count()} accounting periods updated.")
     calculate_financial_summary.short_description = "Recalculate Financial Summary"
 

@@ -3,11 +3,10 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 
-from common.drf_auth import HMSPermission, IsAuthenticated
+from common.drf_auth import HMSPermission
 from common.mixins import TenantViewSetMixin
-from django.db.models import Q, Count, Avg
+from django.db.models import Count, Avg
 from django.utils import timezone
-from django.db.models import F
 
 
 # OpenAPI/Swagger documentation
@@ -15,11 +14,11 @@ from drf_spectacular.utils import (
     extend_schema,
     extend_schema_view,
     OpenApiParameter,
-    OpenApiExample,
     OpenApiResponse
 )
 
 from .models import Appointment, AppointmentType
+from apps.opd.models import Visit
 from .serializers import (
     AppointmentListSerializer,
     AppointmentDetailSerializer,
@@ -78,14 +77,14 @@ class AppointmentTypeViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     permission_classes = [HMSPermission]
     hms_module = 'hospital'  # Appointment types are part of hospital config
 
-    # Custom action to permission mapping
+    # Maps to PERMISSION_SCHEMA hms.hospital actions: view, edit_config, create, edit, delete
     action_permission_map = {
-        'list': 'view_config',
-        'retrieve': 'view_config',
-        'create': 'manage_appointment_types',
-        'update': 'manage_appointment_types',
-        'partial_update': 'manage_appointment_types',
-        'destroy': 'manage_appointment_types',
+        'list': 'view',
+        'retrieve': 'view',
+        'create': 'create',
+        'update': 'edit',
+        'partial_update': 'edit',
+        'destroy': 'delete',
     }
 
 
@@ -103,7 +102,7 @@ class AppointmentTypeViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             OpenApiParameter(name='date_to', type=str, description='Appointments to date (YYYY-MM-DD)'),
             OpenApiParameter(name='status', type=str, description='Comma-separated status values'),
             OpenApiParameter(name='priority', type=str, description='Comma-separated priority values'),
-            
+
             OpenApiParameter(name='search', type=str, description='Search across complaint, symptoms, notes'),
         ],
         tags=['Appointments']
@@ -146,7 +145,8 @@ class AppointmentViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     permission_classes = [HMSPermission]
     hms_module = 'appointments'  # Maps to permissions.hms.appointments in JWT
 
-    # Custom action to permission mapping
+    # Maps to PERMISSION_SCHEMA hms.appointments actions:
+    # view, create, edit, delete, cancel, reschedule
     action_permission_map = {
         'list': 'view',
         'retrieve': 'view',
@@ -154,10 +154,10 @@ class AppointmentViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         'update': 'edit',
         'partial_update': 'edit',
         'destroy': 'delete',
-        'confirm': 'confirm',
+        'confirm': 'edit',        # confirming = editing status
         'cancel': 'cancel',
         'reschedule': 'reschedule',
-        'check_in': 'check_in',
+        'check_in': 'edit',       # check-in = status update
         'start': 'edit',
         'complete': 'edit',
         'today': 'view',
@@ -258,13 +258,13 @@ class AppointmentViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                 'success': False,
                 'error': f'Cannot check in {appointment.status} appointment'
             }, status=status.HTTP_400_BAD_REQUEST)
-        
+
         if appointment.visit:
             return Response({
                 'success': False,
                 'error': 'Patient already checked in'
             }, status=status.HTTP_400_BAD_REQUEST)
-        
+
         # Create Visit
         visit = Visit.objects.create(
             patient=appointment.patient,
@@ -274,18 +274,18 @@ class AppointmentViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             status='waiting',
             created_by=request.user
         )
-        
+
         # Update appointment
         appointment.visit = visit
         appointment.check_in_time = timezone.now()
         appointment.status = 'checked_in'
         appointment.save()
-        
+
         # Serialize response
         from apps.opd.serializers import VisitDetailSerializer
         visit_serializer = VisitDetailSerializer(visit)
         appt_serializer = self.get_serializer(appointment)
-        
+
         return Response({
             'success': True,
             'message': 'Patient checked in successfully',
@@ -340,7 +340,7 @@ class AppointmentViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             'message': 'Consultation completed successfully',
             'data': serializer.data
         })
-    
+
 
     @extend_schema(
         summary="Get Today's Appointments",
@@ -414,7 +414,7 @@ class AppointmentViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         avg_fee = Appointment.objects.aggregate(avg_fee=Avg('consultation_fee'))['avg_fee'] or 0
 
         # Paid vs Unpaid
-        
+
 
         return Response({
             'success': True,
@@ -423,6 +423,6 @@ class AppointmentViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                 'status_breakdown': status_breakdown,
                 'priority_breakdown': priority_breakdown,
                 'average_consultation_fee': round(float(avg_fee), 2),
-                
+
             }
         })

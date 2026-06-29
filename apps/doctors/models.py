@@ -1,7 +1,6 @@
 from django.db import models
 from django.core.exceptions import ValidationError
 from django.utils import timezone
-import uuid
 
 
 class Specialty(models.Model):
@@ -88,9 +87,9 @@ class DoctorProfile(models.Model):
     specialties = models.ManyToManyField(
         Specialty,
         related_name='doctors',
-    
-        blank=True, 
-       
+
+        blank=True,
+
     )
     years_of_experience = models.PositiveIntegerField(default=0,blank=True, null=True)
 
@@ -100,7 +99,7 @@ class DoctorProfile(models.Model):
         decimal_places=2,
         default=0,
         help_text="Consultation fee in INR",
-        blank=True, 
+        blank=True,
         null=True,
     )
     follow_up_fee = models.DecimalField(
@@ -113,7 +112,7 @@ class DoctorProfile(models.Model):
 
     consultation_duration = models.PositiveIntegerField(
         default=15,
-        
+
         help_text="Duration in minutes"
     )
     is_available_online = models.BooleanField(default=False)

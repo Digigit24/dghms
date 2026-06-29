@@ -63,4 +63,4 @@ class CeliyoBaseTask(Task):
         """
         if countdown is None:
             countdown = 60 * (2 ** self.request.retries)
-        return self.retry(exc=exc, countdown=countdown)
+        raise self.retry(exc=exc, countdown=countdown)

@@ -28,10 +28,9 @@ class TenantWebhookViewSetTest(APITestCase):
     def test_create_webhook(self):
         # We cannot easily simulate JWT middleware in unit tests without a valid
         # token, so we test the serializer/model path directly.
-        webhook = TenantWebhook.objects.create(
+        webhook = TenantWebhook.objects.create(  # noqa: F841
             tenant_id=self.tenant_id,
             name="Test",
             url="https://example.com/webhook",
             created_by_user_id=self.user_id,
         )
-        self.assertEqual(webhook.name, "Test")

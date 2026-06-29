@@ -223,79 +223,22 @@ HOSPITAL_SYSTEM_PICKLISTS = [
             {"label": "Topical", "value": "topical", "display_order": 5},
             {"label": "Inhalation", "value": "inhalation", "display_order": 6},
             {"label": "Sublingual (SL)", "value": "sublingual", "display_order": 7},
-            {"label": "Rectal (PR)", "value": "rectal", "display_order": 8},
-            {"label": "Nasal", "value": "nasal", "display_order": 9},
-            {"label": "Ophthalmic", "value": "ophthalmic", "display_order": 10},
-            {"label": "Otic (Ear)", "value": "otic", "display_order": 11},
         ],
     },
     {
-        "code": "drug_frequency",
-        "name": "Drug Frequency",
-        "description": "Medication dosing frequency abbreviations.",
+        "code": "investigations",
+        "name": "Investigations",
+        "description": "Common laboratory investigations. Tenants can add more items.",
         "is_system": True,
         "items": [
-            {"label": "OD – Once Daily", "value": "od", "display_order": 1},
-            {"label": "BD – Twice Daily", "value": "bd", "display_order": 2},
-            {"label": "TDS – Three Times Daily", "value": "tds", "display_order": 3},
-            {"label": "QID – Four Times Daily", "value": "qid", "display_order": 4},
-            {"label": "SOS – As Needed", "value": "sos", "display_order": 5},
-            {"label": "Stat – Immediately (Single Dose)", "value": "stat", "display_order": 6},
-            {"label": "HS – At Bedtime", "value": "hs", "display_order": 7},
-            {"label": "Weekly", "value": "weekly", "display_order": 8},
-            {"label": "Fortnightly", "value": "fortnightly", "display_order": 9},
-            {"label": "Monthly", "value": "monthly", "display_order": 10},
-        ],
-    },
-    {
-        "code": "drug_timing",
-        "name": "Drug Timing",
-        "description": "When to take medication relative to food.",
-        "is_system": True,
-        "items": [
-            {"label": "After Food", "value": "after_food", "display_order": 1},
-            {"label": "Before Food", "value": "before_food", "display_order": 2},
-            {"label": "With Food", "value": "with_food", "display_order": 3},
-            {"label": "Empty Stomach", "value": "empty_stomach", "display_order": 4},
-            {"label": "At Bedtime", "value": "at_bedtime", "display_order": 5},
-        ],
-    },
-    {
-        "code": "lab_investigations",
-        "name": "Lab Investigations",
-        "description": "Common laboratory and radiology tests. Tenants can add more items.",
-        "is_system": True,
-        "items": [
-            {"label": "Complete Blood Count (CBC)", "value": "cbc", "display_order": 1},
-            {"label": "CRP (C-Reactive Protein)", "value": "crp", "display_order": 2},
-            {"label": "ESR", "value": "esr", "display_order": 3},
-            {"label": "Urine Routine & Microscopy", "value": "urine_routine", "display_order": 4},
-            {"label": "Widal Test", "value": "widal", "display_order": 5},
-            {"label": "Blood Sugar Fasting (BSF)", "value": "bsf", "display_order": 6},
-            {"label": "Blood Sugar Random (BSR)", "value": "bsr", "display_order": 7},
-            {"label": "HbA1c", "value": "hba1c", "display_order": 8},
-            {"label": "Lipid Profile", "value": "lipid_profile", "display_order": 9},
-            {"label": "Liver Function Test (LFT)", "value": "lft", "display_order": 10},
-            {"label": "Kidney Function Test (KFT / RFT)", "value": "kft", "display_order": 11},
-            {"label": "Serum Electrolytes", "value": "electrolytes", "display_order": 12},
-            {"label": "Thyroid Profile (TSH)", "value": "tsh", "display_order": 13},
-            {"label": "ECG", "value": "ecg", "display_order": 14},
-            {"label": "2D Echocardiography", "value": "2d_echo", "display_order": 15},
-            {"label": "Chest X-Ray", "value": "xray_chest", "display_order": 16},
-            {"label": "USG Abdomen & Pelvis", "value": "usg_abdomen", "display_order": 17},
-            {"label": "CT Scan", "value": "ct_scan", "display_order": 18},
-            {"label": "MRI", "value": "mri", "display_order": 19},
-            {"label": "Blood Culture & Sensitivity", "value": "blood_culture", "display_order": 20},
-            {"label": "Urine Culture & Sensitivity", "value": "urine_culture", "display_order": 21},
-            {"label": "Sputum Culture & Sensitivity", "value": "sputum_culture", "display_order": 22},
-            {"label": "Dengue NS1 / IgM IgG", "value": "dengue", "display_order": 23},
-            {"label": "Malaria Antigen / Smear", "value": "malaria", "display_order": 24},
-            {"label": "COVID-19 RTPCR", "value": "covid_rtpcr", "display_order": 25},
-            {"label": "Prothrombin Time (PT / INR)", "value": "pt_inr", "display_order": 26},
-            {"label": "Coagulation Profile (APTT)", "value": "aptt", "display_order": 27},
-            {"label": "Serum Uric Acid", "value": "uric_acid", "display_order": 28},
-            {"label": "Serum Calcium", "value": "calcium", "display_order": 29},
-            {"label": "Vitamin D3", "value": "vit_d3", "display_order": 30},
+            {"label": "Dengue NS1 / IgM IgG", "value": "dengue", "display_order": 1},
+            {"label": "Malaria Antigen / Smear", "value": "malaria", "display_order": 2},
+            {"label": "COVID-19 RTPCR", "value": "covid_rtpcr", "display_order": 3},
+            {"label": "Prothrombin Time (PT / INR)", "value": "pt_inr", "display_order": 4},
+            {"label": "Coagulation Profile (APTT)", "value": "aptt", "display_order": 5},
+            {"label": "Serum Uric Acid", "value": "uric_acid", "display_order": 6},
+            {"label": "Serum Calcium", "value": "calcium", "display_order": 7},
+            {"label": "Vitamin D3", "value": "vit_d3", "display_order": 8},
         ],
     },
     {
@@ -322,6 +265,100 @@ HOSPITAL_SYSTEM_PICKLISTS = [
         ],
     },
 ]
+
+
+class Command(BaseCommand):
+    help = "Seed system clinical forms and picklists for a tenant."
+
+    def add_arguments(self, parser):
+        parser.add_argument("--tenant-id", type=str, required=True, help="UUID of the tenant.")
+        parser.add_argument("--user-id", type=str, default=None, help="UUID of the acting user.")
+
+    def handle(self, *args, **options):
+        from apps.clinical.models import (
+            ClinicalForm,
+            ClinicalFormField,
+            ClinicalFormSection,
+            ClinicalPicklist,
+            ClinicalPicklistItem,
+        )
+
+        tenant_id = uuid.UUID(options["tenant_id"])
+        user_id = uuid.UUID(options["user_id"]) if options.get("user_id") else None
+
+        picklist_map = {}
+        for pl_def in SYSTEM_PICKLISTS:
+            pl, _ = ClinicalPicklist.objects.get_or_create(
+                tenant_id=tenant_id,
+                code=pl_def["code"],
+                defaults={
+                    "name": pl_def["name"],
+                    "description": pl_def.get("description", ""),
+                    "is_system": pl_def.get("is_system", True),
+                    "created_by_user_id": user_id,
+                },
+            )
+            picklist_map[pl_def["code"]] = pl
+            for item_def in pl_def.get("items", []):
+                ClinicalPicklistItem.objects.get_or_create(
+                    tenant_id=tenant_id,
+                    picklist=pl,
+                    value=item_def["value"],
+                    defaults={
+                        "label": item_def["label"],
+                        "display_order": item_def.get("display_order", 0),
+                        "created_by_user_id": user_id,
+                    },
+                )
+
+        form_def = SYSTEM_VITALS_FORM
+        form, _ = ClinicalForm.objects.get_or_create(
+            tenant_id=tenant_id,
+            code=form_def["code"],
+            defaults={
+                "name": form_def["name"],
+                "description": form_def.get("description", ""),
+                "version": form_def.get("version", 1),
+                "status": form_def.get("status", "published"),
+                "is_system": form_def.get("is_system", True),
+                "entity_type": form_def.get("entity_type", "generic"),
+                "config": form_def.get("config", {}),
+                "created_by_user_id": user_id,
+            },
+        )
+        for section_def in form_def.get("sections", []):
+            section, _ = ClinicalFormSection.objects.get_or_create(
+                tenant_id=tenant_id,
+                form=form,
+                code=section_def["code"],
+                defaults={
+                    "title": section_def["title"],
+                    "description": section_def.get("description", ""),
+                    "display_order": section_def.get("display_order", 0),
+                    "is_collapsed": section_def.get("is_collapsed", False),
+                    "config": section_def.get("config", {}),
+                    "created_by_user_id": user_id,
+                },
+            )
+            for field_def in section_def.get("fields", []):
+                picklist = picklist_map.get(field_def.get("config", {}).get("picklist_code"))
+                ClinicalFormField.objects.get_or_create(
+                    tenant_id=tenant_id,
+                    section=section,
+                    field_key=field_def["field_key"],
+                    defaults={
+                        "field_type": field_def["field_type"],
+                        "label": field_def["label"],
+                        "display_order": field_def.get("display_order", 0),
+                        "is_required": field_def.get("is_required", False),
+                        "is_read_only": field_def.get("is_read_only", False),
+                        "config": field_def.get("config", {}),
+                        "picklist": picklist,
+                        "created_by_user_id": user_id,
+                    },
+                )
+
+        self.stdout.write(self.style.SUCCESS("System forms seeded successfully."))
 
 # Form definitions are large; load them directly from the migration file to avoid
 # duplication. The filename starts with a digit so we use spec_from_file_location.

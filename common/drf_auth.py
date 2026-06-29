@@ -301,15 +301,12 @@ class IsAuthenticated(permissions.BasePermission):
         return request.user.is_authenticated
 
     def authenticate_header(self, request):
-        """Return authentication header for 401 responses."""
+        """Return authentication header value."""
         return 'Bearer realm="api"'
 
 
 class AllowAny(permissions.BasePermission):
-    """
-    Permission class that allows unrestricted access.
-    Use sparingly and only for truly public endpoints.
-    """
+    """Permission class that allows unrestricted access."""
 
     def has_permission(self, request, view):
         """Allow any access."""

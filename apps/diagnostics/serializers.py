@@ -63,19 +63,19 @@ class RequisitionSerializer(TenantMixin, serializers.ModelSerializer):
     procedure_orders = ProcedureOrderSerializer(many=True, read_only=True)
     package_orders = PackageOrderSerializer(many=True, read_only=True)
     patient_name = serializers.CharField(source='patient.user.get_full_name', read_only=True)
-    
+
     # --- Option 1: Smart Payload Fields ---
     encounter_type = serializers.CharField(
-        write_only=True, 
-        required=False, 
+        write_only=True,
+        required=False,
         help_text="String representation of model, e.g. 'opd.visit' or 'ipd.admission'"
     )
     encounter_id = serializers.IntegerField(
-        write_only=True, 
+        write_only=True,
         required=False,
         help_text="ID of the encounter object"
     )
-    
+
     # --- Nested Writes for Orders ---
     investigation_ids = serializers.ListField(
         child=serializers.IntegerField(),
@@ -102,22 +102,22 @@ class RequisitionSerializer(TenantMixin, serializers.ModelSerializer):
                 app_label, model_name = encounter_type_str.split('.')
                 content_type = ContentType.objects.get(app_label=app_label, model=model_name)
                 attrs['content_type'] = content_type
-                
+
                 if encounter_id:
                     attrs['object_id'] = encounter_id
                 else:
                     raise serializers.ValidationError({"encounter_id": "This field is required when encounter_type is provided."})
-                    
+
                 # Clean up write-only fields so they aren't passed to create() directly if model doesn't have them
                 # But we might need to pop them in create() instead if we want them there.
                 # Actually, ModelSerializer's create() only uses fields in validated_data that match model fields.
                 # We should ensure 'content_type' and 'object_id' are in validated_data.
-                
+
             except ValueError:
                 raise serializers.ValidationError({"encounter_type": "Invalid format. Use 'app_label.model_name' (e.g., 'opd.visit')."})
             except ContentType.DoesNotExist:
                 raise serializers.ValidationError({"encounter_type": f"Model '{encounter_type_str}' not found."})
-        
+
         return attrs
 
     def create(self, validated_data):
@@ -125,17 +125,17 @@ class RequisitionSerializer(TenantMixin, serializers.ModelSerializer):
         validated_data.pop('encounter_type', None)
         validated_data.pop('encounter_id', None)
         investigation_ids = validated_data.pop('investigation_ids', [])
-        
+
         # Create the Requisition
         requisition = super().create(validated_data)
-        
+
         # Create Nested Orders
         if investigation_ids:
             orders_to_create = []
             # Fetch investigations in bulk to get prices
             investigations = Investigation.objects.filter(id__in=investigation_ids)
             inv_map = {inv.id: inv for inv in investigations}
-            
+
             for inv_id in investigation_ids:
                 if inv_id in inv_map:
                     inv = inv_map[inv_id]
@@ -148,7 +148,7 @@ class RequisitionSerializer(TenantMixin, serializers.ModelSerializer):
                             status='pending'
                         )
                     )
-            
+
             if orders_to_create:
                 DiagnosticOrder.objects.bulk_create(orders_to_create)
 

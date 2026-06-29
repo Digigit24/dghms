@@ -6,7 +6,7 @@ from .models import (
     Cart,
     CartItem,
     PharmacyOrder,
-    PharmacyOrderItem
+    PharmacyOrderItem,
 )
 
 
@@ -190,3 +190,36 @@ class PharmacyOrderSerializer(TenantMixin, serializers.ModelSerializer):
         if not value or not value.strip():
             raise serializers.ValidationError("Billing address is required")
         return value
+
+
+class PrescriptionItemSerializer(TenantMixin, serializers.ModelSerializer):
+    """Serializer for prescription line items."""
+
+    inventory_item_name = serializers.SerializerMethodField()
+
+    class Meta:
+        from apps.pharmacy.models import PrescriptionItem
+        model = PrescriptionItem
+        fields = [
+            "id", "prescription", "drug_name", "dosage", "frequency",
+            "duration", "quantity", "instructions", "created_at", "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+    def get_inventory_item_name(self, obj):
+        return obj.drug_name
+
+
+class PrescriptionSerializer(TenantMixin, serializers.ModelSerializer):
+    """Serializer for Prescription model."""
+
+    items = PrescriptionItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        from apps.pharmacy.models import Prescription
+        model = Prescription
+        fields = [
+            "id", "tenant_id", "visit_id", "doctor_user_id", "status",
+            "notes", "items", "created_at", "updated_at",
+        ]
+        read_only_fields = ["id", "tenant_id", "created_at", "updated_at"]

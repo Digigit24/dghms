@@ -9,7 +9,7 @@ env/
 
 # VS Code
 .vscode/
-
+venv_linux
 # Logs
 *.log
 

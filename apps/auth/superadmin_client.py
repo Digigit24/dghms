@@ -497,6 +497,7 @@ def get_superadmin_client(request) -> SuperAdminClient:
     if not access_token:
         auth_header = request.META.get('HTTP_AUTHORIZATION', '')
         if auth_header.startswith('Bearer '):
-            access_token = auth_header.split(' ')[1]
+            access_token = auth_header.split(' ', 1)[1]
 
     return SuperAdminClient(access_token=access_token)
+

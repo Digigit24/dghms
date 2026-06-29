@@ -146,8 +146,8 @@ def _attempt_delivery(self, tenant_id: str, delivery_id: int):
         raise self.retry(countdown=countdown)
 
     logger.error(
-        "webhook_delivery_failed",
+        "webhook_delivery_exhausted",
         delivery_id=delivery.id,
         webhook_id=webhook.id,
-        attempts=delivery.attempt_count,
+        attempt=delivery.attempt_count,
     )

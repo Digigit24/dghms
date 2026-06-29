@@ -8,7 +8,6 @@ from .models import (
     ClinicalFieldValue,
     ClinicalForm,
     ClinicalFormField,
-    ClinicalFormGenerationRequest,
     ClinicalFormSection,
     ClinicalPicklist,
     ClinicalPicklistItem,
@@ -172,35 +171,7 @@ class ClinicalRecordAuditLogAdmin(TenantModelAdmin):
     readonly_fields = ("tenant_id", "created_at", "created_by_user_id")
 
     def has_change_permission(self, request, obj=None):
-        # Audit logs are append-only.
         return False
 
     def has_delete_permission(self, request, obj=None):
-        # Audit logs are append-only.
         return False
-
-
-@admin.register(ClinicalFormGenerationRequest, site=hms_admin_site)
-class ClinicalFormGenerationRequestAdmin(TenantModelAdmin):
-    list_display = (
-        "id",
-        "entity_type",
-        "status",
-        "applied_form",
-        "tenant_id",
-        "created_at",
-    )
-    list_filter = ("status", "entity_type")
-    search_fields = ("prompt", "error_message")
-    readonly_fields = (
-        "tenant_id",
-        "created_at",
-        "updated_at",
-        "created_by_user_id",
-        "applied_form",
-    )
-    fieldsets = (
-        ("Prompt", {"fields": ("prompt", "extra_instructions", "entity_type")}),
-        ("Result", {"fields": ("status", "generated_draft", "applied_form", "error_message")}),
-        ("System", {"fields": ("tenant_id", "created_by_user_id", "created_at", "updated_at")}),
-    )

@@ -30,73 +30,73 @@ class AppointmentListSerializer(serializers.ModelSerializer):
     patient = PatientProfileListSerializer(read_only=True)
     doctor = DoctorProfileListSerializer(read_only=True)
     appointment_type = serializers.StringRelatedField()
-    
+
     status_display = serializers.CharField(
-        source='get_status_display', 
+        source='get_status_display',
         read_only=True
     )
     priority_display = serializers.CharField(
-        source='get_priority_display', 
+        source='get_priority_display',
         read_only=True
     )
-    
-    
+
+
     class Meta:
         model = Appointment
         fields = [
-            'id', 'appointment_id', 'patient', 'doctor', 
-            'appointment_type', 'appointment_date', 'appointment_time', 
+            'id', 'appointment_id', 'patient', 'doctor',
+            'appointment_type', 'appointment_date', 'appointment_time',
             'status', 'status_display', 'priority', 'priority_display',
             'consultation_fee', 'is_follow_up',
-            'visit', 
-           
-            'check_in_time', 
+            'visit',
+
+            'check_in_time',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['check_in_time']
-    
+
 
 class AppointmentDetailSerializer(serializers.ModelSerializer):
     """Detail view serializer for appointments"""
     patient = PatientProfileListSerializer(read_only=True)
     doctor = DoctorProfileListSerializer(read_only=True)
     appointment_type = AppointmentTypeSerializer(read_only=True)  # Changed from StringRelatedField
-    
+
     status_display = serializers.CharField(
-        source='get_status_display', 
+        source='get_status_display',
         read_only=True
     )
     priority_display = serializers.CharField(
-        source='get_priority_display', 
+        source='get_priority_display',
         read_only=True
     )
-    
+
     created_by_name = serializers.SerializerMethodField()
     cancelled_by_name = serializers.SerializerMethodField()
     approved_by_name = serializers.SerializerMethodField()
     visit_number = serializers.CharField(source='visit.visit_number', read_only=True)
-    
+
     def get_created_by_name(self, obj):
         """Get created by name - placeholder since we don't have user model"""
         return f"User {obj.created_by_id}" if obj.created_by_id else None
-    
+
     def get_cancelled_by_name(self, obj):
         """Get cancelled by name - placeholder since we don't have user model"""
         return f"User {obj.cancelled_by_id}" if obj.cancelled_by_id else None
-    
+
     def get_approved_by_name(self, obj):
         """Get approved by name - placeholder since we don't have user model"""
         return f"User {obj.approved_by_id}" if obj.approved_by_id else None
-    
+
     class Meta:
         model = Appointment
         fields = '__all__'  # Changed from 'exclude'
         read_only_fields = [
-            'id', 'appointment_id', 
+            'id', 'appointment_id',
             'created_at', 'updated_at',
-            'checked_in_at', 'actual_start_time', 
-            'visit', 
-            'visit_number', 
+            'checked_in_at', 'actual_start_time',
+            'visit',
+            'visit_number',
             'check_in_time',
             'actual_end_time', 'waiting_time_minutes',
             'cancelled_at', 'approved_at'
@@ -128,7 +128,7 @@ class AppointmentCreateUpdateSerializer(serializers.ModelSerializer):
             'original_appointment',
             'created_by_id', 'cancelled_by_id', 'approved_by_id'
         ]
-    
+
     def validate(self, attrs):
         """Perform additional validation"""
         # Validate patient
@@ -138,7 +138,7 @@ class AppointmentCreateUpdateSerializer(serializers.ModelSerializer):
             attrs['patient'] = patient
         except PatientProfile.DoesNotExist:
             raise serializers.ValidationError({'patient_id': 'Invalid patient ID'})
-        
+
         # Validate doctor
         try:
             from apps.doctors.models import DoctorProfile
@@ -146,7 +146,7 @@ class AppointmentCreateUpdateSerializer(serializers.ModelSerializer):
             attrs['doctor'] = doctor
         except DoctorProfile.DoesNotExist:
             raise serializers.ValidationError({'doctor_id': 'Invalid doctor ID'})
-        
+
         # Validate appointment type (optional)
         appointment_type_id = attrs.get('appointment_type_id')
         if appointment_type_id:
@@ -157,7 +157,7 @@ class AppointmentCreateUpdateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({'appointment_type_id': 'Invalid appointment type ID'})
         else:
             attrs['appointment_type'] = None
-        
+
         # Validate original appointment if follow-up
         if attrs.get('is_follow_up'):
             if not attrs.get('original_appointment_id'):
@@ -171,9 +171,9 @@ class AppointmentCreateUpdateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({
                     'original_appointment_id': 'Invalid original appointment ID'
                 })
-        
+
         return attrs
-    
+
     def create(self, validated_data):
         """Custom create method to set creator"""
         request = self.context.get('request')
@@ -190,7 +190,7 @@ class AppointmentCreateUpdateSerializer(serializers.ModelSerializer):
 
         # Note: tenant_id is automatically set by TenantViewSetMixin.perform_create()
         return super().create(validated_data)
-    
+
     def update(self, instance, validated_data):
         """Custom update method"""
         # Remove write-only fields and prevent tenant_id change

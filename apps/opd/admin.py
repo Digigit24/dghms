@@ -93,7 +93,7 @@ class VisitAdmin(TenantModelAdmin):
             )
         }),
     )
-    
+
     def payment_status_badge(self, obj):
         """Display payment status with color badge."""
         colors = {
@@ -194,7 +194,7 @@ class OPDBillAdmin(TenantModelAdmin):
             )
         }),
     )
-    
+
     def payment_status_badge(self, obj):
         """Display payment status with color badge."""
         colors = {
@@ -263,7 +263,7 @@ class ProcedureMasterAdmin(TenantModelAdmin):
             )
         }),
     )
-    
+
     def is_active_badge(self, obj):
         """Display active status with badge."""
         return format_html(
@@ -331,7 +331,7 @@ class ProcedurePackageAdmin(TenantModelAdmin):
             )
         }),
     )
-    
+
     def savings_display(self, obj):
         """Display savings amount and percentage."""
         return format_html(
@@ -340,7 +340,7 @@ class ProcedurePackageAdmin(TenantModelAdmin):
             round(obj.discount_percent, 2)
         )
     savings_display.short_description = 'Savings'
-    
+
     def is_active_badge(self, obj):
         """Display active status with badge."""
         return format_html(
@@ -421,7 +421,7 @@ class ClinicalNoteAdmin(TenantModelAdmin):
             )
         }),
     )
-    
+
     def diagnosis_short(self, obj):
         """Display truncated diagnosis."""
         if obj.diagnosis:
@@ -503,18 +503,18 @@ class VisitFindingAdmin(TenantModelAdmin):
             )
         }),
     )
-    
+
     def bp_display(self, obj):
         """Display formatted blood pressure."""
         return obj.blood_pressure or '-'
     bp_display.short_description = 'BP'
-    
+
     def bmi_category_display(self, obj):
         """Display BMI category with color."""
         category = obj.bmi_category
         if not category:
             return '-'
-        
+
         colors = {
             'Underweight': 'orange',
             'Normal': 'green',
@@ -572,7 +572,7 @@ class VisitAttachmentAdmin(TenantModelAdmin):
             )
         }),
     )
-    
+
     def file_size_display(self, obj):
         """Display file size."""
         return obj.get_file_size() or '-'

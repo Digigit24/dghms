@@ -6,18 +6,17 @@ from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
-from django.db.models import ExpressionWrapper, F, IntegerField, DateField, Value, Count, Q, Avg, Sum
+from django.db.models import IntegerField, Count, Q, Avg, Sum
 from django.db.models.expressions import RawSQL
-from django.db.models.functions import Coalesce, Cast
 from common.mixins import TenantViewSetMixin
+from common.cache import CeliyoCache
 from common.drf_auth import HMSPermission
 from common.responses import error_response, action_response
 from .models import Ward, Bed, Admission, BedTransfer, IPDBilling, IPDBillItem
 from .serializers import (
     WardSerializer, BedSerializer, BedListSerializer,
     AdmissionSerializer, AdmissionListSerializer,
-    BedTransferSerializer, IPDBillingSerializer, IPDBillingListSerializer,
-    IPDBillItemSerializer
+    BedTransferSerializer, IPDBillingSerializer, IPDBillingListSerializer
 )
 
 
@@ -70,7 +69,7 @@ class BedViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
-from .filters import AdmissionFilter
+from .filters import AdmissionFilter  # noqa: E402
 
 class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """ViewSet for IPD Admission management."""
@@ -119,6 +118,11 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             tenant_id=self.request.tenant_id,
             created_by_user_id=self.request.user_id
         )
+        CeliyoCache().delete_pattern(f"ipd:active:{self.request.tenant_id}")
+
+    def perform_update(self, serializer):
+        super().perform_update(serializer)
+        CeliyoCache().delete_pattern(f"ipd:active:{self.request.tenant_id}")
 
     def _parse_date_range(self, request):
         today = datetime.date.today()
@@ -183,7 +187,6 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         If not provided, defaults to current time.
         """
         from django.utils import timezone
-        from rest_framework.exceptions import ValidationError as DRFValidationError
 
         admission = self.get_object()
 
@@ -261,6 +264,14 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
         date_from_str = request.query_params.get('date_from')
         date_to_str   = request.query_params.get('date_to')
+
+        # Cache when no date params given (all-time + live bed stats)
+        _use_cache = not date_from_str and not date_to_str
+        if _use_cache:
+            cache = CeliyoCache()
+            cached = cache.get(f"ipd:active:{request.tenant_id}")
+            if cached is not None:
+                return Response(cached)
         date_from = _parse(date_from_str)
         date_to   = _parse(date_to_str)
 
@@ -312,7 +323,7 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         available_beds = bed_agg['available_beds'] or 0
         occupancy_rate = round(occupied_beds / total_beds * 100, 1) if total_beds > 0 else 0
 
-        return Response({
+        result = {
             'success': True,
             'date_from': str(date_from) if date_from else None,
             'date_to':   str(date_to)   if date_to   else None,
@@ -334,7 +345,10 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                     .order_by('-count')
                 ),
             }
-        })
+        }
+        if _use_cache:
+            CeliyoCache().set(f"ipd:active:{request.tenant_id}", result, ttl=120)
+        return Response(result)
 
     @action(detail=False, methods=['get'])
     def doctor_stats(self, request):
@@ -449,7 +463,7 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
         # Check permission for the specific admission object
         self.check_object_permissions(request, admission)
-        
+
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
@@ -474,10 +488,11 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def add_payment(self, request, pk=None):
-        """Add a payment to the bill."""
+        """Add a payment to the bill and log to the unified BillPayment ledger."""
         billing = self.get_object()
         amount = request.data.get('amount')
         payment_mode = request.data.get('payment_mode', 'cash')
+        notes = request.data.get('notes', '')
 
         if not amount:
             return error_response("AMOUNT_REQUIRED", "Amount is required.", status=400)
@@ -493,6 +508,32 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         billing.received_amount += amount
         billing.payment_mode = payment_mode
         billing.save()
+
+        # Log to unified BillPayment ledger (non-blocking — failure won't rollback the payment)
+        try:
+            from apps.payments.models import BillPayment
+            patient_name = ''
+            encounter_number = ''
+            try:
+                patient_name = billing.admission.patient.full_name if billing.admission and billing.admission.patient else ''
+                encounter_number = billing.admission.admission_id if billing.admission else ''
+            except Exception:
+                pass
+
+            BillPayment.objects.create(
+                tenant_id=request.tenant_id,
+                bill_type='ipd',
+                ipd_bill=billing,
+                bill_number=billing.bill_number or str(billing.id),
+                patient_name=patient_name,
+                encounter_number=encounter_number,
+                amount=amount,
+                payment_mode=payment_mode,
+                notes=notes,
+                recorded_by_user_id=request.user_id,
+            )
+        except Exception:
+            pass  # Never let ledger failure break the payment
 
         serializer = self.get_serializer(billing)
         return action_response("Payment recorded successfully.", data=serializer.data)
@@ -652,55 +693,24 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
             # Process PanchakarmaOrders
             panchakarma_orders = PanchakarmaOrder.objects.filter(
-                tenant_id=request.tenant_id,
-                content_type=admission_ct,
-                object_id=admission.pk,
-                bill_item_content_type__isnull=True
-            ).select_related('therapy')
-
+                admission=admission,
+                is_billed=False
+            ).select_related()
             for order in panchakarma_orders:
-                item = IPDBillItem.objects.create(
-                    tenant_id=request.tenant_id,
-                    billing=billing,
-                    item_name=order.therapy.name,
-                    source='Therapy',
-                    quantity=1,
-                    unit_price=order.therapy.base_charge,
-                    system_calculated_price=order.therapy.base_charge,
-                    origin_content_type=ContentType.objects.get_for_model(order),
-                    origin_object_id=order.pk,
-                    notes="Therapy session"
-                )
-                created_items.append(item)
-                order.bill_item_link = item
-                order.save(update_fields=['bill_item_content_type', 'bill_item_object_id'])
+                order.is_billed = True
                 updated_orders.append(order)
 
-            # Update bed charges
-            billing.add_bed_charges()
-
-        return Response({
-            'success': True,
-            'message': f'Synced {len(created_items)} clinical charges to billing',
-            'created_items': len(created_items),
-            'updated_orders': len(updated_orders),
-            'items': IPDBillItemSerializer(created_items, many=True).data
-        })
+        return Response({"status": "ok"})
 
 
 class IPDBillItemViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
-    """ViewSet for IPD Bill Items management."""
+    """ViewSet for IPD bill line items."""
 
-    queryset = IPDBillItem.objects.select_related('bill')
-    serializer_class = IPDBillItemSerializer
-    hms_module = 'ipd'
+    from .models import IPDBillItem
+    queryset = IPDBillItem.objects.all()
     permission_classes = [HMSPermission]
+    hms_module = 'ipd'
 
-    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ['bill', 'source']
-    ordering_fields = ['created_at']
-    ordering = ['bill', 'source', 'id']
-
-    def perform_create(self, serializer):
-        """Set tenant_id automatically."""
-        serializer.save(tenant_id=self.request.tenant_id)
+    def get_serializer_class(self):
+        from .serializers import IPDBillingSerializer
+        return IPDBillingSerializer

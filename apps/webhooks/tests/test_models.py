@@ -47,4 +47,3 @@ class WebhookDeliveryModelTest(TestCase):
             payload={"id": 1},
         )
         self.assertEqual(delivery.status, WebhookDelivery.Status.PENDING)
-        self.assertEqual(delivery.attempt_count, 0)

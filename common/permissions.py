@@ -269,20 +269,3 @@ class PermissionRequiredMixin:
 
             raise PermissionDenied("You don't have permission to perform this action")
 
-    def check_object_permissions(self, request, obj):
-        super().check_object_permissions(request, obj)
-        if self.action in ["update", "partial_update", "destroy"]:
-            permission_key = self.permission_map.get(self.action)
-            if permission_key:
-                owner_id = getattr(obj, "owner_user_id", None)
-                if not check_permission(request, permission_key, owner_id):
-                    from rest_framework.exceptions import PermissionDenied
-
-                    raise PermissionDenied("You don't have permission to modify this resource")
-
-
-def has_module_access(request, module_name):
-    """Check if the user's JWT lists ``module_name`` in enabled_modules."""
-    if not hasattr(request, "enabled_modules"):
-        return False
-    return module_name in request.enabled_modules

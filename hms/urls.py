@@ -1,6 +1,4 @@
 from django.urls import path, include
-from django.conf import settings
-from django.conf.urls.static import static
 from django.views.generic import RedirectView
 
 # Import custom HMS admin site
@@ -50,22 +48,24 @@ urlpatterns = [
     path('api/clinical/', include('apps.clinical.urls')),
     path('api/webhooks/', include('apps.webhooks.urls')),
 
+    # Inventory Management
+    path('api/inventory/', include('apps.inventory.urls')),
+
     # Nuvi API (No authentication required)
     path('api/', include('apps.nuviapi.urls')),
 
     # Nakshatra API (No authentication required)
     path('api/', include('apps.nakshatra_api.urls')),
-    
+
     # ✅ API Documentation endpoints
     # OpenAPI schema
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
-    
+
     # Swagger UI (Interactive documentation)
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
-    
+
     # ReDoc UI (Alternative documentation)
     path('api/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
 ]
 
-# Serve media files (Django handles this; configure Nginx to proxy /media/ if needed in production)
-urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+# Serve media files (Django handles this; configure Nginx to proxy /media/ if needed i

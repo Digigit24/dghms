@@ -17,3 +17,4 @@ class WebhookDeliveryAdmin(TenantModelAdmin):
 
 hms_admin_site.register(TenantWebhook, TenantWebhookAdmin)
 hms_admin_site.register(WebhookDelivery, WebhookDeliveryAdmin)
+

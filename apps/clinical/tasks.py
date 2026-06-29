@@ -66,4 +66,4 @@ def create_clinical_audit_log_task(
             user_id=user_id,
             error=str(exc),
         )
-        raise self.apply_retry(exc) from exc
+        raise self.retry(exc=exc)

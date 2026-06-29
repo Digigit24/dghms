@@ -1,0 +1,21 @@
+[
+  { "code": "patients.view", "label": "View Patients" },
+  { "code": "patients.create", "label": "Create Patients" },
+  { "code": "patients.edit", "label": "Edit Patients" },
+  { "code": "opd.view", "label": "View OPD" },
+  { "code": "opd.create", "label": "Create OPD Visit" },
+  { "code": "opd.manage", "label": "Manage OPD" },
+  { "code": "ipd.view", "label": "View IPD" },
+  { "code": "ipd.manage", "label": "Manage IPD" },
+  { "code": "clinical.view_record", "label": "View Clinical Records" },
+  { "code": "clinical.create_record", "label": "Create Clinical Records" },
+  { "code": "clinical.manage_forms", "label": "Manage Clinical Forms" },
+  { "code": "inventory.view", "label": "View Inventory" },
+  { "code": "inventory.manage", "label": "Manage Inventory" },
+  { "code": "pharmacy.view_prescriptions", "label": "View Prescriptions" },
+  { "code": "pharmacy.dispense", "label": "Dispense Medicines" },
+  { "code": "billing.view", "label": "View Billing" },
+  { "code": "billing.create", "label": "Create Bills" },
+  { "code": "billing.view_reports", "label": "View Billing Reports" },
+  { "code": "settings.manage", "label": "Manage Settings" }
+]

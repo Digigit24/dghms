@@ -1,6 +1,6 @@
 # ipd/models.py
 from django.db import models, transaction, IntegrityError, connection
-from django.contrib.contenttypes.fields import GenericRelation, GenericForeignKey
+from django.contrib.contenttypes.fields import GenericRelation
 from django.contrib.contenttypes.models import ContentType
 from django.core.validators import MinValueValidator, MaxValueValidator
 from decimal import Decimal
@@ -835,36 +835,100 @@ class IPDBilling(models.Model):
             self.payment_details = details
         self.save()
 
+    def get_bed_day_info(self):
+        """
+        Returns bed day tracking info for this admission:
+          - total_los: full length of stay (days)
+          - already_billed_days: days billed in OTHER bills for this admission
+          - remaining_days: unbilled days available for this bill to charge
+          - this_bill_days: bed days currently in this bill's bed item (0 if none)
+        """
+        if not self.admission.bed:
+            return {'total_los': 0, 'already_billed_days': 0, 'remaining_days': 0, 'this_bill_days': 0}
+
+        if self.admission.discharge_date:
+            delta = self.admission.discharge_date - self.admission.admission_date
+        else:
+            delta = timezone.now() - self.admission.admission_date
+
+        total_los = max(1, delta.days if delta.days > 0 else 1)
+
+        from django.db.models import Sum as DSum
+        admission_ct = ContentType.objects.get_for_model(self.admission)
+
+        # Days billed in OTHER bills for this admission
+        already_billed = (
+            IPDBillItem.objects
+            .filter(
+                bill__admission=self.admission,
+                source='Bed',
+                origin_content_type=admission_ct,
+                origin_object_id=self.admission.pk,
+            )
+            .exclude(bill=self)
+            .aggregate(total=DSum('quantity'))['total'] or 0
+        )
+
+        # Days in THIS bill's bed item
+        try:
+            this_item = IPDBillItem.objects.get(
+                bill=self,
+                source='Bed',
+                origin_content_type=admission_ct,
+                origin_object_id=self.admission.pk,
+            )
+            this_bill_days = int(this_item.quantity)
+        except IPDBillItem.DoesNotExist:
+            this_bill_days = 0
+
+        remaining_days = max(0, total_los - int(already_billed))
+
+        return {
+            'total_los': total_los,
+            'already_billed_days': int(already_billed),
+            'remaining_days': remaining_days,
+            'this_bill_days': this_bill_days,
+        }
+
     def add_bed_charges(self):
         """
         Calculate and add bed charges based on length of stay.
 
+        Only bills the REMAINING unbilled days for this admission — days already
+        billed in other bills for the same admission are excluded.
+
         Automatically creates/updates IPDBillItem with:
         - Proper calculation: (discharge_date or current_date) - admission_date
-        - Minimum 1 day charge
+        - Minimum 1 day total charge across all bills
         - Links to Admission via origin_order GFK
         - Sets system_calculated_price for manual override tracking
         """
         if not self.admission.bed:
             return
 
-        # Calculate length of stay
-        if self.admission.discharge_date:
-            delta = self.admission.discharge_date - self.admission.admission_date
-        else:
-            delta = timezone.now() - self.admission.admission_date
-
-        # Minimum 1 day, otherwise round up to next day
-        length_of_stay = max(1, delta.days if delta.days > 0 else 1)
-
-        bed_charge_per_day = self.admission.bed.daily_charge
-        total_bed_charge = bed_charge_per_day * length_of_stay
-
-        # Get ContentType for Admission
-        from django.contrib.contenttypes.models import ContentType
         admission_ct = ContentType.objects.get_for_model(self.admission)
 
-        # Create or update bed charge item with origin tracking
+        info = self.get_bed_day_info()
+        total_los = info['total_los']
+        already_billed_days = info['already_billed_days']
+        days_to_bill = info['remaining_days']
+
+        if days_to_bill <= 0:
+            # All days already billed in other bills — skip bed item for this bill
+            return None
+
+        bed_charge_per_day = self.admission.bed.daily_charge
+        from_date = self.admission.admission_date.date()
+        to_date = (self.admission.discharge_date or timezone.now()).date()
+
+        notes = (
+            f"Bed charges: {days_to_bill} of {total_los} total day(s) "
+            f"({from_date} to {to_date})"
+        )
+        if already_billed_days > 0:
+            notes += f". {already_billed_days} day(s) billed in other bills."
+
+        # Create or update bed charge item for remaining days only
         bed_item, created = IPDBillItem.objects.update_or_create(
             bill=self,
             source='Bed',
@@ -872,14 +936,14 @@ class IPDBilling(models.Model):
             origin_object_id=self.admission.pk,
             defaults={
                 'tenant_id': self.tenant_id,
-                'item_name': f"{self.admission.bed} - {length_of_stay} day(s)",
-                'quantity': length_of_stay,
+                'item_name': f"{self.admission.bed} - {days_to_bill} day(s)",
+                'quantity': days_to_bill,
                 'unit_price': bed_charge_per_day,
                 'system_calculated_price': bed_charge_per_day,
-                'notes': f"Bed charges from {self.admission.admission_date.date()} to {(self.admission.discharge_date or timezone.now()).date()}"
+                'notes': notes,
             }
         )
-        # No need to call save() - signal will auto-recalculate totals
+        # No need to call save() — signal auto-recalculates totals
 
         return bed_item
 
@@ -941,73 +1005,25 @@ class IPDBillItem(models.Model):
         max_digits=10,
         decimal_places=2,
         validators=[MinValueValidator(Decimal('0.00'))],
-        help_text="Actual unit price (can be manually overridden)"
+        help_text="Actual unit price charged (may differ from system price)"
     )
     total_price = models.DecimalField(
         max_digits=10,
         decimal_places=2,
         validators=[MinValueValidator(Decimal('0.00'))],
-        help_text="Total price (quantity × unit_price)"
+        help_text="Total price for this item"
     )
-    is_price_overridden = models.BooleanField(
-        default=False,
-        help_text="Flag indicating if price was manually changed from system default"
-    )
-
-    # Reverse GenericForeignKey for source tracking
-    origin_content_type = models.ForeignKey(
-        ContentType,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        help_text="Type of source order/admission (DiagnosticOrder, MedicineOrder, Admission, etc.)",
-        related_name='+'
-    )
-    origin_object_id = models.PositiveIntegerField(
-        null=True,
-        blank=True,
-        help_text="ID of the source order/admission"
-    )
-    origin_order = GenericForeignKey('origin_content_type', 'origin_object_id')
-
-    # Additional Details
-    notes = models.TextField(
-        blank=True,
-        help_text="Additional notes about this item"
-    )
-
-    # Timestamps
+    notes = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'ipd_bill_items'
-        ordering = ['bill', 'source', 'id']
-        verbose_name = 'IPD Bill Item'
-        verbose_name_plural = 'IPD Bill Items'
+        db_table = "ipd_bill_items"
+        ordering = ["-created_at"]
         indexes = [
-            models.Index(fields=['tenant_id']),
-            models.Index(fields=['bill', 'source']),
-            models.Index(fields=['origin_content_type', 'origin_object_id']),
+            models.Index(fields=["tenant_id"]),
+            models.Index(fields=["tenant_id", "bill"]),
         ]
 
     def __str__(self):
-        return f"{self.item_name} ({self.source}) - {self.bill.bill_number}"
-
-    def save(self, *args, **kwargs):
-        """Auto-calculate total_price and detect price overrides."""
-        # Auto-calculate total_price
-        self.total_price = self.unit_price * self.quantity
-
-        # Detect if price was manually overridden
-        if self.system_calculated_price and self.unit_price != self.system_calculated_price:
-            self.is_price_overridden = True
-        else:
-            self.is_price_overridden = False
-
-        super().save(*args, **kwargs)
-
-    @property
-    def price_override_difference(self):
-        """Return the difference between system price and actual price."""
-        return self.unit_price - self.system_calculated_price
+        return f"{self.item_name} x{self.quantity} = {self.total_price}"

@@ -36,6 +36,7 @@ class Migration(migrations.Migration):
                 ],
                 default='new',
                 max_length=20,
+                help_text='Type of visit',
             ),
         ),
     ]

@@ -26,4 +26,4 @@ class UserActivityLog(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.method} {self.path} ({self.status_code})"
+        return f"{self.method} {self.path} {self.status_code}"

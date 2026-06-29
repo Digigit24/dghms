@@ -31,7 +31,7 @@ class HospitalConfigView(generics.RetrieveUpdateAPIView):
         hms_perm.hms_module = 'hospital'
         hms_perm.action_permission_map = {'update': 'edit_config', 'partial_update': 'edit_config'}
         return [hms_perm]
-    
+
     def get_object(self):
         """Get the singleton hospital instance"""
         try:
@@ -41,7 +41,7 @@ class HospitalConfigView(generics.RetrieveUpdateAPIView):
             if self.request.method == 'GET':
                 return None
             raise
-    
+
     def retrieve(self, request, *args, **kwargs):
         """Get hospital configuration"""
         try:
@@ -51,7 +51,7 @@ class HospitalConfigView(generics.RetrieveUpdateAPIView):
                     'success': False,
                     'error': 'Hospital configuration not found'
                 }, status=status.HTTP_404_NOT_FOUND)
-            
+
             serializer = self.get_serializer(instance)
             return Response({
                 'success': True,
@@ -62,19 +62,19 @@ class HospitalConfigView(generics.RetrieveUpdateAPIView):
                 'success': False,
                 'error': str(e)
             }, status=status.HTTP_400_BAD_REQUEST)
-    
+
     def update(self, request, *args, **kwargs):
         """Update hospital configuration"""
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
         serializer = self.get_serializer(
-            instance, 
-            data=request.data, 
+            instance,
+            data=request.data,
             partial=partial
         )
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
-        
+
         return Response({
             'success': True,
             'message': 'Hospital configuration updated successfully',

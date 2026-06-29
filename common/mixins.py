@@ -208,10 +208,4 @@ class CachedFormStructureMixin:
         super().perform_update(serializer)
         form_id = getattr(serializer.instance, "form_id", None)
         if form_id:
-            self._bust_form_cache(form_id)
-
-    def perform_destroy(self, instance):
-        form_id = getattr(instance, "form_id", None)
-        super().perform_destroy(instance)
-        if form_id:
-            self._bust_form_cache(form_id)
+            self._bust_form_cache

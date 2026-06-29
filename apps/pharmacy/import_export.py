@@ -10,8 +10,6 @@ from decimal import Decimal, InvalidOperation
 from typing import List, Dict, Any, Tuple
 
 import pandas as pd
-import openpyxl
-from django.core.exceptions import ValidationError
 from django.utils.dateparse import parse_date
 
 from .models import PharmacyProduct, ProductCategory

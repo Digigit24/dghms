@@ -107,5 +107,5 @@ class NakshatraLeadCreateSerializer(serializers.ModelSerializer):
         """Validate phone number"""
         if not value:
             raise serializers.ValidationError("Phone number is required.")
-        
+
         return value

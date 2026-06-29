@@ -131,7 +131,7 @@ class Requisition(TenantModelMixin, EncounterMixin):
         db_index=True,
         help_text="SuperAdmin User ID of doctor who ordered the test"
     )
-    
+
     status = models.CharField(
         max_length=20,
         choices=STATUS_CHOICES,
@@ -142,7 +142,7 @@ class Requisition(TenantModelMixin, EncounterMixin):
         choices=PRIORITY_CHOICES,
         default='routine'
     )
-    
+
     order_date = models.DateTimeField(auto_now_add=True)
     clinical_notes = models.TextField(blank=True)
 
@@ -256,7 +256,7 @@ class DiagnosticOrder(TenantModelMixin):
 
     def __str__(self):
         return f"{self.investigation.name} ({self.status})"
-    
+
     def save(self, *args, **kwargs):
         if not self.price and self.investigation:
             self.price = self.investigation.base_charge
@@ -503,16 +503,16 @@ class LabReport(TenantModelMixin):
         blank=True
     )
     technician_id = models.UUIDField(
-        null=True, 
+        null=True,
         blank=True,
         help_text="User ID of the technician who entered results"
     )
     verified_by = models.UUIDField(
-        null=True, 
+        null=True,
         blank=True,
         help_text="User ID of the doctor/pathologist who verified results"
     )
-    
+
     verified_at = models.DateTimeField(null=True, blank=True)
     whatsapp_sent = models.BooleanField(default=False)
     whatsapp_message_log_id = models.CharField(max_length=255, blank=True, null=True)
@@ -547,23 +547,23 @@ class InvestigationRange(TenantModelMixin):
     )
     min_age = models.IntegerField(default=0, help_text="Minimum age in years")
     max_age = models.IntegerField(default=120, help_text="Maximum age in years")
-    
+
     min_value = models.DecimalField(
-        max_digits=10, 
-        decimal_places=2, 
-        null=True, 
+        max_digits=10,
+        decimal_places=2,
+        null=True,
         blank=True
     )
     max_value = models.DecimalField(
-        max_digits=10, 
-        decimal_places=2, 
-        null=True, 
+        max_digits=10,
+        decimal_places=2,
+        null=True,
         blank=True
     )
     unit = models.CharField(max_length=50, blank=True)
-    
+
     text_reference = models.TextField(
-        blank=True, 
+        blank=True,
         help_text="Textual reference range if numerical is not applicable"
     )
 

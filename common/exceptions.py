@@ -121,5 +121,9 @@ class CeliyoAPIError(Exception):
 class RecordLockedError(CeliyoAPIError):
     """Raised when a clinical record is locked and cannot be modified."""
 
-    def __init__(self, message="Record is locked and cannot be edited."):
-        super().__init__(error_codes.RECORD_LOCKED, message, status=422)
+    def __init__(self, message="This clinical record is locked and cannot be edited."):
+        super().__init__(
+            code="RECORD_ALREADY_LOCKED",
+            message=message,
+            status=422,
+        )

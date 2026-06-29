@@ -44,13 +44,9 @@ def error_response(code, message, status=400, field=None, detail=None):
 def action_response(message, status=200, data=None):
     """Return a lightweight action confirmation response.
 
-    Useful for POST/PUT/PATCH/DELETE actions that do not need to return a
-    full resource representation.
+    Useful for POST/PUT/PATCH/DELETE actions that do not return a resource body.
     """
-    payload = {
-        "success": True,
-        "message": message,
-    }
+    body = {"success": True, "message": message}
     if data is not None:
-        payload["data"] = data
-    return Response(payload, status=status)
+        body["data"] = data
+    return Response(body, status=status)

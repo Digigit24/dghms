@@ -374,16 +374,16 @@ class ClinicalRecordAuditLog(models.Model):
         db_table = "clinical_record_audit_logs"
         ordering = ["-created_at"]
         indexes = [
+            models.Index(fields=["tenant_id", "-created_at"]),
             models.Index(fields=["tenant_id", "record", "-created_at"]),
-            models.Index(fields=["tenant_id", "user_id"]),
         ]
 
     def __str__(self):
-        return f"{self.record_id} / {self.action} / {self.created_at}"
+        return f"AuditLog {self.action} on record {self.record_id}"
 
 
 class ClinicalFormGenerationRequest(models.Model):
-    """Stores a user prompt, the AI-generated form draft, and migration status."""
+    """Tracks an AI-generated form draft from a natural-language prompt."""
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -402,15 +402,17 @@ class ClinicalFormGenerationRequest(models.Model):
         help_text="The encounter type this form is meant for.",
     )
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
-    generated_draft = models.JSONField(default=None, null=True, blank=True, help_text="AI-generated form schema.")
-    applied_form = models.ForeignKey(
-        ClinicalForm,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="ai_generation_requests",
+    generated_draft = models.JSONField(
+        null=True, blank=True, default=None, help_text="AI-generated form schema."
     )
     error_message = models.TextField(blank=True, default="")
+    applied_form = models.ForeignKey(
+        ClinicalForm,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ai_generation_requests",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     created_by_user_id = models.UUIDField(null=True, blank=True, db_index=True)
@@ -424,4 +426,4 @@ class ClinicalFormGenerationRequest(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.id} / {self.status} / {self.prompt[:50]}"
+        return f"GenerationRequest {self.id} [{self.status}]"

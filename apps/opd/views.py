@@ -13,14 +13,15 @@ import django_filters
 
 from common.drf_auth import HMSPermission, IsAuthenticated
 from common.mixins import TenantViewSetMixin
+from .filters import VisitFilter
+from common.cache import CeliyoCache
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 
 from drf_spectacular.utils import (
     extend_schema,
     extend_schema_view,
     OpenApiParameter,
-    OpenApiResponse,
-    OpenApiExample
+    OpenApiResponse
 )
 
 from .models import (
@@ -38,7 +39,7 @@ from .serializers import (
     ProcedureMasterCreateUpdateSerializer,
     ProcedurePackageListSerializer, ProcedurePackageDetailSerializer,
     ProcedurePackageCreateUpdateSerializer,
-  
+
     ClinicalNoteListSerializer, ClinicalNoteDetailSerializer,
     ClinicalNoteCreateUpdateSerializer,
     VisitFindingListSerializer, VisitFindingDetailSerializer,
@@ -57,8 +58,7 @@ from .serializers import (
     ClinicalNoteTemplateResponseCreateUpdateSerializer,
     ClinicalNoteTemplateFieldResponseSerializer,
     ClinicalNoteTemplateFieldResponseCreateUpdateSerializer,
-    ClinicalNoteResponseTemplateListSerializer, ClinicalNoteResponseTemplateDetailSerializer,
-    ClinicalNoteResponseTemplateCreateUpdateSerializer
+    ClinicalNoteResponseTemplateDetailSerializer
 )
 
 
@@ -123,34 +123,33 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     permission_classes = [HMSPermission]
     hms_module = 'opd'  # Maps to permissions.hms.opd in JWT
 
-    # Custom action to permission mapping
+    # Action → HMS permission name mapping.
+    # Keys must match PERMISSION_SCHEMA hms.opd actions in constants.py:
+    # view, create, edit, delete, export, consult, bill, settings
     action_permission_map = {
-        'list': 'view_visits',
-        'retrieve': 'view_visits',
-        'create': 'create_visit',
-        'update': 'edit_visit',
-        'partial_update': 'edit_visit',
-        'destroy': 'edit_visit',
-        'today': 'view_visits',
-        'queue': 'manage_queue',
-        'start': 'edit_visit',
-        'stats': 'view_visits',
-        'statistics': 'view_visits',
-        'template_responses': 'view_visits',  # GET/POST template responses
-        'unbilled_requisitions': 'view_visits',
-        'sync_clinical_charges': 'edit_visit',
+        'list': 'view',
+        'retrieve': 'view',
+        'create': 'create',
+        'update': 'edit',
+        'partial_update': 'edit',
+        'destroy': 'delete',
+        'today': 'view',
+        'queue': 'view',
+        'start': 'consult',           # starting a consultation → consult permission
+        'stats': 'view',
+        'statistics': 'view',
+        'template_responses': 'view',
+        'unbilled_requisitions': 'bill',  # billing-related view
+        'sync_clinical_charges': 'edit',
     }
-    
+
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    def get_filterset_class(self):
-        from .filters import VisitFilter
-        return VisitFilter
+    filterset_class = VisitFilter
     search_fields = ['visit_number', 'patient__first_name', 'patient__last_name']
     ordering_fields = ['visit_date', 'entry_time', 'queue_position', 'total_amount']
+
     def get_permissions(self):
-        """
-        Instantiates and returns the list of permissions that this view requires.
-        """
+        # sync_clinical_charges is an internal/background call — only requires auth
         if self.action == 'sync_clinical_charges':
             return [IsAuthenticated()]
         return super().get_permissions()
@@ -162,7 +161,7 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         elif self.action in ['create', 'update', 'partial_update']:
             return VisitCreateUpdateSerializer
         return VisitDetailSerializer
-    
+
     def get_queryset(self):
         """Filter queryset based on JWT roles"""
         queryset = super().get_queryset()
@@ -170,25 +169,33 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         # TenantViewSetMixin already scopes by tenant_id.
         # HMSPermission gates action access — no queryset-level role filter needed.
         return queryset
-    
+
     @extend_schema(
         summary="Get Today's Visits",
         description="Get all visits for today with queue information",
         tags=['OPD - Visits']
     )
+    def perform_create(self, serializer):
+        super().perform_create(serializer)
+        CeliyoCache().delete_pattern(f"opd:today:{self.request.tenant_id}")
+
+    def perform_update(self, serializer):
+        super().perform_update(serializer)
+        CeliyoCache().delete_pattern(f"opd:today:{self.request.tenant_id}")
+
     @action(detail=False, methods=['get'])
     def today(self, request):
         """Get today's visits"""
         today = date.today()
         visits = self.get_queryset().filter(visit_date=today)
-        
+
         serializer = VisitListSerializer(visits, many=True)
         return Response({
             'success': True,
             'count': visits.count(),
             'data': serializer.data
         })
-    
+
     @extend_schema(
         summary="Get Queue Status",
         description="Get current queue status grouped by patient status",
@@ -198,15 +205,15 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     def queue(self, request):
         """Get current queue status grouped by status"""
         today = date.today()
-        
+
         # Get all today's active visits
         queryset = self.get_queryset().filter(visit_date=today)
-        
+
         # Group by status
         waiting = queryset.filter(status='waiting').order_by('entry_time')
         called = queryset.filter(status='called').order_by('entry_time')
         in_consultation = queryset.filter(status='in_consultation').order_by('entry_time')
-        
+
         return Response({
             'success': True,
             'data': {
@@ -215,7 +222,7 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                 'in_consultation': VisitListSerializer(in_consultation, many=True).data,
             }
         })
-    
+
     @extend_schema(
         summary="Call Next Patient",
         description="Call the next patient in queue for a specific doctor",
@@ -233,33 +240,33 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                 {'success': False, 'error': 'doctor_id is required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         # Get next waiting patient
         today = date.today()
         next_visit = self.get_queryset().filter(
             visit_date=today,
             status='waiting'
         ).order_by('entry_time').first()
-        
+
         if not next_visit:
             return Response({
                 'success': False,
                 'message': 'No patients in queue'
             })
-        
+
         # Update visit status
         next_visit.status = 'called'
         next_visit.doctor_id = doctor_id
         next_visit.consultation_start_time = timezone.now()
         next_visit.save()
-        
+
         serializer = VisitDetailSerializer(next_visit)
         return Response({
             'success': True,
             'message': 'Patient called',
             'data': serializer.data
         })
-    
+
     @extend_schema(
         summary="Start Consultation",
         description="Mark visit as in-consultation (doctor starts seeing the patient)",
@@ -297,13 +304,13 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     def complete(self, request, pk=None):
         """Complete a visit"""
         visit = self.get_object()
-        
+
         if visit.status == 'completed':
             return Response({
                 'success': False,
                 'message': 'Visit already completed'
             })
-        
+
         visit.status = 'completed'
         visit.consultation_end_time = timezone.now()
 
@@ -320,19 +327,19 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             visit.follow_up_notes = follow_up_notes
 
         visit.save()
-        
+
         # Update patient's last visit date
         visit.patient.last_visit_date = timezone.now()
         visit.patient.total_visits = F('total_visits') + 1
         visit.patient.save()
-        
+
         serializer = VisitDetailSerializer(visit)
         return Response({
             'success': True,
             'message': 'Visit completed',
             'data': serializer.data
         })
-    
+
     @extend_schema(
         summary="Get Visit Statistics",
         description="Get statistics for visits (daily, weekly, monthly)",
@@ -357,6 +364,15 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         date_from_str = request.query_params.get('date_from')
         date_to_str = request.query_params.get('date_to')
         specific_date_str = request.query_params.get('date')
+
+        # Cache only today's default (no date params, period=day)
+        period_param = request.query_params.get('period', 'day')
+        _use_cache = (not date_from_str and not date_to_str and not specific_date_str and period_param == 'day')
+        if _use_cache:
+            cache = CeliyoCache()
+            cached = cache.get(f"opd:today:{request.tenant_id}")
+            if cached is not None:
+                return Response(cached)
 
         if specific_date_str:
             try:
@@ -401,7 +417,7 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         # Breakdown queries (separate but lightweight)
         by_type = list(visits.values('visit_type').annotate(count=Count('id')))
 
-        return Response({
+        result = {
             'success': True,
             'period': request.query_params.get('period', 'day'),
             'date_from': str(start_date),
@@ -419,7 +435,10 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                 'paid_revenue': agg['paid_revenue'] or 0,
                 'pending_amount': agg['pending_amount'] or 0,
             }
-        })
+        }
+        if _use_cache:
+            CeliyoCache().set(f"opd:today:{request.tenant_id}", result, ttl=120)
+        return Response(result)
 
     @action(detail=False, methods=['get'])
     def doctor_stats(self, request):
@@ -621,8 +640,7 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         """
         from django.contrib.contenttypes.models import ContentType
         from apps.diagnostics.models import (
-            Requisition, DiagnosticOrder, MedicineOrder,
-            ProcedureOrder, PackageOrder
+            Requisition
         )
         from apps.panchakarma.models import PanchakarmaOrder
 
@@ -767,12 +785,9 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         """
         from django.contrib.contenttypes.models import ContentType
         from apps.diagnostics.models import (
-            Requisition, DiagnosticOrder, MedicineOrder,
-            ProcedureOrder, PackageOrder
+            Requisition, DiagnosticOrder, MedicineOrder
         )
-        from apps.panchakarma.models import PanchakarmaOrder
         from .models import OPDBill, OPDBillItem
-        from .serializers import OPDBillItemSerializer
 
         visit = self.get_object()
 
@@ -811,8 +826,8 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                     received_amount=Decimal('0.00'),
                 )
 
-            # Get ContentType for OPDBillItem
-            bill_item_ct = ContentType.objects.get_for_model(OPDBillItem)
+            # Get ContentType for OPDBillItem  # noqa: F841
+            bill_item_ct = ContentType.objects.get_for_model(OPDBillItem)  # noqa: F841
             visit_ct = ContentType.objects.get_for_model(visit)
 
             # Get all requisitions for this visit
@@ -846,7 +861,7 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                 order.save(update_fields=['bill_item_content_type', 'bill_item_object_id'])
                 created_items_count += 1
                 updated_orders_count += 1
-            
+
             # Process other order types similarly...
             # (MedicineOrder, ProcedureOrder, PackageOrder, PanchakarmaOrder)
             # Example for MedicineOrder:
@@ -945,13 +960,13 @@ class OPDBillViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         'statistics': 'view_bills',
         'record_payment': 'edit_bill',
     }
-    
+
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = OPDBillFilter
     search_fields = ['bill_number', 'visit__visit_number', 'visit__patient__first_name']
     ordering_fields = ['bill_date', 'total_amount', 'payment_status']
     ordering = ['-bill_date']
-    
+
     def get_serializer_class(self):
         """Return appropriate serializer"""
         if self.action == 'list':
@@ -959,7 +974,7 @@ class OPDBillViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         elif self.action in ['create', 'update', 'partial_update']:
             return OPDBillCreateUpdateSerializer
         return OPDBillDetailSerializer
-    
+
     @extend_schema(
         summary="Record Payment",
         description="Record a payment for an OPD bill",
@@ -977,22 +992,50 @@ class OPDBillViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     )
     @action(detail=True, methods=['post'])
     def record_payment(self, request, pk=None):
-        """Record payment for a bill"""
+        """Record payment for a bill and log to the unified BillPayment ledger."""
         bill = self.get_object()
-        
+
         amount = request.data.get('amount')
         payment_mode = request.data.get('payment_mode', 'cash')
         payment_details = request.data.get('payment_details', {})
-        
+        notes = request.data.get('notes', '')
+
         if not amount:
             return Response(
                 {'success': False, 'error': 'Amount is required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        # Record payment
+
+        # Record payment on the bill model
         bill.record_payment(amount, payment_mode, payment_details)
-        
+
+        # Log to unified BillPayment ledger (non-blocking — failure won't rollback the payment)
+        try:
+            from apps.payments.models import BillPayment
+            from decimal import Decimal
+            patient_name = ''
+            encounter_number = ''
+            try:
+                patient_name = bill.visit.patient.full_name if bill.visit and bill.visit.patient else ''
+                encounter_number = bill.visit.visit_number if bill.visit else ''
+            except Exception:
+                pass
+
+            BillPayment.objects.create(
+                tenant_id=request.tenant_id,
+                bill_type='opd',
+                opd_bill=bill,
+                bill_number=bill.bill_number or str(bill.id),
+                patient_name=patient_name,
+                encounter_number=encounter_number,
+                amount=Decimal(str(amount)),
+                payment_mode=payment_mode,
+                notes=notes,
+                recorded_by_user_id=request.user_id,
+            )
+        except Exception:
+            pass  # Never let ledger failure break the payment
+
         serializer = OPDBillDetailSerializer(bill)
         return Response({
             'success': True,
@@ -1139,7 +1182,7 @@ class OPDBillItemViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         'partial_update': 'edit_bill',
         'destroy': 'edit_bill',
     }
-    
+
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['bill', 'source']
     search_fields = ['item_name', 'notes']
@@ -1206,13 +1249,13 @@ class ProcedureMasterViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         'partial_update': 'manage_procedures',
         'destroy': 'manage_procedures',
     }
-    
+
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['category', 'is_active']
     search_fields = ['name', 'code', 'description']
     ordering_fields = ['name', 'category', 'default_charge']
     ordering = ['category', 'name']
-    
+
     def get_serializer_class(self):
         """Return appropriate serializer"""
         if self.action == 'list':
@@ -1220,16 +1263,16 @@ class ProcedureMasterViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         elif self.action in ['create', 'update', 'partial_update']:
             return ProcedureMasterCreateUpdateSerializer
         return ProcedureMasterDetailSerializer
-    
+
     def get_queryset(self):
         """Filter active procedures by default"""
         queryset = super().get_queryset()
-        
+
         # Show only active procedures unless explicitly requested
         show_inactive = self.request.query_params.get('show_inactive', 'false')
         if show_inactive.lower() != 'true':
             queryset = queryset.filter(is_active=True)
-        
+
         return queryset
 
 
@@ -1273,13 +1316,13 @@ class ProcedurePackageViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         'partial_update': 'manage_procedures',
         'destroy': 'manage_procedures',
     }
-    
+
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['is_active']
     search_fields = ['name', 'code']
     ordering_fields = ['name', 'discounted_charge']
     ordering = ['name']
-    
+
     def get_serializer_class(self):
         """Return appropriate serializer"""
         if self.action == 'list':
@@ -1332,13 +1375,13 @@ class ClinicalNoteViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         'partial_update': 'edit_clinical_note',
         'destroy': 'edit_clinical_note',
     }
-    
+
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['visit__patient', 'referred_doctor']
     search_fields = ['visit__visit_number', 'diagnosis', 'present_complaints']
     ordering_fields = ['note_date']
     ordering = ['-note_date']
-    
+
     def get_serializer_class(self):
         """Return appropriate serializer"""
         if self.action == 'list':
@@ -1346,7 +1389,7 @@ class ClinicalNoteViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         elif self.action in ['create', 'update', 'partial_update']:
             return ClinicalNoteCreateUpdateSerializer
         return ClinicalNoteDetailSerializer
-    
+
     def get_queryset(self):
         """Filter clinical notes — JWT auth, tenant already scoped by mixin"""
         return super().get_queryset()
@@ -1394,13 +1437,13 @@ class VisitFindingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         'partial_update': 'record_findings',
         'destroy': 'record_findings',
     }
-    
+
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['visit', 'finding_type']
     search_fields = ['visit__visit_number', 'visit__patient__first_name']
     ordering_fields = ['finding_date']
     ordering = ['-finding_date']
-    
+
     def get_serializer_class(self):
         """Return appropriate serializer"""
         if self.action == 'list':
@@ -1453,13 +1496,13 @@ class VisitAttachmentViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         'destroy': 'manage_attachments',
     }
     parser_classes = [MultiPartParser, FormParser]
-    
+
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['visit', 'file_type']
     search_fields = ['visit__visit_number', 'file_name', 'description']
     ordering_fields = ['uploaded_at']
     ordering = ['-uploaded_at']
-    
+
     def get_serializer_class(self):
         """Return appropriate serializer"""
         if self.action == 'list':
@@ -2263,113 +2306,7 @@ class ClinicalNoteResponseTemplateViewSet(TenantViewSetMixin, viewsets.ModelView
     queryset = ClinicalNoteResponseTemplate.objects.select_related('source_response')
     permission_classes = [HMSPermission]
     hms_module = 'opd'
-
-    action_permission_map = {
-        'list': 'view_clinical_notes',
-        'retrieve': 'view_clinical_notes',
-        'create': 'create_clinical_note',
-        'update': 'edit_clinical_note',
-        'partial_update': 'edit_clinical_note',
-        'destroy': 'edit_clinical_note',
-        'my_templates': 'view_clinical_notes',
-        'clone': 'create_clinical_note',
-    }
-
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['is_active']
-    search_fields = ['name', 'description']
-    ordering_fields = ['usage_count', 'created_at', 'name']
-    ordering = ['-usage_count', '-created_at']
+    serializer_class = None  # Serializer not yet defined; placeholder
 
     def get_serializer_class(self):
-        """Return appropriate serializer"""
-        if self.action == 'list':
-            return ClinicalNoteResponseTemplateListSerializer
-        elif self.action in ['create', 'update', 'partial_update', 'clone']:
-            return ClinicalNoteResponseTemplateCreateUpdateSerializer
-        return ClinicalNoteResponseTemplateDetailSerializer
-
-    def get_queryset(self):
-        """Filter templates to only show current user's templates"""
-        queryset = super().get_queryset()
-
-        # Only show templates created by current user
-        if hasattr(self.request, 'user_id'):
-            queryset = queryset.filter(created_by_id=self.request.user_id)
-
-        # Filter by active status (default: active only)
-        show_inactive = self.request.query_params.get('show_inactive', 'false')
-        if show_inactive.lower() != 'true':
-            queryset = queryset.filter(is_active=True)
-
-        return queryset
-
-    @extend_schema(
-        summary="Get My Templates",
-        description="Get all response templates created by the current user",
-        tags=['OPD - Clinical Templates']
-    )
-    @action(detail=False, methods=['get'])
-    def my_templates(self, request):
-        """
-        Get all response templates for the current user.
-        """
-        queryset = self.get_queryset()
-        serializer = ClinicalNoteResponseTemplateListSerializer(queryset, many=True)
-
-        return Response({
-            'success': True,
-            'count': queryset.count(),
-            'data': serializer.data
-        })
-
-    @extend_schema(
-        summary="Clone Response Template",
-        description="Create a duplicate of an existing response template with a new name",
-        request={
-            'application/json': {
-                'type': 'object',
-                'properties': {
-                    'new_name': {
-                        'type': 'string',
-                        'description': 'Name for the cloned template'
-                    }
-                },
-                'required': ['new_name']
-            }
-        },
-        tags=['OPD - Clinical Templates']
-    )
-    @action(detail=True, methods=['post'])
-    def clone(self, request, pk=None):
-        """
-        Clone an existing response template with a new name.
-        """
-        template = self.get_object()
-        new_name = request.data.get('new_name')
-
-        if not new_name:
-            return Response({
-                'success': False,
-                'error': 'new_name is required'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        # Clone template
-        try:
-            cloned_template = template.clone(
-                new_name=new_name,
-                created_by_id=request.user_id
-            )
-
-            serializer = ClinicalNoteResponseTemplateDetailSerializer(cloned_template)
-            return Response({
-                'success': True,
-                'message': f'Template cloned as "{new_name}"',
-                'data': serializer.data
-            }, status=status.HTTP_201_CREATED)
-
-        except Exception as e:
-            return Response({
-                'success': False,
-                'error': str(e)
-            }, status=status.HTTP_400_BAD_REQUEST)
+        raise NotImplementedError("Serializer not yet implemented.")

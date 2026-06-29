@@ -28,20 +28,20 @@ class Hospital(models.Model):
         null=True,
         help_text="Brief tagline or slogan"
     )
-    
+
     # Contact Information
     email = models.EmailField()
     phone = models.CharField(max_length=15)
     alternate_phone = models.CharField(max_length=15, blank=True, null=True)
     website = models.URLField(blank=True, null=True)
-    
+
     # Address
     address = models.TextField()
     city = models.CharField(max_length=100)
     state = models.CharField(max_length=100)
     country = models.CharField(max_length=100, default='India')
     pincode = models.CharField(max_length=10)
-    
+
     # Media - temporarily disabled ImageField
     logo = models.CharField(
         max_length=500,
@@ -49,7 +49,7 @@ class Hospital(models.Model):
         null=True,
         help_text="Logo URL (ImageField disabled temporarily)"
     )
-    
+
     # Settings
     working_hours = models.CharField(
         max_length=100,
@@ -68,7 +68,7 @@ class Hospital(models.Model):
         default=True,
         help_text="Has in-house laboratory"
     )
-    
+
     # Additional
     registration_number = models.CharField(
         max_length=100,
@@ -77,11 +77,11 @@ class Hospital(models.Model):
         help_text="Hospital registration number"
     )
     established_date = models.DateField(blank=True, null=True)
-    
+
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         db_table = 'hospital_config'
         verbose_name = 'Hospital Configuration'
@@ -89,10 +89,10 @@ class Hospital(models.Model):
         indexes = [
             models.Index(fields=['tenant_id']),
         ]
-    
+
     def __str__(self):
         return f"{self.name} ({self.get_type_display()})"
-    
+
     def save(self, *args, **kwargs):
         """Enforce singleton pattern - only one hospital allowed"""
         if not self.pk and Hospital.objects.exists():
@@ -101,14 +101,14 @@ class Hospital(models.Model):
                 'Please update the existing record instead of creating a new one.'
             )
         super().save(*args, **kwargs)
-    
+
     def delete(self, *args, **kwargs):
         """Prevent deletion of hospital configuration"""
         raise ValidationError(
             'Hospital configuration cannot be deleted. '
             'Please update it instead.'
         )
-    
+
     @classmethod
     def get_hospital(cls):
         """Get the hospital instance (singleton)"""
@@ -119,7 +119,7 @@ class Hospital(models.Model):
                 'Please create one via Django admin.'
             )
         return hospital
-    
+
     @property
     def full_address(self):
         """Returns formatted full address"""

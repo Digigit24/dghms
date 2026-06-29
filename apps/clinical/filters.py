@@ -40,4 +40,4 @@ class ClinicalPicklistItemFilter(FilterSet):
 
     class Meta:
         model = ClinicalPicklistItem
-        fields = ["picklist", "value"]
+        fields = ["picklist", "value", "is_active"]

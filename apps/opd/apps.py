@@ -6,4 +6,4 @@ class OpdConfig(AppConfig):
     name = 'apps.opd'
 
     def ready(self):
-        import apps.opd.signals
+        pass

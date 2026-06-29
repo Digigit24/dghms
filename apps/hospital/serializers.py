@@ -10,7 +10,7 @@ class HospitalSerializer(serializers.ModelSerializer):
         read_only=True
     )
     full_address = serializers.CharField(read_only=True)
-    
+
     class Meta:
         model = Hospital
         fields = [
@@ -27,7 +27,7 @@ class HospitalSerializer(serializers.ModelSerializer):
 
 class HospitalUpdateSerializer(serializers.ModelSerializer):
     """Hospital update serializer"""
-    
+
     class Meta:
         model = Hospital
         exclude = ['id', 'created_at', 'updated_at']

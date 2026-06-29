@@ -1,6 +1,6 @@
 # apps/opd/filters.py
 import django_filters
-from .models import Visit, OPDBill
+from .models import Visit
 
 
 class VisitFilter(django_filters.FilterSet):

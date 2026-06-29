@@ -58,4 +58,4 @@ def write_activity_log_entry(
             path=scrubbed_path,
             error=str(exc),
         )
-        raise self.apply_retry(exc)
+        raise self.retry(exc=exc)

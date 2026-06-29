@@ -1,5 +1,6 @@
 """API views for the clinical forms and records app."""
 
+import hashlib
 import structlog
 import uuid
 from django.db import transaction
@@ -9,6 +10,7 @@ from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
+from rest_framework.response import Response
 
 from common import error_codes
 from common.cache import CeliyoCache
@@ -146,10 +148,24 @@ class ClinicalFormViewSet(
             Q(tenant_id=tenant_id) | Q(tenant_id=system_tenant_id, is_system=True)
         )
 
+    def list(self, request, *args, **kwargs):
+        cache = CeliyoCache()
+        params_hash = hashlib.md5(
+            request.query_params.urlencode().encode()
+        ).hexdigest()[:12]
+        cache_key = f"clinical:forms:{request.tenant_id}:{params_hash}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
+        response = super().list(request, *args, **kwargs)
+        cache.set(cache_key, response.data, ttl=600)
+        return response
+
     def perform_create(self, serializer):
         if not check_permission(self.request, HMSPermissions.CLINICAL_CREATE):
             raise PermissionDenied("No permission to create clinical forms.")
         serializer.save(created_by_user_id=self.request.user_id)
+        CeliyoCache().delete_pattern(f"clinical:forms:{self.request.tenant_id}:*")
 
     def perform_update(self, serializer):
         if not check_permission(self.request, HMSPermissions.CLINICAL_EDIT):
@@ -157,13 +173,16 @@ class ClinicalFormViewSet(
         if serializer.instance.is_system:
             raise PermissionDenied("System forms cannot be modified.")
         serializer.save()
+        CeliyoCache().delete_pattern(f"clinical:forms:{self.request.tenant_id}:*")
 
     def perform_destroy(self, instance):
         if not check_permission(self.request, HMSPermissions.CLINICAL_DELETE):
             raise PermissionDenied("No permission to delete clinical forms.")
         if instance.is_system:
             raise PermissionDenied("System forms cannot be deleted.")
+        tenant_id = self.request.tenant_id
         super().perform_destroy(instance)
+        CeliyoCache().delete_pattern(f"clinical:forms:{tenant_id}:*")
 
     @extend_schema(
         summary="Get cached form structure",
@@ -453,10 +472,29 @@ class ClinicalPicklistViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     )
     @action(detail=True, methods=["get"], url_path="items")
     def items(self, request, pk=None):
-        """Nested read of picklist items."""
-        picklist = self.get_object()
-        items = picklist.items.filter(tenant_id=request.tenant_id, is_active=True)
-        serializer = ClinicalPicklistItemSerializer(items, many=True)
+        """
+        Nested read of picklist items.
+        Fetches the picklist by pk regardless of tenant (system picklists may
+        have a different tenant_id), then returns only the items that belong
+        to this tenant OR items from system picklists.
+        """
+        try:
+            picklist = ClinicalPicklist.objects.get(pk=pk)
+        except ClinicalPicklist.DoesNotExist:
+            from rest_framework.exceptions import NotFound
+            raise NotFound("Picklist not found.")
+
+        # Allow access if this tenant owns the picklist OR it is a system picklist
+        if not picklist.is_system and str(picklist.tenant_id) != str(request.tenant_id):
+            from rest_framework.exceptions import PermissionDenied as DRFPermissionDenied
+            raise DRFPermissionDenied("You do not have access to this picklist.")
+
+        # Return tenant-specific items first; fall back to any active items for system lists
+        items_qs = picklist.items.filter(is_active=True)
+        if not picklist.is_system:
+            items_qs = items_qs.filter(tenant_id=request.tenant_id)
+
+        serializer = ClinicalPicklistItemSerializer(items_qs.order_by("display_order"), many=True)
         return action_response(message="Picklist items.", data=serializer.data)
 
 
@@ -770,13 +808,18 @@ class ClinicalRecordViewSet(
         user_id = request.user_id
         field_ids = {item["field_id"] for item in payload.validated_data["values"]}
 
-        # Ensure all fields belong to the record's form and tenant.
+        # System forms have tenant_id = 00000000-…-0000 (seeded, not owned by any hospital).
+        # We must accept those fields as well as tenant-owned fields.
+        _SYSTEM_TENANT = uuid.UUID("00000000-0000-0000-0000-000000000000")
+
+        # Ensure all fields belong to the record's form.
+        # Accept both tenant-owned fields and system-seeded fields.
         fields = {
             field.id: field
             for field in ClinicalFormField.objects.filter(
+                Q(tenant_id=tenant_id) | Q(tenant_id=_SYSTEM_TENANT),
                 id__in=field_ids,
                 section__form=record.form,
-                tenant_id=tenant_id,
                 is_active=True,
             )
         }
@@ -934,7 +977,7 @@ class UserFormPreferenceViewSet(PatientAccessMixin, TenantViewSetMixin, viewsets
     def perform_destroy(self, instance):
         if not check_permission(self.request, HMSPermissions.CLINICAL_DELETE):
             raise PermissionDenied("No permission to delete form preferences.")
-        super().perform_destroy(instance)
+        instance.delete()
 
 
 # ---------------------------------------------------------------------------
@@ -942,73 +985,21 @@ class UserFormPreferenceViewSet(PatientAccessMixin, TenantViewSetMixin, viewsets
 # ---------------------------------------------------------------------------
 
 
-@extend_schema_view(
-    list=extend_schema(
-        summary="List saved snapshots",
-        description="List saved snapshots accessible to the current user.",
-        tags=["Clinical Snapshots"],
-        responses={200: SavedFormSnapshotSerializer(many=True)},
-    ),
-    retrieve=extend_schema(
-        summary="Retrieve a saved snapshot",
-        description="Retrieve a saved snapshot.",
-        tags=["Clinical Snapshots"],
-        responses={200: SavedFormSnapshotSerializer},
-    ),
-    create=extend_schema(
-        summary="Create a saved snapshot",
-        description="Create a saved snapshot for a record.",
-        tags=["Clinical Snapshots"],
-        responses={201: SavedFormSnapshotSerializer},
-    ),
-    update=extend_schema(
-        summary="Update a saved snapshot",
-        description="Rename or update snapshot data.",
-        tags=["Clinical Snapshots"],
-        responses={200: SavedFormSnapshotSerializer},
-    ),
-    partial_update=extend_schema(
-        summary="Patch a saved snapshot",
-        description="Partially update a saved snapshot.",
-        tags=["Clinical Snapshots"],
-        responses={200: SavedFormSnapshotSerializer},
-    ),
-    destroy=extend_schema(
-        summary="Delete a saved snapshot",
-        description="Delete a saved snapshot.",
-        tags=["Clinical Snapshots"],
-        responses={204: None},
-    ),
-)
-class SavedFormSnapshotViewSet(PatientAccessMixin, TenantViewSetMixin, viewsets.ModelViewSet):
-    """CRUD for saved record snapshots."""
+class SavedFormSnapshotViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
+    """CRUD for saved form snapshots."""
 
     queryset = SavedFormSnapshot.objects.select_related("record")
     serializer_class = SavedFormSnapshotSerializer
     permission_classes = [IsTenantAuthenticated, HMSPermission]
     hms_module = "clinical"
     pagination_class = StandardPagination
-    filterset_fields = ["record"]
-
-    def get_queryset(self):
-        if not (check_permission(self.request, HMSPermissions.CLINICAL_VIEW) or check_permission(self.request, HMSPermissions.CLINICAL_CREATE) or check_permission(self.request, HMSPermissions.CLINICAL_EDIT)):
-            raise PermissionDenied("No permission to view snapshots.")
-        qs = super().get_queryset()
-        if getattr(self.request, "is_patient", False):
-            qs = qs.filter(record__patient_user_id=self.request.user_id)
-        return qs
 
     def perform_create(self, serializer):
         if not check_permission(self.request, HMSPermissions.CLINICAL_CREATE):
             raise PermissionDenied("No permission to create snapshots.")
         serializer.save(created_by_user_id=self.request.user_id)
 
-    def perform_update(self, serializer):
-        if not check_permission(self.request, HMSPermissions.CLINICAL_EDIT):
-            raise PermissionDenied("No permission to update snapshots.")
-        serializer.save()
-
     def perform_destroy(self, instance):
         if not check_permission(self.request, HMSPermissions.CLINICAL_DELETE):
             raise PermissionDenied("No permission to delete snapshots.")
-        super().perform_destroy(instance)
+        instance.delete()

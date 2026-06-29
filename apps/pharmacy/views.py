@@ -7,9 +7,9 @@ from django.contrib.postgres.search import SearchQuery, SearchRank
 from django.core.cache import cache
 from django.http import HttpResponse
 
-from common.drf_auth import HMSPermission, IsAuthenticated
+from common.drf_auth import HMSPermission
 from common.mixins import TenantViewSetMixin
-from django.db.models import Q, Sum, Count, F
+from django.db.models import Sum, F
 from django.utils import timezone
 from datetime import timedelta
 from celery.result import AsyncResult
@@ -26,11 +26,9 @@ from .serializers import (
     ProductCategorySerializer,
     PharmacyProductSerializer,
     CartSerializer,
-    CartItemSerializer,
     PharmacyOrderSerializer
 )
 from .tasks import import_products_task, export_products_task
-from .import_export import ProductImporter, ProductExporter
 
 
 class ProductCategoryViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
@@ -43,13 +41,14 @@ class ProductCategoryViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     permission_classes = [HMSPermission]
     hms_module = 'pharmacy'
 
+    # Maps to PERMISSION_SCHEMA hms.pharmacy: view, create, edit, delete
     action_permission_map = {
-        'list': 'view_categories',
-        'retrieve': 'view_categories',
-        'create': 'manage_categories',
-        'update': 'manage_categories',
-        'partial_update': 'manage_categories',
-        'destroy': 'manage_categories',
+        'list': 'view',
+        'retrieve': 'view',
+        'create': 'create',
+        'update': 'edit',
+        'partial_update': 'edit',
+        'destroy': 'delete',
     }
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['name', 'type', 'description']
@@ -59,12 +58,12 @@ class ProductCategoryViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         """Filter active categories by default"""
         queryset = self.queryset
-        
+
         # Option to include inactive categories
         include_inactive = self.request.query_params.get('include_inactive', 'false')
         if include_inactive.lower() != 'true':
             queryset = queryset.filter(is_active=True)
-        
+
         return queryset
 
     def destroy(self, request, *args, **kwargs):
@@ -85,21 +84,22 @@ class PharmacyProductViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     permission_classes = [HMSPermission]
     hms_module = 'pharmacy'
 
+    # Maps to PERMISSION_SCHEMA hms.pharmacy: view, create, edit, delete, export, stock_adjust
     action_permission_map = {
-        'list': 'view_products',
-        'retrieve': 'view_products',
-        'create': 'create_product',
-        'update': 'edit_product',
-        'partial_update': 'edit_product',
-        'destroy': 'delete_product',
-        'low_stock': 'view_products',
-        'expiring_soon': 'view_products',
-        'search_products': 'view_products',
-        'autocomplete': 'view_products',
-        'import_products': 'create_product',
-        'export_products': 'view_products',
-        'task_status': 'view_products',
-        'download_export': 'view_products',
+        'list': 'view',
+        'retrieve': 'view',
+        'create': 'create',
+        'update': 'edit',
+        'partial_update': 'edit',
+        'destroy': 'delete',
+        'low_stock': 'view',
+        'expiring_soon': 'view',
+        'search_products': 'view',
+        'autocomplete': 'view',
+        'import_products': 'create',
+        'export_products': 'export',
+        'task_status': 'view',
+        'download_export': 'export',
     }
     filter_backends = [
         DjangoFilterBackend,
@@ -114,28 +114,28 @@ class PharmacyProductViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         """Filter and annotate products"""
         queryset = self.queryset
-        
+
         # Filter active products by default
         include_inactive = self.request.query_params.get('include_inactive', 'false')
         if include_inactive.lower() != 'true':
             queryset = queryset.filter(is_active=True)
-        
+
         # Additional filtering options
         category_name = self.request.query_params.get('category_name')
         in_stock = self.request.query_params.get('in_stock')
         low_stock = self.request.query_params.get('low_stock')
-        
+
         if category_name:
             queryset = queryset.filter(category__name__icontains=category_name)
-        
+
         if in_stock == 'true':
             queryset = queryset.filter(quantity__gt=0)
         elif in_stock == 'false':
             queryset = queryset.filter(quantity=0)
-        
+
         if low_stock == 'true':
             queryset = queryset.filter(quantity__lte=F('minimum_stock_level'))
-        
+
         return queryset
 
     @action(detail=False, methods=['get'])
@@ -146,7 +146,7 @@ class PharmacyProductViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             quantity__lte=F('minimum_stock_level'),
             is_active=True
         ).order_by('quantity')
-        
+
         serializer = self.get_serializer(low_stock_products, many=True)
         return Response({
             'success': True,
@@ -160,13 +160,13 @@ class PharmacyProductViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         days = int(request.query_params.get('days', 90))
         queryset = self.get_queryset()
         threshold_date = timezone.now().date() + timedelta(days=days)
-        
+
         near_expiry = queryset.filter(
             expiry_date__lte=threshold_date,
             expiry_date__gte=timezone.now().date(),
             is_active=True
         ).order_by('expiry_date')
-        
+
         serializer = self.get_serializer(near_expiry, many=True)
         return Response({
             'success': True,
@@ -182,7 +182,7 @@ class PharmacyProductViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         expired_products = queryset.filter(
             expiry_date__lt=timezone.now().date()
         ).order_by('expiry_date')
-        
+
         serializer = self.get_serializer(expired_products, many=True)
         return Response({
             'success': True,
@@ -194,7 +194,7 @@ class PharmacyProductViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     def statistics(self, request):
         """Get pharmacy product statistics"""
         queryset = self.get_queryset()
-        
+
         stats = {
             'total_products': queryset.count(),
             'active_products': queryset.filter(is_active=True).count(),
@@ -216,7 +216,7 @@ class PharmacyProductViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             ).count(),
             'categories': ProductCategory.objects.filter(is_active=True).count(),
         }
-        
+
         return Response({
             'success': True,
             'data': stats
@@ -525,17 +525,18 @@ class CartViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     permission_classes = [HMSPermission]
     hms_module = 'pharmacy'
 
+    # Cart operations require sell permission (dispensing workflow)
     action_permission_map = {
-        'list': 'view_cart',
-        'retrieve': 'view_cart',
-        'create': 'view_cart',
-        'update': 'view_cart',
-        'partial_update': 'view_cart',
-        'destroy': 'view_cart',
-        'add_item': 'view_cart',
-        'remove_item': 'view_cart',
-        'clear': 'view_cart',
-        'checkout': 'create_order',
+        'list': 'sell',
+        'retrieve': 'sell',
+        'create': 'sell',
+        'update': 'sell',
+        'partial_update': 'sell',
+        'destroy': 'sell',
+        'add_item': 'sell',
+        'remove_item': 'sell',
+        'clear': 'sell',
+        'checkout': 'sell',
     }
 
     def get_queryset(self):
@@ -606,7 +607,7 @@ class CartViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                     'success': False,
                     'error': f'Insufficient stock. Available: {product.quantity}, In cart: {cart_item.quantity}'
                 }, status=status.HTTP_400_BAD_REQUEST)
-            
+
             cart_item.quantity = new_quantity
             cart_item.price_at_time = product.selling_price  # Update to current price
             cart_item.save()
@@ -712,15 +713,16 @@ class PharmacyOrderViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     permission_classes = [HMSPermission]
     hms_module = 'pharmacy'
 
+    # Maps to PERMISSION_SCHEMA hms.pharmacy: view, sell, edit, statistics
     action_permission_map = {
-        'list': 'view_orders',
-        'retrieve': 'view_orders',
-        'create': 'create_order',
-        'update': 'edit_order',
-        'partial_update': 'edit_order',
-        'destroy': 'edit_order',
-        'cancel': 'edit_order',
-        'stats': 'view_orders',
+        'list': 'view',
+        'retrieve': 'view',
+        'create': 'sell',
+        'update': 'edit',
+        'partial_update': 'edit',
+        'destroy': 'edit',
+        'cancel': 'edit',
+        'stats': 'statistics',
     }
     filter_backends = [
         DjangoFilterBackend,
@@ -778,7 +780,7 @@ class PharmacyOrderViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                     'success': False,
                     'error': f'Product {product.product_name} is no longer available'
                 }, status=status.HTTP_400_BAD_REQUEST)
-            
+
             if product.quantity < cart_item.quantity:
                 return Response({
                     'success': False,
@@ -853,7 +855,7 @@ class PharmacyOrderViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     def statistics(self, request):
         """Get order statistics for current user"""
         queryset = self.get_queryset()
-        
+
         stats = {
             'total_orders': queryset.count(),
             'pending_orders': queryset.filter(status='pending').count(),
@@ -865,7 +867,7 @@ class PharmacyOrderViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                 payment_status='paid'
             ).aggregate(total=Sum('total_amount'))['total'] or 0,
         }
-        
+
         return Response({
             'success': True,
             'data': stats

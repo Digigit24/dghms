@@ -59,4 +59,4 @@ class WebhookDeliverySerializer(serializers.ModelSerializer):
 
 class WebhookTestSerializer(serializers.Serializer):
     event_name = serializers.CharField(max_length=128)
-    payload = serializers.JSONField(default=dict)
+    payload = serializers.JSONField(default=dict, required=False)

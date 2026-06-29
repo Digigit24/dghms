@@ -1,21 +1,19 @@
 from django.db.models import Avg
 from django.utils.timezone import now
-from django.db import transaction
-from django.contrib.auth.models import Group
 
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 
-from common.drf_auth import HMSPermission, IsAuthenticated, AllowAny
+from common.drf_auth import HMSPermission, AllowAny
 from common.mixins import TenantViewSetMixin
 
 from drf_spectacular.utils import (
     extend_schema, extend_schema_view, OpenApiParameter, OpenApiExample, OpenApiResponse
 )
 
-from .models import DoctorProfile, Specialty, DoctorAvailability
+from .models import DoctorProfile, Specialty
 from .serializers import (
     DoctorProfileListSerializer,
     DoctorProfileDetailSerializer,
@@ -81,14 +79,14 @@ class SpecialtyViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     permission_classes = [HMSPermission]
     hms_module = 'doctors'  # Maps to permissions.hms.doctors in JWT
 
-    # Custom action to permission mapping
+    # Maps to PERMISSION_SCHEMA hms.doctors actions: view, create, edit, delete
     action_permission_map = {
         'list': 'view',
         'retrieve': 'view',
-        'create': 'manage_specialties',
-        'update': 'manage_specialties',
-        'partial_update': 'manage_specialties',
-        'destroy': 'manage_specialties',
+        'create': 'create',
+        'update': 'edit',
+        'partial_update': 'edit',
+        'destroy': 'delete',
     }
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -100,11 +98,11 @@ class SpecialtyViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
         page = self.paginate_queryset(queryset)
-        
+
         if page is not None:
             serializer = self.get_serializer(page, many=True)
             return self.get_paginated_response(serializer.data)
-        
+
         serializer = self.get_serializer(queryset, many=True)
         return Response({'success': True, 'data': serializer.data})
 
@@ -117,7 +115,7 @@ class SpecialtyViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
-        
+
         return Response(
             {
                 'success': True,
@@ -133,7 +131,7 @@ class SpecialtyViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
-        
+
         return Response({
             'success': True,
             'message': 'Specialty updated successfully',
@@ -142,7 +140,7 @@ class SpecialtyViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
-        
+
         # Business rule: prevent delete if specialty has active doctors
         if instance.doctors.filter(status='active').exists():
             return Response(
@@ -152,7 +150,7 @@ class SpecialtyViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        
+
         self.perform_destroy(instance)
         return Response(
             {'success': True, 'message': 'Specialty deleted successfully'},
@@ -248,8 +246,8 @@ class DoctorProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         'update': 'edit',
         'partial_update': 'edit',
         'destroy': 'delete',
-        'availability': 'view_availability',
-        'set_availability': 'manage_schedule',
+        'availability': 'view',
+        'set_availability': 'set_availability',  # matches PERMISSION_SCHEMA hms.doctors.set_availability
         'stats': 'view',
         'activate': 'edit',
     }
@@ -321,11 +319,11 @@ class DoctorProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
         page = self.paginate_queryset(queryset)
-        
+
         if page is not None:
             serializer = self.get_serializer(page, many=True)
             return self.get_paginated_response(serializer.data)
-        
+
         serializer = self.get_serializer(queryset, many=True)
         return Response({'success': True, 'data': serializer.data})
 
@@ -361,7 +359,7 @@ class DoctorProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
         doctor = serializer.save()
-        
+
         return Response({
             'success': True,
             'message': 'Doctor profile updated successfully',
@@ -373,7 +371,7 @@ class DoctorProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         instance = self.get_object()
         instance.status = 'inactive'
         instance.save(update_fields=['status'])
-        
+
         return Response(
             {'success': True, 'message': 'Doctor profile deactivated successfully'},
             status=status.HTTP_204_NO_CONTENT
@@ -430,14 +428,14 @@ class DoctorProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         Creates User + DoctorProfile in one transaction.
         """
         serializer = DoctorRegistrationSerializer(data=request.data)
-        
+
         if serializer.is_valid():
             doctor = serializer.save()
-            
+
             # Generate token for immediate login
             from rest_framework.authtoken.models import Token
             token, created = Token.objects.get_or_create(user=doctor.user)
-            
+
             return Response({
                 'success': True,
                 'message': 'Doctor registered successfully',
@@ -446,7 +444,7 @@ class DoctorProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                     'doctor': DoctorProfileDetailSerializer(doctor).data
                 }
             }, status=status.HTTP_201_CREATED)
-        
+
         return Response({
             'success': False,
             'errors': serializer.errors
@@ -586,11 +584,11 @@ class DoctorProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                     )
 
                     # DEBUG: Log the complete response structure
-                    logger.info(f"===== SUPERADMIN RESPONSE DEBUG =====")
+                    logger.info("===== SUPERADMIN RESPONSE DEBUG =====")
                     logger.info(f"Response type: {type(user_response)}")
                     logger.info(f"Response keys: {user_response.keys() if isinstance(user_response, dict) else 'Not a dict'}")
                     logger.info(f"Full response: {user_response}")
-                    logger.info(f"====================================")
+                    logger.info("====================================")
 
                     # Extract user_id from response
                     user_id = user_response.get('id')
@@ -815,7 +813,7 @@ class DoctorProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         doctor = self.get_object()
         doctor.status = 'active'
         doctor.save(update_fields=['status'])
-        
+
         return Response({
             'success': True,
             'message': 'Doctor profile activated successfully',
@@ -835,7 +833,7 @@ class DoctorProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         doctor = self.get_object()
         doctor.status = 'inactive'
         doctor.save(update_fields=['status'])
-        
+
         return Response({
             'success': True,
             'message': 'Doctor profile deactivated successfully',

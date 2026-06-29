@@ -1,5 +1,4 @@
 from django.db import models
-from django.conf import settings
 from django.core.validators import MinValueValidator
 from decimal import Decimal
 from django.contrib.postgres.search import SearchVector, SearchVectorField
@@ -19,7 +18,7 @@ class ProductCategory(models.Model):
     description = models.TextField(blank=True, null=True)
     type = models.CharField(max_length=50, choices=CATEGORY_TYPES)
     is_active = models.BooleanField(default=True)
-    
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -49,7 +48,7 @@ class PharmacyProduct(models.Model):
     )
     company = models.CharField(max_length=255, blank=True, null=True)
     batch_no = models.CharField(max_length=100, blank=True, null=True)
-    
+
     # Pricing
     mrp = models.DecimalField(
         max_digits=10,
@@ -63,14 +62,14 @@ class PharmacyProduct(models.Model):
         blank=True,
         null=True
     )
-    
+
     # Inventory
     quantity = models.PositiveIntegerField(default=0)
     minimum_stock_level = models.PositiveIntegerField(default=10)
-    
+
     # Dates
     expiry_date = models.DateField(blank=True, null=True)
-    
+
     # Status
     is_active = models.BooleanField(default=True)
 
@@ -89,7 +88,6 @@ class PharmacyProduct(models.Model):
             models.Index(fields=['product_name']),
             models.Index(fields=['company']),
             models.Index(fields=['batch_no']),
-            # Full-text search index (GIN)
             GinIndex(fields=['search_vector'], name='pharmacy_search_vector_idx'),
         ]
 
@@ -98,21 +96,16 @@ class PharmacyProduct(models.Model):
 
     @property
     def is_in_stock(self):
-        """Check if product is in stock"""
         return self.quantity > 0
 
     @property
     def low_stock_warning(self):
-        """Check if product stock is below minimum level"""
         return self.quantity <= self.minimum_stock_level
 
     def save(self, *args, **kwargs):
-        """Auto-set selling price if not provided"""
         if not self.selling_price:
             self.selling_price = self.mrp
         super().save(*args, **kwargs)
-
-        # Update search vector after save (in a separate query)
         PharmacyProduct.objects.filter(pk=self.pk).update(
             search_vector=(
                 SearchVector('product_name', weight='A', config='english') +
@@ -141,14 +134,10 @@ class Cart(models.Model):
 
     @property
     def total_items(self):
-        """Get total number of items in cart"""
-        return self.cart_items.aggregate(
-            total=models.Sum('quantity')
-        )['total'] or 0
+        return self.cart_items.aggregate(total=models.Sum('quantity'))['total'] or 0
 
     @property
     def total_amount(self):
-        """Calculate total cart amount"""
         return sum(
             item.price_at_time * item.quantity
             for item in self.cart_items.all()
@@ -158,15 +147,8 @@ class Cart(models.Model):
 class CartItem(models.Model):
     """Individual items in the shopping cart"""
     tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
-    cart = models.ForeignKey(
-        Cart,
-        on_delete=models.CASCADE,
-        related_name='cart_items'
-    )
-    product = models.ForeignKey(
-        PharmacyProduct,
-        on_delete=models.CASCADE
-    )
+    cart = models.ForeignKey(Cart, on_delete=models.CASCADE, related_name='cart_items')
+    product = models.ForeignKey(PharmacyProduct, on_delete=models.CASCADE)
     quantity = models.PositiveIntegerField(default=1)
     price_at_time = models.DecimalField(
         max_digits=10,
@@ -183,7 +165,6 @@ class CartItem(models.Model):
         ]
 
     def save(self, *args, **kwargs):
-        """Set price at time of adding to cart"""
         if not self.price_at_time:
             self.price_at_time = self.product.selling_price
         super().save(*args, **kwargs)
@@ -193,7 +174,6 @@ class CartItem(models.Model):
 
     @property
     def total_price(self):
-        """Calculate total price for this cart item"""
         return self.quantity * self.price_at_time
 
 
@@ -206,7 +186,6 @@ class PharmacyOrder(models.Model):
         ('delivered', 'Delivered'),
         ('cancelled', 'Cancelled')
     ]
-
     PAYMENT_STATUS_CHOICES = [
         ('pending', 'Pending'),
         ('paid', 'Paid'),
@@ -216,28 +195,15 @@ class PharmacyOrder(models.Model):
 
     tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
     user_id = models.UUIDField(null=True, blank=True, help_text="User who placed this order")
-    
     total_amount = models.DecimalField(
         max_digits=10,
         decimal_places=2,
         validators=[MinValueValidator(Decimal('0.00'))]
     )
-    
-    status = models.CharField(
-        max_length=20,
-        choices=STATUS_CHOICES,
-        default='pending'
-    )
-    
-    payment_status = models.CharField(
-        max_length=20,
-        choices=PAYMENT_STATUS_CHOICES,
-        default='pending'
-    )
-    
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    payment_status = models.CharField(max_length=20, choices=PAYMENT_STATUS_CHOICES, default='pending')
     shipping_address = models.TextField()
     billing_address = models.TextField()
-    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -257,15 +223,8 @@ class PharmacyOrder(models.Model):
 class PharmacyOrderItem(models.Model):
     """Items in a pharmacy order"""
     tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
-    order = models.ForeignKey(
-        PharmacyOrder,
-        on_delete=models.CASCADE,
-        related_name='order_items'
-    )
-    product = models.ForeignKey(
-        PharmacyProduct,
-        on_delete=models.PROTECT
-    )
+    order = models.ForeignKey(PharmacyOrder, on_delete=models.CASCADE, related_name='order_items')
+    product = models.ForeignKey(PharmacyProduct, on_delete=models.PROTECT)
     quantity = models.PositiveIntegerField()
     price_at_time = models.DecimalField(
         max_digits=10,
@@ -285,5 +244,108 @@ class PharmacyOrderItem(models.Model):
 
     @property
     def total_price(self):
-        """Calculate total price for this order item"""
         return self.quantity * self.price_at_time
+
+
+class Prescription(models.Model):
+    """Clinical prescription tied to an OPD visit."""
+
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('partially_dispensed', 'Partially Dispensed'),
+        ('dispensed', 'Dispensed'),
+        ('cancelled', 'Cancelled'),
+    ]
+
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
+    visit = models.ForeignKey(
+        'opd.Visit',
+        on_delete=models.CASCADE,
+        related_name='prescriptions',
+        help_text="OPD visit this prescription belongs to",
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    notes = models.TextField(blank=True, help_text="General prescription notes")
+    created_by_user_id = models.UUIDField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'pharmacy_prescriptions'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['tenant_id'], name='pharmacy_pr_tenant__ca0aef_idx'),
+            models.Index(fields=['tenant_id', 'visit'], name='pharmacy_pr_tenant__ee0c13_idx'),
+            models.Index(fields=['tenant_id', 'status'], name='pharmacy_pr_tenant__34ac52_idx'),
+        ]
+
+    def __str__(self):
+        return f"Prescription {self.id} for visit {self.visit_id}"
+
+
+class PrescriptionItem(models.Model):
+    """Individual medicine line item within a prescription."""
+
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
+    prescription = models.ForeignKey(
+        Prescription,
+        on_delete=models.CASCADE,
+        related_name='items',
+    )
+    inventory_item = models.ForeignKey(
+        'inventory.InventoryItem',
+        on_delete=models.PROTECT,
+        related_name='prescription_items',
+        null=True,
+        blank=True,
+        help_text="Inventory item being prescribed (nullable for manual entries)",
+    )
+    medicine_name = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Snapshot of inventory item name at prescription time",
+    )
+    dosage = models.CharField(max_length=100, blank=True)
+    frequency = models.CharField(max_length=100, blank=True)
+    duration = models.CharField(max_length=100, blank=True)
+    quantity = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal('1.00'),
+        validators=[MinValueValidator(Decimal('0.01'))],
+        help_text="Quantity prescribed",
+    )
+    dispensed_quantity = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        validators=[MinValueValidator(Decimal('0.00'))],
+    )
+    is_dispensed = models.BooleanField(default=False)
+    dispensed_at = models.DateTimeField(null=True, blank=True)
+    dispensed_by_user_id = models.UUIDField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'pharmacy_prescription_items'
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['tenant_id'], name='pharmacy_pr_tenant__eafb3e_idx'),
+            models.Index(fields=['tenant_id', 'prescription'], name='pharmacy_pr_tenant__8a3b6e_idx'),
+            models.Index(fields=['tenant_id', 'inventory_item'], name='pharmacy_pr_tenant__58cd22_idx'),
+        ]
+
+    def __str__(self):
+        return f"{self.medicine_name or self.inventory_item_id} - {self.quantity}"
+
+    def mark_dispensed(self, quantity=None, user_id=None):
+        """Mark item as dispensed and record metadata."""
+        from django.utils import timezone
+        self.is_dispensed = True
+        if quantity is not None:
+            self.dispensed_quantity = quantity
+        self.dispensed_at = timezone.now()
+        if user_id is not None:
+            self.dispensed_by_user_id = user_id
+        self.save()

@@ -36,17 +36,17 @@ class HospitalAdmin(TenantModelAdmin):
     )
 
     readonly_fields = ['tenant_id', 'created_at', 'updated_at']
-    
+
     def has_add_permission(self, request):
         """Prevent adding more than one hospital"""
         if Hospital.objects.exists():
             return False
         return super().has_add_permission(request)
-    
+
     def has_delete_permission(self, request, obj=None):
         """Prevent deletion of hospital configuration"""
         return False
-    
+
     def changeform_view(self, request, object_id=None, form_url='', extra_context=None):
         """Customize change form"""
         extra_context = extra_context or {}

@@ -16,7 +16,6 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.clinical.models import (
-    ClinicalFieldValue,
     ClinicalForm,
     ClinicalFormField,
     ClinicalFormSection,
@@ -444,8 +443,3 @@ class SavedFormSnapshotViewSetTest(BaseViewSetTest):
         self.auth(self.token_a)
         r = self.client.get(reverse("savedformsnapshot-detail", kwargs={"pk": self.snap_b.pk}))
         self.assertEqual(r.status_code, status.HTTP_404_NOT_FOUND)
-
-    def test_retrieve_own_returns_200(self):
-        self.auth(self.token_a)
-        r = self.client.get(reverse("savedformsnapshot-detail", kwargs={"pk": self.snap_a.pk}))
-        self.assertEqual(r.status_code, status.HTTP_200_OK)

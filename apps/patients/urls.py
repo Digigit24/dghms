@@ -6,7 +6,7 @@ from .views import PatientProfileViewSet
 router = DefaultRouter()
 router.register(r'profiles', PatientProfileViewSet, basename='patient')
 
-import logging as _log
+import logging as _log  # noqa: E402
 _log.getLogger(__name__).warning('[PATIENTS URLS] Loading urls.py v2 with explicit export paths')
 
 _export_view           = PatientProfileViewSet.as_view({'get': 'export'})

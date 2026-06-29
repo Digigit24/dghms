@@ -16,7 +16,7 @@ def create_pharmacy_transaction(sender, instance, created, **kwargs):
                     'description': 'Income from pharmacy product sales'
                 }
             )
-            
+
             Transaction.objects.create(
                 amount=instance.total_amount,
                 category=pharmacy_category,

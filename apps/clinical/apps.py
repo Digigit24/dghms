@@ -7,4 +7,4 @@ class ClinicalConfig(AppConfig):
     verbose_name = "Clinical Forms & Records"
 
     def ready(self):
-        import apps.clinical.signals  # noqa: F401
+        pass  # no

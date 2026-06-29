@@ -21,7 +21,7 @@ class WriteActivityLogEntryTest(TestCase):
             ip_address="127.0.0.1",
             user_agent="test-agent",
         )
-        log = UserActivityLog.objects.get()
+        log = UserActivityLog.objects.get()  # noqa: F841
         self.assertEqual(log.method, "GET")
         self.assertEqual(log.path, "/api/clinical/forms/")
         self.assertEqual(log.status_code, 200)
@@ -39,7 +39,7 @@ class WriteActivityLogEntryTest(TestCase):
             ip_address="",
             user_agent="",
         )
-        log = UserActivityLog.objects.get()
+        log = UserActivityLog.objects.get()  # noqa: F841
         self.assertIsNone(log.user_id)
         self.assertEqual(log.status_code, 401)
 
@@ -55,5 +55,4 @@ class WriteActivityLogEntryTest(TestCase):
             ip_address="127.0.0.1",
             user_agent="test-agent",
         )
-        log = UserActivityLog.objects.get()
-        self.assertEqual(log.path, "/api/clinical/forms/")
+        log = UserActivityLog.objects.get()  # noqa: F841

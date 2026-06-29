@@ -76,12 +76,13 @@ class RazorpayConfigViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     hms_module = 'orders'
     http_method_names = ['get', 'post', 'put', 'patch']  # No delete
 
+    # Razorpay config is hospital-level admin config — maps to hms.orders.edit
     action_permission_map = {
-        'list': 'manage_razorpay_config',
-        'retrieve': 'manage_razorpay_config',
-        'create': 'manage_razorpay_config',
-        'update': 'manage_razorpay_config',
-        'partial_update': 'manage_razorpay_config',
+        'list': 'view',
+        'retrieve': 'view',
+        'create': 'edit',
+        'update': 'edit',
+        'partial_update': 'edit',
     }
 
     def get_serializer_class(self):
@@ -227,13 +228,14 @@ class FeeTypeViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     permission_classes = [HMSPermission]
     hms_module = 'orders'
 
+    # Maps to PERMISSION_SCHEMA hms.orders: view, create, edit, delete
     action_permission_map = {
-        'list': 'view_fee_types',
-        'retrieve': 'view_fee_types',
-        'create': 'manage_fee_types',
-        'update': 'manage_fee_types',
-        'partial_update': 'manage_fee_types',
-        'destroy': 'manage_fee_types',
+        'list': 'view',
+        'retrieve': 'view',
+        'create': 'create',
+        'update': 'edit',
+        'partial_update': 'edit',
+        'destroy': 'delete',
     }
 
     def list(self, request, *args, **kwargs):
@@ -298,8 +300,8 @@ class OrderViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         'create': 'create',
         'update': 'edit',
         'partial_update': 'edit',
-        'destroy': 'cancel',
-        'statistics': 'view_reports',
+        'destroy': 'delete',
+        'statistics': 'view',
     }
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -326,7 +328,7 @@ class OrderViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         elif self.action in ['create', 'update', 'partial_update']:
             return OrderCreateUpdateSerializer
         return OrderDetailSerializer
-    
+
     def get_queryset(self):
         """Custom queryset filtering"""
         queryset = super().get_queryset()
@@ -343,10 +345,10 @@ class OrderViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             else:
                 # Regular staff can see orders they created
                 queryset = queryset.filter(user=user)
-        
+
         # Additional query parameter filtering
         params = self.request.query_params
-        
+
         # Date range filtering
         date_from = params.get('date_from')
         date_to = params.get('date_to')
@@ -354,7 +356,7 @@ class OrderViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             queryset = queryset.filter(created_at__date__gte=date_from)
         if date_to:
             queryset = queryset.filter(created_at__date__lte=date_to)
-        
+
         # Amount range filtering
         min_amount = params.get('min_amount')
         max_amount = params.get('max_amount')
@@ -362,9 +364,9 @@ class OrderViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             queryset = queryset.filter(total_amount__gte=min_amount)
         if max_amount:
             queryset = queryset.filter(total_amount__lte=max_amount)
-        
+
         return queryset
-    
+
     @extend_schema(
         summary="Get Order Statistics",
         description="Retrieve comprehensive order statistics (Admin only)",
@@ -384,19 +386,19 @@ class OrderViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             paid_orders=Count('id', filter=Q(is_paid=True)),
             unpaid_orders=Count('id', filter=Q(is_paid=False))
         )
-        
+
         # Service type breakdown
         service_breakdown = Order.objects.values('services_type').annotate(
             count=Count('id'),
             total_revenue=Sum('total_amount')
         )
-        
+
         # Status breakdown
         status_breakdown = Order.objects.values('status').annotate(
             count=Count('id'),
             total_revenue=Sum('total_amount')
         )
-        
+
         return Response({
             'success': True,
             'data': {
@@ -411,7 +413,7 @@ class OrderViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                 'status_breakdown': list(status_breakdown)
             }
         })
-    
+
     @extend_schema(
         summary="Cancel Order",
         description="Soft cancel an existing order",
@@ -420,18 +422,18 @@ class OrderViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         """Custom destroy to soft cancel order"""
         instance = self.get_object()
-        
+
         # Only allow cancellation of pending orders
         if instance.status != 'pending':
             return Response({
                 'success': False,
                 'error': 'Only pending orders can be cancelled'
             }, status=status.HTTP_400_BAD_REQUEST)
-        
+
         # Update order status
         instance.status = 'cancelled'
         instance.save()
-        
+
         serializer = self.get_serializer(instance)
         return Response({
             'success': True,

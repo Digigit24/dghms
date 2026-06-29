@@ -191,7 +191,7 @@ class IPDBillItemSerializer(TenantMixin, serializers.ModelSerializer):
     def validate(self, attrs):
         """Validate bill item data."""
         unit_price = attrs.get('unit_price')
-        
+
         # If system_calculated_price is not provided, set it to unit_price
         if 'system_calculated_price' not in attrs or attrs.get('system_calculated_price') is None:
             attrs['system_calculated_price'] = unit_price
@@ -211,6 +211,7 @@ class IPDBillingSerializer(TenantMixin, serializers.ModelSerializer):
     admission_id = serializers.ReadOnlyField(source='admission.admission_id')
     patient_name = serializers.ReadOnlyField(source='admission.patient.full_name')
     items = IPDBillItemSerializer(many=True, read_only=True)
+    bed_day_info = serializers.SerializerMethodField()
 
     class Meta:
         model = IPDBilling
@@ -219,35 +220,19 @@ class IPDBillingSerializer(TenantMixin, serializers.ModelSerializer):
             'bill_number', 'bill_date', 'doctor_id', 'diagnosis', 'remarks',
             'total_amount', 'discount_percent', 'discount_amount', 'payable_amount',
             'payment_mode', 'payment_details', 'received_amount', 'balance_amount', 'payment_status',
-            'items', 'billed_by_id', 'created_at', 'updated_at'
+            'items', 'bed_day_info', 'billed_by_id', 'created_at', 'updated_at'
         ]
         read_only_fields = [
             'id', 'tenant_id', 'bill_number', 'total_amount', 'payable_amount', 'balance_amount',
             'payment_status', 'billed_by_id', 'created_at', 'updated_at'
         ]
 
-    def create(self, validated_data):
-        """
-        Create a new IPD Billing instance.
-        """
-        # The admission instance is expected to be in validated_data
-        billing = IPDBilling.objects.create(**validated_data)
-
-        # Optionally, add initial bed charges or other items
-        billing.add_bed_charges()
-
-        return billing
+    def get_bed_day_info(self, obj):
+        return obj.get_bed_day_info()
 
 
-class IPDBillingListSerializer(TenantMixin, serializers.ModelSerializer):
-    """Minimal serializer for listing IPD bills."""
+class IPDBillingListSerializer(IPDBillingSerializer):
+    """Lightweight serializer for list views."""
 
-    admission_id = serializers.ReadOnlyField(source='admission.admission_id')
-    patient_name = serializers.ReadOnlyField(source='admission.patient.full_name')
-
-    class Meta:
-        model = IPDBilling
-        fields = [
-            'id', 'bill_number', 'admission_id', 'patient_name',
-            'bill_date', 'total_amount', 'received_amount', 'balance_amount', 'payment_status'
-        ]
+    class Meta(IPDBillingSerializer.Meta):
+        pass

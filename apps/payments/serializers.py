@@ -2,7 +2,7 @@ from datetime import timezone
 from rest_framework import serializers
 from django.db.models import Q
 
-from .models import PaymentCategory, Transaction, AccountingPeriod
+from .models import PaymentCategory, Transaction, AccountingPeriod, BillPayment
 
 
 class PaymentCategorySerializer(serializers.ModelSerializer):
@@ -18,21 +18,21 @@ class TransactionRelatedObjectSerializer(serializers.Serializer):
     """
     content_type = serializers.SerializerMethodField()
     object_details = serializers.SerializerMethodField()
-    
+
     def get_content_type(self, obj):
         """Get content type name"""
         return obj.content_type.model if obj.content_type else None
-    
+
     def get_object_details(self, obj):
         """
         Retrieve dynamic object details based on content type
         """
         if not obj.related_object:
             return None
-        
+
         # Map different object types to their representations
         content_type_model = obj.content_type.model
-        
+
         if content_type_model == 'order':
             return {
                 'id': obj.related_object.id,
@@ -45,7 +45,7 @@ class TransactionRelatedObjectSerializer(serializers.Serializer):
                 'appointment_id': obj.related_object.appointment_id,
                 'doctor': str(obj.related_object.doctor)
             }
-        
+
         # Add more content type mappings as needed
         return str(obj.related_object)
 
@@ -78,14 +78,14 @@ class TransactionSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at',
             'reconciled_at', 'reconciled_by_id'
         ]
-    
+
     def get_related_object_details(self, obj):
         """Get details of the related object"""
         if obj.content_type and obj.related_object:
             serializer = TransactionRelatedObjectSerializer(obj)
             return serializer.data
         return None
-    
+
     def validate(self, attrs):
         """
         Additional validation for transactions
@@ -93,7 +93,7 @@ class TransactionSerializer(serializers.ModelSerializer):
         # Validate related object if content type is provided
         content_type = attrs.get('content_type')
         object_id = attrs.get('object_id')
-        
+
         if content_type and object_id:
             try:
                 related_object = content_type.get_object_for_this_type(pk=object_id)
@@ -102,20 +102,20 @@ class TransactionSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({
                     'object_id': f'Invalid object ID for {content_type.model}'
                 })
-        
+
         return attrs
-    
+
     def create(self, validated_data):
         """
         Custom create method to handle related objects
         """
         # Remove write-only fields
         request = self.context.get('request')
-        
+
         # Set user from request if not provided
         if request and request.user and not validated_data.get('user'):
             validated_data['user'] = request.user
-        
+
         return super().create(validated_data)
 
 
@@ -134,45 +134,68 @@ class AccountingPeriodSerializer(serializers.ModelSerializer):
             'total_income', 'total_expenses',
             'net_profit', 'closed_at', 'closed_by_id'
         ]
-    
+
     def validate(self, attrs):
         """
         Validate accounting period dates
         """
         start_date = attrs.get('start_date')
         end_date = attrs.get('end_date')
-        
+
         if start_date and end_date and start_date >= end_date:
             raise serializers.ValidationError({
                 'end_date': 'End date must be after start date'
             })
-        
+
         # Check for overlapping periods
         existing_periods = AccountingPeriod.objects.filter(
             Q(start_date__lte=attrs.get('end_date')) &
             Q(end_date__gte=attrs.get('start_date'))
         )
-        
+
         if existing_periods.exists():
             raise serializers.ValidationError({
                 'start_date': 'An accounting period already exists for this date range'
             })
-        
+
         return attrs
-    
+
     def create(self, validated_data):
         """
         Custom create method to set closed_by for closing an accounting period
         """
         request = self.context.get('request')
-        
+
         # Set closed_by for closing an accounting period
         if validated_data.get('is_closed') and request:
             validated_data['closed_by'] = request.user
             validated_data['closed_at'] = timezone.now()
-        
+
         # Calculate financial summary during creation
         period = AccountingPeriod.objects.create(**validated_data)
         period.calculate_financial_summary()
-        
+
         return period
+
+
+class BillPaymentSerializer(serializers.ModelSerializer):
+    """Serializer for the unified BillPayment ledger model."""
+
+    class Meta:
+        model = BillPayment
+        fields = [
+            "id", "tenant_id", "bill_type", "opd_bill", "ipd_bill",
+            "bill_number", "patient_name", "encounter_number",
+            "amount", "payment_mode", "payment_date", "notes",
+            "recorded_by_user_id", "created_at", "updated_at",
+        ]
+        read_only_fields = ["id", "tenant_id", "created_at", "updated_at"]
+
+
+class BillPaymentStatsSerializer(serializers.Serializer):
+    """Read-only stats summary for bill payments."""
+
+    total_amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    total_count = serializers.IntegerField()
+    by_mode = serializers.DictField(child=serializers.DecimalField(max_digits=12, decimal_places=2))
+    by_bill_type = serializers.DictField(child=serializers.DecimalField(max_digits=12, decimal_places=2))

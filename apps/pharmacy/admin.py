@@ -69,7 +69,7 @@ class PharmacyProductAdmin(TenantModelAdmin):
             'classes': ('collapse',)
         }),
     )
-    
+
     def stock_status(self, obj):
         """Display stock status with color coding"""
         if obj.quantity == 0:
@@ -87,7 +87,7 @@ class CartItemInline(admin.TabularInline):
     extra = 0
     readonly_fields = ['price_at_time', 'total_price']
     fields = ['product', 'quantity', 'price_at_time', 'total_price']
-    
+
     def total_price(self, obj):
         """Calculate total price for cart item"""
         if obj.id:
@@ -120,7 +120,7 @@ class PharmacyOrderItemInline(admin.TabularInline):
     extra = 0
     readonly_fields = ['product', 'quantity', 'price_at_time', 'total_price']
     can_delete = False
-    
+
     def total_price(self, obj):
         """Calculate total price for order item"""
         if obj.id:
@@ -160,7 +160,7 @@ class PharmacyOrderAdmin(TenantModelAdmin):
             'classes': ('collapse',)
         }),
     )
-    
+
     def has_add_permission(self, request):
         """Disable manual order creation in admin"""
         return False

@@ -526,7 +526,7 @@ class Command(BaseCommand):
         ).first()
 
         if existing and reset and not no_input:
-            response_count = ClinicalNoteTemplateFieldResponse.objects.filter(
+            response_count = ClinicalNoteTemplateFieldResponse.objects.filter(  # noqa: F841
                 tenant_id=tenant_id,
                 field_responses__field__template=existing,
             ).distinct().count() if False else 0

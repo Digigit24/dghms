@@ -4,7 +4,6 @@ from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from django.contrib.contenttypes.models import ContentType
 from django.core.validators import MinValueValidator, MaxValueValidator
-from django.core.exceptions import ValidationError
 from django.utils import timezone
 from decimal import Decimal
 import os
@@ -19,7 +18,7 @@ class Visit(models.Model):
     Tracks every patient visit to the OPD, managing queue positions,
     consultation timing, and payment status.
     """
-    
+
     VISIT_TYPE_CHOICES = [
         ('new', 'New Visit'),
         ('follow_up', 'Follow-up'),
@@ -33,7 +32,7 @@ class Visit(models.Model):
         ('high', 'High'),
         ('urgent', 'Urgent'),
     ]
-    
+
     STATUS_CHOICES = [
         ('waiting', 'Waiting'),
         ('called', 'Called'),
@@ -42,13 +41,13 @@ class Visit(models.Model):
         ('cancelled', 'Cancelled'),
         ('no_show', 'No Show'),
     ]
-    
+
     PAYMENT_STATUS_CHOICES = [
         ('unpaid', 'Unpaid'),
         ('partial', 'Partially Paid'),
         ('paid', 'Paid'),
     ]
-    
+
     # Primary Fields
     id = models.AutoField(primary_key=True)
     tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
@@ -56,7 +55,7 @@ class Visit(models.Model):
         max_length=50,
         help_text="Unique visit identifier (e.g., OPD/20231223/001)"
     )
-    
+
     # Related Models
     patient = models.ForeignKey(
         'patients.PatientProfile',
@@ -88,7 +87,7 @@ class Visit(models.Model):
         help_text="Referring doctor if applicable"
     )
     created_by_id = models.UUIDField(null=True, blank=True, help_text="User who created the visit")
-    
+
     # Visit Information
     visit_date = models.DateField(default=timezone.now)
     visit_type = models.CharField(
@@ -134,7 +133,7 @@ class Visit(models.Model):
         blank=True,
         help_text="Position in waiting queue"
     )
-    
+
     # Consultation Timing
     consultation_start_time = models.DateTimeField(
         null=True,
@@ -144,7 +143,7 @@ class Visit(models.Model):
         null=True,
         blank=True
     )
-    
+
     # Payment Information
     payment_status = models.CharField(
         max_length=20,
@@ -198,10 +197,10 @@ class Visit(models.Model):
             models.Index(fields=['status', 'visit_date'], name='visit_status_date_idx'),
             models.Index(fields=['payment_status'], name='visit_payment_idx'),
         ]
-    
+
     def __str__(self):
         return self.visit_number
-    
+
     def save(self, *args, **kwargs):
         """Auto-generate visit number if not set."""
         if not self.visit_number:
@@ -280,25 +279,25 @@ class Visit(models.Model):
         raise NotImplementedError(
             "Use generate_visit_number_for_tenant(tenant_id, visit_date) instead"
         )
-    
+
     def calculate_waiting_time(self):
         """Calculate time spent in waiting queue."""
         if self.consultation_start_time:
             delta = self.consultation_start_time - self.entry_time
             return int(delta.total_seconds() / 60)  # Return minutes
         return None
-    
+
     def get_queue_position(self):
         """Calculate current position in queue."""
         if self.status not in ['waiting', 'called']:
             return None
-        
+
         return Visit.objects.filter(
             visit_date=self.visit_date,
             status__in=['waiting', 'called'],
             entry_time__lt=self.entry_time
         ).count() + 1
-    
+
     def update_payment_status(self):
         """Update payment status based on amounts."""
         if self.paid_amount >= self.total_amount:
@@ -320,20 +319,20 @@ class OPDBill(models.Model):
     Stores billing details for OPD consultations including
     fees, discounts, and payment information.
     """
-    
+
     OPD_TYPE_CHOICES = [
         ('consultation', 'Consultation'),
         ('follow_up', 'Follow-up'),
         ('emergency', 'Emergency'),
     ]
-    
+
     CHARGE_TYPE_CHOICES = [
         ('first_visit', 'First Visit'),
         ('revisit', 'Revisit'),
         ('follow_up', 'Follow-up'),
         ('emergency', 'Emergency'),
     ]
-    
+
     PAYMENT_MODE_CHOICES = [
         ('cash', 'Cash'),
         ('card', 'Card'),
@@ -342,13 +341,13 @@ class OPDBill(models.Model):
         ('razorpay', 'Razorpay'),
         ('multiple', 'Multiple Modes'),
     ]
-    
+
     PAYMENT_STATUS_CHOICES = [
         ('unpaid', 'Unpaid'),
         ('partial', 'Partially Paid'),
         ('paid', 'Paid'),
     ]
-    
+
     # Primary Fields
     id = models.AutoField(primary_key=True)
     tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
@@ -362,7 +361,7 @@ class OPDBill(models.Model):
         help_text="Unique bill identifier (e.g., OPD-BILL/20231223/001)"
     )
     bill_date = models.DateTimeField(auto_now_add=True)
-    
+
     # Doctor Information
     doctor = models.ForeignKey(
         'doctors.DoctorProfile',
@@ -371,7 +370,7 @@ class OPDBill(models.Model):
         null=True,
         blank=True
     )
-    
+
     # Bill Classification
     opd_type = models.CharField(
         max_length=20,
@@ -389,11 +388,11 @@ class OPDBill(models.Model):
         choices=CHARGE_TYPE_CHOICES,
         default='first_visit'
     )
-    
+
     # Medical Information
     diagnosis = models.TextField(blank=True)
     remarks = models.TextField(blank=True)
-    
+
     # Financial Details
     total_amount = models.DecimalField(
         max_digits=10,
@@ -421,7 +420,7 @@ class OPDBill(models.Model):
         default=Decimal('0.00'), # Added default value
         validators=[MinValueValidator(Decimal('0.00'))]
     )
-    
+
     # Payment Details
     payment_mode = models.CharField(
         max_length=20,
@@ -449,14 +448,14 @@ class OPDBill(models.Model):
         choices=PAYMENT_STATUS_CHOICES,
         default='unpaid'
     )
-    
+
     # Audit Fields
     billed_by_id = models.UUIDField(null=True, blank=True, help_text="User who created this bill")
-    
+
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         db_table = 'opd_bills'
         ordering = ['-bill_date']
@@ -472,10 +471,10 @@ class OPDBill(models.Model):
             models.Index(fields=['doctor', 'bill_date'], name='opd_bill_doctor_date_idx'),
             models.Index(fields=['payment_status'], name='opd_bill_payment_idx'),
         ]
-    
+
     def __str__(self):
         return self.bill_number
-    
+
     def save(self, *args, **kwargs):
         """
         Save OPDBill with safeguards against duplicate bill numbers (race conditions).
@@ -579,7 +578,7 @@ class OPDBill(models.Model):
                 continue
 
         return f"{bill_prefix}{today_count:03d}"
-        
+
     def _calculate_derived_totals(self):
         """
         Calculate total amounts from items, apply discount, and update status.
@@ -610,15 +609,15 @@ class OPDBill(models.Model):
             self.payment_status = 'partial'
         else:
             self.payment_status = 'unpaid'
-    
+
     def record_payment(self, amount, mode='cash', details=None):
         """Record a payment for this bill."""
         self.received_amount += Decimal(str(amount))
         self.payment_mode = mode
-        
+
         if details:
             self.payment_details = details
-        
+
         self.save()
 
 
@@ -629,7 +628,7 @@ class ProcedureMaster(models.Model):
     Stores available procedures, tests, and investigations
     with their default charges.
     """
-    
+
     CATEGORY_CHOICES = [
         ('laboratory', 'Laboratory'),
         ('radiology', 'Radiology'),
@@ -642,7 +641,7 @@ class ProcedureMaster(models.Model):
         ('xray', 'X-Ray'),
         ('other', 'Other'),
     ]
-    
+
     # Primary Fields
     id = models.AutoField(primary_key=True)
     tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
@@ -656,21 +655,21 @@ class ProcedureMaster(models.Model):
         choices=CATEGORY_CHOICES
     )
     description = models.TextField(blank=True)
-    
+
     # Pricing
     default_charge = models.DecimalField(
         max_digits=10,
         decimal_places=2,
         validators=[MinValueValidator(Decimal('0.00'))]
     )
-    
+
     # Status
     is_active = models.BooleanField(default=True)
-    
+
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         db_table = 'procedure_masters'
         ordering = ['category', 'name']
@@ -685,7 +684,7 @@ class ProcedureMaster(models.Model):
             models.Index(fields=['category'], name='proc_master_category_idx'),
             models.Index(fields=['is_active'], name='proc_master_active_idx'),
         ]
-    
+
     def __str__(self):
         return f"{self.code} - {self.name}"
 
@@ -697,7 +696,7 @@ class ProcedurePackage(models.Model):
     Groups multiple procedures into packages with
     discounted pricing.
     """
-    
+
     # Primary Fields
     id = models.AutoField(primary_key=True)
     tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
@@ -712,7 +711,7 @@ class ProcedurePackage(models.Model):
         ProcedureMaster,
         related_name='packages'
     )
-    
+
     # Pricing
     total_charge = models.DecimalField(
         max_digits=10,
@@ -726,14 +725,14 @@ class ProcedurePackage(models.Model):
         validators=[MinValueValidator(Decimal('0.00'))],
         help_text="Package discounted price"
     )
-    
+
     # Status
     is_active = models.BooleanField(default=True)
-    
+
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         db_table = 'procedure_packages'
         ordering = ['name']
@@ -746,10 +745,10 @@ class ProcedurePackage(models.Model):
             models.Index(fields=['code'], name='proc_package_code_idx'),
             models.Index(fields=['is_active'], name='proc_package_active_idx'),
         ]
-    
+
     def __str__(self):
         return f"{self.code} - {self.name}"
-    
+
     @property
     def discount_percent(self):
         """Calculate discount percentage."""
@@ -757,7 +756,7 @@ class ProcedurePackage(models.Model):
             discount = self.total_charge - self.discounted_charge
             return (discount / self.total_charge) * 100
         return 0
-    
+
     @property
     def savings_amount(self):
         """Calculate savings amount."""
@@ -767,17 +766,17 @@ class ProcedurePackage(models.Model):
 # class ProcedureBill(models.Model):
 #     """
 #     Procedure Bill Model - Investigation billing.
-    
+
 #     Stores billing for procedures and investigations
 #     ordered during OPD visits.
 #     """
-    
+
 #     BILL_TYPE_CHOICES = [
 #         ('hospital', 'Hospital'),
 #         ('diagnostic', 'Diagnostic Center'),
 #         ('external', 'External Lab'),
 #     ]
-    
+
 #     PAYMENT_MODE_CHOICES = [
 #         ('cash', 'Cash'),
 #         ('card', 'Card'),
@@ -785,13 +784,13 @@ class ProcedurePackage(models.Model):
 #         ('bank', 'Bank Transfer'),
 #         ('multiple', 'Multiple Modes'),
 #     ]
-    
+
 #     PAYMENT_STATUS_CHOICES = [
 #         ('unpaid', 'Unpaid'),
 #         ('partial', 'Partially Paid'),
 #         ('paid', 'Paid'),
 #     ]
-    
+
 #     # Primary Fields
 #     id = models.AutoField(primary_key=True)
 #     tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
@@ -806,7 +805,7 @@ class ProcedurePackage(models.Model):
 #         help_text="Unique bill identifier (e.g., PROC-BILL/20231223/001)"
 #     )
 #     bill_date = models.DateTimeField(auto_now_add=True)
-    
+
 #     # Doctor Information
 #     doctor = models.ForeignKey(
 #         'doctors.DoctorProfile',
@@ -814,7 +813,7 @@ class ProcedurePackage(models.Model):
 #         related_name='ordered_procedures',
 #         help_text="Doctor who ordered the procedures"
 #     )
-    
+
 #     # Bill Classification
 #     bill_type = models.CharField(
 #         max_length=20,
@@ -826,7 +825,7 @@ class ProcedurePackage(models.Model):
 #         blank=True,
 #         help_text="Additional categorization"
 #     )
-    
+
 #     # Financial Details
 #     total_amount = models.DecimalField(
 #         max_digits=10,
@@ -853,7 +852,7 @@ class ProcedurePackage(models.Model):
 #         decimal_places=2,
 #         validators=[MinValueValidator(Decimal('0.00'))]
 #     )
-    
+
 #     # Payment Details
 #     payment_mode = models.CharField(
 #         max_length=20,
@@ -881,14 +880,14 @@ class ProcedurePackage(models.Model):
 #         choices=PAYMENT_STATUS_CHOICES,
 #         default='unpaid'
 #     )
-    
+
 #     # Audit Fields
 #     billed_by_id = models.UUIDField(null=True, blank=True, help_text="User who created this bill")
-    
+
 #     # Timestamps
 #     created_at = models.DateTimeField(auto_now_add=True)
 #     updated_at = models.DateTimeField(auto_now=True)
-    
+
 #     class Meta:
 #         db_table = 'procedure_bills'
 #         ordering = ['-bill_date']
@@ -903,50 +902,50 @@ class ProcedurePackage(models.Model):
 #             models.Index(fields=['doctor', 'bill_date'], name='proc_bill_doctor_date_idx'),
 #             models.Index(fields=['payment_status'], name='proc_bill_payment_idx'),
 #         ]
-    
+
 #     def __str__(self):
 #         return self.bill_number
-    
+
 #     def save(self, *args, **kwargs):
 #         """Auto-generate bill number and calculate amounts."""
 #         if not self.bill_number:
 #             self.bill_number = self.generate_bill_number()
 #         self.calculate_totals()
 #         super().save(*args, **kwargs)
-    
+
 #     @staticmethod
 #     def generate_bill_number():
 #         """Generate unique bill number: PROC-BILL/YYYYMMDD/###"""
 #         from datetime import date
 #         today = date.today()
 #         date_str = today.strftime('%Y%m%d')
-        
+
 #         # Get count of bills for today
 #         today_count = ProcedureBill.objects.filter(
 #             bill_date__date=today
 #         ).count() + 1
-        
+
 #         return f"PROC-BILL/{date_str}/{today_count:03d}"
-    
+
 #     def calculate_totals(self):
 #         """Calculate total amount from items and apply discount."""
 #         # Calculate total from items
 #         self.total_amount = sum(
 #             item.amount for item in self.items.all()
 #         )
-        
+
 #         # Calculate discount amount
 #         if self.discount_percent > 0:
 #             self.discount_amount = (
 #                 self.total_amount * self.discount_percent / Decimal('100.00')
 #             )
-        
+
 #         # Calculate payable amount
 #         self.payable_amount = self.total_amount - self.discount_amount
-        
+
 #         # Calculate balance
 #         self.balance_amount = self.payable_amount - self.received_amount
-        
+
 #         # Update payment status
 #         if self.received_amount >= self.payable_amount:
 #             self.payment_status = 'paid'
@@ -955,18 +954,18 @@ class ProcedurePackage(models.Model):
 #             self.payment_status = 'partial'
 #         else:
 #             self.payment_status = 'unpaid'
-    
+
 #     def record_payment(self, amount, mode='cash', details=None):
 #         """Record a payment for this bill."""
 #         self.received_amount += Decimal(str(amount))
 #         self.payment_mode = mode
-        
+
 #         if details:
 #             self.payment_details = details
-        
+
 #         self.calculate_totals()
 #         self.save()
-        
+
 #         # Update visit payment status
 #         self.visit.paid_amount += Decimal(str(amount))
 #         self.visit.update_payment_status()
@@ -975,10 +974,10 @@ class ProcedurePackage(models.Model):
 # class ProcedureBillItem(models.Model):
 #     """
 #     Procedure Bill Item Model - Line items in procedure bills.
-    
+
 #     Individual procedures/tests listed in a procedure bill.
 #     """
-    
+
 #     # Primary Fields
 #     id = models.AutoField(primary_key=True)
 #     tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
@@ -994,7 +993,7 @@ class ProcedurePackage(models.Model):
 #         blank=True,
 #         related_name='bill_items'
 #     )
-    
+
 #     # Item Details
 #     particular_name = models.CharField(
 #         max_length=200,
@@ -1020,7 +1019,7 @@ class ProcedurePackage(models.Model):
 #         default=0,
 #         help_text="Display order in bill"
 #     )
-    
+
 #     class Meta:
 #         db_table = 'procedure_bill_items'
 #         ordering = ['item_order', 'id']
@@ -1030,20 +1029,20 @@ class ProcedurePackage(models.Model):
 #             models.Index(fields=['tenant_id']),
 #             models.Index(fields=['tenant_id', 'procedure_bill']),
 #         ]
-    
+
 #     def __str__(self):
 #         return f"{self.particular_name} - {self.quantity} × {self.unit_charge}"
-    
+
 #     def save(self, *args, **kwargs):
 #         """Calculate amount before saving."""
 #         self.amount = Decimal(str(self.quantity)) * self.unit_charge
-        
+
 #         # Store procedure name
 #         if self.procedure and not self.particular_name:
 #             self.particular_name = self.procedure.name
-        
+
 #         super().save(*args, **kwargs)
-        
+
 #         # Recalculate bill totals
 #         self.procedure_bill.calculate_totals()
 #         self.procedure_bill.save()
@@ -1180,7 +1179,7 @@ class ClinicalNote(models.Model):
     Stores clinical documentation including complaints,
     diagnosis, treatment plans, and prescriptions.
     """
-    
+
     # Primary Fields
     id = models.AutoField(primary_key=True)
     tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
@@ -1195,7 +1194,7 @@ class ClinicalNote(models.Model):
         help_text="Electronic Health Record ID"
     )
     note_date = models.DateTimeField(auto_now_add=True)
-    
+
     # Clinical Information
     present_complaints = models.TextField(
         blank=True,
@@ -1226,7 +1225,7 @@ class ClinicalNote(models.Model):
         blank=True,
         help_text="Doctor's advice to patient"
     )
-    
+
     # Surgery/Referral
     suggested_surgery_name = models.CharField(
         max_length=200,
@@ -1245,21 +1244,21 @@ class ClinicalNote(models.Model):
         related_name='received_referrals',
         help_text="Doctor to whom patient is referred"
     )
-    
+
     # Follow-up
     next_followup_date = models.DateField(
         null=True,
         blank=True,
         help_text="Next follow-up appointment date"
     )
-    
+
     # Audit Fields
     created_by_id = models.UUIDField(null=True, blank=True, help_text="User who created the note")
-    
+
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         db_table = 'clinical_notes'
         ordering = ['-note_date']
@@ -1271,7 +1270,7 @@ class ClinicalNote(models.Model):
             models.Index(fields=['visit'], name='clinical_note_visit_idx'),
             models.Index(fields=['ehr_number'], name='clinical_note_ehr_idx'),
         ]
-    
+
     def __str__(self):
         return f"Clinical Note - {self.visit.visit_number}"
 
@@ -1283,12 +1282,12 @@ class VisitFinding(models.Model):
     Records vital signs and systemic examination findings
     during patient visits.
     """
-    
+
     FINDING_TYPE_CHOICES = [
         ('examination', 'General Examination'),
         ('systemic', 'Systemic Examination'),
     ]
-    
+
     # Primary Fields
     id = models.AutoField(primary_key=True)
     tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
@@ -1303,7 +1302,7 @@ class VisitFinding(models.Model):
         choices=FINDING_TYPE_CHOICES,
         default='examination'
     )
-    
+
     # Vital Signs
     temperature = models.DecimalField(
         max_digits=4,
@@ -1391,7 +1390,7 @@ class VisitFinding(models.Model):
         ],
         help_text="Breaths per minute"
     )
-    
+
     # Systemic Examination
     tongue = models.CharField(
         max_length=200,
@@ -1423,14 +1422,14 @@ class VisitFinding(models.Model):
         blank=True,
         help_text="Per Abdomen findings"
     )
-    
+
     # Audit Fields
     recorded_by_id = models.UUIDField(null=True, blank=True, help_text="User who recorded these findings")
-    
+
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         db_table = 'visit_findings'
         ordering = ['-finding_date']
@@ -1441,15 +1440,15 @@ class VisitFinding(models.Model):
             models.Index(fields=['tenant_id', 'visit']),
             models.Index(fields=['visit', '-finding_date'], name='finding_visit_date_idx'),
         ]
-    
+
     def __str__(self):
         return f"Findings - {self.visit.visit_number}"
-    
+
     def save(self, *args, **kwargs):
         """Calculate BMI before saving."""
         self.calculate_bmi()
         super().save(*args, **kwargs)
-    
+
     def calculate_bmi(self):
         """Calculate BMI from height and weight."""
         if self.weight and self.height:
@@ -1459,20 +1458,20 @@ class VisitFinding(models.Model):
             self.bmi = self.weight / (height_m ** 2)
             # Round to 2 decimal places
             self.bmi = round(self.bmi, 2)
-    
+
     @property
     def blood_pressure(self):
         """Return formatted blood pressure."""
         if self.bp_systolic and self.bp_diastolic:
             return f"{self.bp_systolic}/{self.bp_diastolic}"
         return None
-    
+
     @property
     def bmi_category(self):
         """Return BMI category."""
         if not self.bmi:
             return None
-        
+
         if self.bmi < 18.5:
             return "Underweight"
         elif 18.5 <= self.bmi < 25:
@@ -1490,7 +1489,7 @@ class VisitAttachment(models.Model):
     Stores uploaded medical documents, reports, and images
     associated with visits.
     """
-    
+
     FILE_TYPE_CHOICES = [
         ('xray', 'X-Ray'),
         ('report', 'Lab Report'),
@@ -1499,7 +1498,7 @@ class VisitAttachment(models.Model):
         ('document', 'Document'),
         ('other', 'Other'),
     ]
-    
+
     # Primary Fields
     id = models.AutoField(primary_key=True)
     tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
@@ -1522,11 +1521,11 @@ class VisitAttachment(models.Model):
         blank=True,
         help_text="Description of the attachment"
     )
-    
+
     # Audit Fields
     uploaded_by_id = models.UUIDField(null=True, blank=True, help_text="User who uploaded this attachment")
     uploaded_at = models.DateTimeField(auto_now_add=True)
-    
+
     class Meta:
         db_table = 'visit_attachments'
         ordering = ['-uploaded_at']
@@ -1538,16 +1537,16 @@ class VisitAttachment(models.Model):
             models.Index(fields=['visit'], name='attachment_visit_idx'),
             models.Index(fields=['file_type'], name='attachment_type_idx'),
         ]
-    
+
     def __str__(self):
         return f"{self.file_name} - {self.visit.visit_number}"
-    
+
     def save(self, *args, **kwargs):
         """Store original filename."""
         if self.file and not self.file_name:
             self.file_name = os.path.basename(self.file.name)
         super().save(*args, **kwargs)
-    
+
     def get_file_size(self):
         """Return file size in a human-readable format."""
         if self.file:
@@ -1557,7 +1556,7 @@ class VisitAttachment(models.Model):
                     return f"{size:.2f} {unit}"
                 size /= 1024.0
         return None
-    
+
     def get_file_extension(self):
         """Return file extension."""
         if self.file:
@@ -2059,7 +2058,6 @@ class ClinicalNoteTemplateResponse(models.Model):
             List of created ClinicalNoteTemplateFieldResponse instances
         """
         from decimal import Decimal
-        from django.utils import timezone
 
         field_responses = []
         template_values = response_template.template_field_values or {}

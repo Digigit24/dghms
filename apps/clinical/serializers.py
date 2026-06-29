@@ -7,6 +7,7 @@ from django.db.models import Q
 from rest_framework import serializers
 
 from common.mixins import TenantMixin
+from common.serializers import TenantAwareSerializer
 
 _SYSTEM_TENANT_ID = _uuid.UUID("00000000-0000-0000-0000-000000000000")
 
@@ -16,7 +17,7 @@ def _tenant_id_from_context(context) -> _uuid.UUID | None:
     request = context.get("request") if context else None
     return getattr(request, "tenant_id", None) if request else None
 
-from .models import (
+from .models import (  # noqa: E402
     ClinicalFieldValue,
     ClinicalForm,
     ClinicalFormField,
@@ -291,185 +292,98 @@ class SavedFormSnapshotSerializer(TenantMixin, serializers.ModelSerializer):
         if tid is None:
             return value
         if not ClinicalRecord.objects.filter(tenant_id=tid, pk=value.pk).exists():
-            raise serializers.ValidationError("Record not found or access denied.")
+            raise serializers.ValidationError("Record not found or not accessible.")
         return value
 
 
-# ---------------------------------------------------------------------------
-# Bulk upsert payload serializers
-# ---------------------------------------------------------------------------
-
-
-class FieldValueUpsertItemSerializer(serializers.Serializer):
-    """Single item for the bulk field-value upsert endpoint."""
-
-    field_id = serializers.IntegerField(min_value=1, help_text="ID of the ClinicalFormField")
-    value_text = serializers.CharField(
-        allow_blank=True,
-        required=True,
-        help_text="Raw string value; will be coerced to the field's typed column.",
-    )
-
-
-class FieldValueBulkUpsertSerializer(serializers.Serializer):
-    """Payload for bulk upsert of field values on a record."""
-
-    values = FieldValueUpsertItemSerializer(many=True, min_length=1)
-
-
-# ---------------------------------------------------------------------------
-# Value coercion helpers
-# ---------------------------------------------------------------------------
-
-
-def coerce_field_value(field: ClinicalFormField, value_text: str):
-    """Coerce a raw string value into the typed storage for a field.
-
-    Returns a dict of column names -> values suitable for update_or_create
-    defaults. Raises ValidationError on type mismatch.
-    """
-    if value_text is None or value_text == "":
-        return {
-            "value_text": None,
-            "value_number": None,
-            "value_boolean": None,
-            "value_date": None,
-            "value_json": None,
-        }
-
-    field_type = field.field_type
-    stripped = value_text.strip()
-
-    if field_type == ClinicalFormField.FieldType.TEXT:
-        return {"value_text": stripped}
-
-    if field_type == ClinicalFormField.FieldType.TEXTAREA:
-        return {"value_text": stripped}
-
-    if field_type == ClinicalFormField.FieldType.NUMBER:
-        try:
-            return {"value_number": Decimal(stripped)}
-        except (InvalidOperation, ValueError) as exc:
-            raise serializers.ValidationError(
-                {f"field_{field.id}": f"Invalid number for field '{field.field_key}'."}
-            ) from exc
-
-    if field_type == ClinicalFormField.FieldType.BOOLEAN:
-        lowered = stripped.lower()
-        if lowered in ("true", "1", "yes", "y"):
-            return {"value_boolean": True}
-        if lowered in ("false", "0", "no", "n"):
-            return {"value_boolean": False}
-        raise serializers.ValidationError(
-            {f"field_{field.id}": f"Invalid boolean for field '{field.field_key}'."}
-        )
-
-    if field_type == ClinicalFormField.FieldType.DATE:
-        try:
-            from datetime import date
-
-            return {"value_date": date.fromisoformat(stripped)}
-        except ValueError as exc:
-            raise serializers.ValidationError(
-                {f"field_{field.id}": f"Invalid date (YYYY-MM-DD) for field '{field.field_key}'."}
-            ) from exc
-
-    if field_type == ClinicalFormField.FieldType.DATETIME:
-        try:
-            from datetime import datetime
-
-            return {"value_json": datetime.fromisoformat(stripped).isoformat()}
-        except ValueError as exc:
-            raise serializers.ValidationError(
-                {f"field_{field.id}": f"Invalid datetime for field '{field.field_key}'."}
-            ) from exc
-
-    if field_type in (ClinicalFormField.FieldType.PICKLIST, ClinicalFormField.FieldType.MULTISELECT):
-        return {"value_text": stripped}
-
-    if field_type == ClinicalFormField.FieldType.FILE:
-        return {"value_text": stripped}
-
-    if field_type == ClinicalFormField.FieldType.CALCULATED:
-        return {"value_json": stripped}
-
-    # Fallback for unknown types
-    return {"value_text": stripped}
-
-
-# ---------------------------------------------------------------------------
-# AI wizard serializers
-# ---------------------------------------------------------------------------
-
-
-class GenerateFormRequestSerializer(serializers.Serializer):
-    """Payload for generating a clinical form draft via AI."""
-
-    prompt = serializers.CharField(
-        required=True,
-        trim_whitespace=True,
-        help_text="Natural-language description of the form to generate.",
-    )
-    extra_instructions = serializers.CharField(
-        required=False,
-        allow_blank=True,
-        default="",
-        help_text="Optional extra constraints for the AI (tone, specialty, fields to include, etc.).",
-    )
-    entity_type = serializers.ChoiceField(
-        choices=ClinicalForm.EntityType.choices,
-        required=False,
-        default=ClinicalForm.EntityType.GENERIC,
-        help_text="Encounter type this form targets.",
-    )
-
-
-class RegenerateFormRequestSerializer(serializers.Serializer):
-    """Payload for regenerating an existing draft with extra instructions."""
-
-    extra_instructions = serializers.CharField(
-        required=False,
-        allow_blank=True,
-        default="",
-        help_text="Additional constraints to append to the original prompt.",
-    )
-
-
-class ApplyFormDraftSerializer(serializers.Serializer):
-    """Payload for applying an AI draft to the real clinical form schema."""
-
-    dry_run = serializers.BooleanField(
-        required=False,
-        default=False,
-        help_text="If true, validate and return the migration plan without writing to the database.",
-    )
-    target_code = serializers.CharField(
-        required=False,
-        allow_blank=True,
-        allow_null=True,
-        default=None,
-        max_length=64,
-        help_text="Override the generated form code. Normalized to snake_case.",
-    )
-
-
-class ClinicalFormGenerationRequestSerializer(serializers.ModelSerializer):
-    """Read serializer for AI generation requests."""
+class ClinicalFormGenerationRequestSerializer(TenantAwareSerializer):
+    """Serializer for ClinicalFormGenerationRequest."""
 
     class Meta:
         model = ClinicalFormGenerationRequest
         fields = [
-            "id",
-            "tenant_id",
-            "prompt",
-            "extra_instructions",
-            "entity_type",
-            "status",
-            "generated_draft",
-            "applied_form",
-            "error_message",
-            "created_at",
-            "updated_at",
-            "created_by_user_id",
+            "id", "tenant_id", "prompt", "extra_instructions", "entity_type",
+            "status", "generated_draft", "error_message", "applied_form",
+            "created_at", "updated_at", "created_by_user_id",
         ]
-        read_only_fields = fields
+        read_only_fields = [
+            "id", "tenant_id", "status", "generated_draft", "error_message",
+            "applied_form", "created_at", "updated_at", "created_by_user_id",
+        ]
+
+
+class ApplyFormDraftSerializer(serializers.Serializer):
+    """Input serializer for the 'apply' action on a GenerationRequest."""
+
+    target_form_id = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        help_text="If provided, apply the draft to an existing form. Otherwise create a new form.",
+    )
+
+
+class GenerateFormRequestSerializer(serializers.Serializer):
+    """Input for the AI form generation wizard."""
+
+    prompt = serializers.CharField(help_text="Natural-language description of the form to generate.")
+    entity_type = serializers.ChoiceField(
+        choices=[("opd_visit", "OPD Visit"), ("ipd_admission", "IPD Admission"), ("generic", "Generic")],
+        default="generic",
+        required=False,
+    )
+    extra_instructions = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class RegenerateFormRequestSerializer(serializers.Serializer):
+    """Input for regenerating an AI form draft."""
+
+    extra_instructions = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class FieldValueBulkUpsertItemSerializer(serializers.Serializer):
+    """A single field value in a bulk upsert payload."""
+
+    field_id = serializers.IntegerField()
+    value_text = serializers.CharField(required=False, allow_null=True, allow_blank=True, default=None)
+    value_number = serializers.DecimalField(max_digits=20, decimal_places=6, required=False, allow_null=True, default=None)
+    value_boolean = serializers.BooleanField(required=False, allow_null=True, default=None)
+    value_date = serializers.DateField(required=False, allow_null=True, default=None)
+    value_json = serializers.JSONField(required=False, allow_null=True, default=None)
+
+
+class FieldValueBulkUpsertSerializer(serializers.Serializer):
+    """Payload for bulk upsert of field values on a clinical record."""
+
+    values = FieldValueBulkUpsertItemSerializer(many=True)
+
+
+def coerce_field_value(field, value_text: str) -> dict:
+    """Coerce a text value to the appropriate typed column for a given field.
+
+    Returns a dict of keyword arguments suitable for passing to
+    ``ClinicalFieldValue.objects.update_or_create(defaults=...)``.
+    Per the MCP-friendly API rule: natural-language tolerance on write.
+    """
+    from .models import ClinicalFormField
+
+    result: dict = {"value_text": value_text}
+
+    if field.field_type == ClinicalFormField.FieldType.NUMBER:
+        try:
+            result["value_number"] = Decimal(str(value_text).replace(",", ""))
+        except (InvalidOperation, ValueError):
+            pass
+    elif field.field_type == ClinicalFormField.FieldType.BOOLEAN:
+        result["value_boolean"] = str(value_text).lower() in ("1", "true", "yes", "on")
+    elif field.field_type == ClinicalFormField.FieldType.DATE:
+        from django.utils.dateparse import parse_date
+        parsed = parse_date(str(value_text))
+        if parsed:
+            result["value_date"] = parsed
+    elif field.field_type == ClinicalFormField.FieldType.DATETIME:
+        from django.utils.dateparse import parse_datetime
+        parsed = parse_datetime(str(value_text))
+        if parsed:
+            result["value_date"] = parsed
+
+    return result

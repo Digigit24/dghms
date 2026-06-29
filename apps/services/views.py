@@ -26,16 +26,16 @@ class ServiceCategoryViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     hms_module = 'services'
 
     action_permission_map = {
-        'list': 'view_services',
-        'retrieve': 'view_services',
-        'create': 'create_service',
-        'update': 'edit_service',
-        'partial_update': 'edit_service',
-        'destroy': 'delete_service',
+        'list': 'view',
+        'retrieve': 'view',
+        'create': 'create',
+        'update': 'edit',
+        'partial_update': 'edit',
+        'destroy': 'delete',
     }
     filter_backends = [
-        DjangoFilterBackend, 
-        filters.SearchFilter, 
+        DjangoFilterBackend,
+        filters.SearchFilter,
         filters.OrderingFilter
     ]
     filterset_fields = ['type', 'is_active']
@@ -51,21 +51,21 @@ class DiagnosticTestViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     hms_module = 'services'
 
     action_permission_map = {
-        'list': 'view_services',
-        'retrieve': 'view_services',
-        'create': 'create_service',
-        'update': 'edit_service',
-        'partial_update': 'edit_service',
-        'destroy': 'delete_service',
+        'list': 'view',
+        'retrieve': 'view',
+        'create': 'create',
+        'update': 'edit',
+        'partial_update': 'edit',
+        'destroy': 'delete',
     }
     filter_backends = [
-        DjangoFilterBackend, 
-        filters.SearchFilter, 
+        DjangoFilterBackend,
+        filters.SearchFilter,
         filters.OrderingFilter
     ]
     filterset_fields = [
-        'category', 'sample_type', 
-        'is_active', 'is_home_collection', 
+        'category', 'sample_type',
+        'is_active', 'is_home_collection',
         'reporting_type'
     ]
     search_fields = ['name', 'code', 'description']
@@ -80,20 +80,20 @@ class NursingCarePackageViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     hms_module = 'services'
 
     action_permission_map = {
-        'list': 'view_services',
-        'retrieve': 'view_services',
-        'create': 'create_service',
-        'update': 'edit_service',
-        'partial_update': 'edit_service',
-        'destroy': 'delete_service',
+        'list': 'view',
+        'retrieve': 'view',
+        'create': 'create',
+        'update': 'edit',
+        'partial_update': 'edit',
+        'destroy': 'delete',
     }
     filter_backends = [
-        DjangoFilterBackend, 
-        filters.SearchFilter, 
+        DjangoFilterBackend,
+        filters.SearchFilter,
         filters.OrderingFilter
     ]
     filterset_fields = [
-        'category', 'package_type', 
+        'category', 'package_type',
         'is_active', 'target_group'
     ]
     search_fields = ['name', 'code', 'description']
@@ -108,20 +108,20 @@ class HomeHealthcareServiceViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     hms_module = 'services'
 
     action_permission_map = {
-        'list': 'view_services',
-        'retrieve': 'view_services',
-        'create': 'create_service',
-        'update': 'edit_service',
-        'partial_update': 'edit_service',
-        'destroy': 'delete_service',
+        'list': 'view',
+        'retrieve': 'view',
+        'create': 'create',
+        'update': 'edit',
+        'partial_update': 'edit',
+        'destroy': 'delete',
     }
     filter_backends = [
-        DjangoFilterBackend, 
-        filters.SearchFilter, 
+        DjangoFilterBackend,
+        filters.SearchFilter,
         filters.OrderingFilter
     ]
     filterset_fields = [
-        'category', 'service_type', 
+        'category', 'service_type',
         'is_active', 'staff_type_required'
     ]
     search_fields = ['name', 'code', 'description']

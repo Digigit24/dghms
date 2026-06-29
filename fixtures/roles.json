@@ -1,0 +1,22 @@
+[
+  {
+    "name": "doctor",
+    "label": "Doctor",
+    "permissions": ["patients.view", "patients.edit", "opd.view", "opd.create", "opd.manage", "ipd.view", "clinical.view_record", "clinical.create_record", "pharmacy.view_prescriptions"]
+  },
+  {
+    "name": "nurse",
+    "label": "Nurse",
+    "permissions": ["patients.view", "patients.edit", "ipd.view", "clinical.view_record", "clinical.create_record", "pharmacy.view_prescriptions"]
+  },
+  {
+    "name": "pharmacist",
+    "label": "Pharmacist",
+    "permissions": ["patients.view", "pharmacy.view_prescriptions", "pharmacy.dispense", "inventory.view"]
+  },
+  {
+    "name": "receptionist",
+    "label": "Receptionist",
+    "permissions": ["patients.view", "patients.create", "patients.edit", "opd.view", "opd.create", "ipd.view", "billing.view", "billing.create"]
+  }
+]

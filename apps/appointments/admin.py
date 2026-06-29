@@ -32,11 +32,11 @@ class FollowUpAppointmentInline(admin.TabularInline):
     fk_name = 'original_appointment'
     extra = 0
     readonly_fields = ['appointment_id', 'created_at', 'updated_at']
-    
+
     def has_add_permission(self, request, obj=None):
         """Restrict adding follow-ups directly"""
         return request.user.is_superuser
-    
+
     # Add this method to prevent cursor issues
     def get_queryset(self, request):
         qs = super().get_queryset(request)
@@ -140,21 +140,21 @@ class AppointmentAdmin(TenantModelAdmin):
             'classes': ('collapse',)
         }),
     )
-    
+
     def patient_display(self, obj):
         """Display patient information"""
         if not obj.patient:
             return "No Patient"
         return f"{obj.patient.first_name} {obj.patient.last_name} ({obj.patient.mobile_primary})"
     patient_display.short_description = "Patient"
-    
+
     def doctor_display(self, obj):
         """Display doctor information"""
         if not obj.doctor:
             return "No Doctor"
         return f"Dr. (ID: {obj.doctor.user_id})"
     doctor_display.short_description = "Doctor"
-    
+
     def status_badge(self, obj):
         """Colorful status representation"""
         color_map = {
@@ -174,7 +174,7 @@ class AppointmentAdmin(TenantModelAdmin):
             obj.get_status_display()
         )
     status_badge.short_description = "Status"
-    
+
     def get_queryset(self, request):
         """Optimize queryset with select_related"""
         qs = super().get_queryset(request)
@@ -184,7 +184,7 @@ class AppointmentAdmin(TenantModelAdmin):
             'doctor',
             'appointment_type'
         )
-    
+
     # IMPORTANT: Override formfield_for_foreignkey to prevent cursor issues
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "patient":

@@ -2,16 +2,17 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
 from .views import (
-    PaymentCategoryViewSet, 
-    TransactionViewSet, 
-    AccountingPeriodViewSet
+    PaymentCategoryViewSet,
+    TransactionViewSet,
+    AccountingPeriodViewSet,
+    BillPaymentViewSet,
 )
 
-# Create a router and register our viewsets
 router = DefaultRouter()
-router.register(r'categories', PaymentCategoryViewSet, basename='payment-categories')
-router.register(r'transactions', TransactionViewSet, basename='transactions')
-router.register(r'accounting-periods', AccountingPeriodViewSet, basename='accounting-periods')
+router.register(r'categories',        PaymentCategoryViewSet, basename='payment-categories')
+router.register(r'transactions',      TransactionViewSet,     basename='transactions')
+router.register(r'accounting-periods',AccountingPeriodViewSet,basename='accounting-periods')
+router.register(r'bill-payments',     BillPaymentViewSet,     basename='bill-payments')
 
 urlpatterns = [
     path('', include(router.urls)),

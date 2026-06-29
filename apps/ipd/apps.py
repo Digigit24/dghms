@@ -8,4 +8,4 @@ class IpdConfig(AppConfig):
     verbose_name = 'IPD Management'
 
     def ready(self):
-        import apps.ipd.signals
+        pass

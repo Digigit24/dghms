@@ -2,7 +2,7 @@
 
 import structlog
 from drf_spectacular.utils import extend_schema, extend_schema_view
-from rest_framework import viewsets, status
+from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 
@@ -140,7 +140,5 @@ class TenantWebhookViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             delivery_id=delivery.id,
         )
         return success_response(
-            data=WebhookDeliverySerializer(delivery, context={"request": request}).data,
-            message="Test delivery queued.",
-            status=status.HTTP_202_ACCEPTED,
+            data=WebhookDeliverySerializer(delivery).data,
         )
