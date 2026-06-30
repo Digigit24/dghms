@@ -8,6 +8,8 @@ Follows the same patterns as other DigiHMS apps:
   - separate List vs Detail serializers where needed for performance
 """
 
+from decimal import Decimal
+
 from rest_framework import serializers
 
 from .models import (
@@ -155,21 +157,16 @@ class InventoryBatchSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, attrs):
-        qty_recv = attrs.get("quantity_received", Decimal("0"))
-        qty_rem  = attrs.get("remaining_quantity")
-
-        if qty_rem is None:
-            attrs["remaining_quantity"] = qty_recv
-
+        # NOTE: Do NOT pre-set remaining_quantity here. The batch is created
+        # with remaining_quantity=0 (model default), and _apply_transaction()
+        # in perform_create increments it via F() to quantity_received.
+        # Pre-setting it here causes double-counting: remaining = 2 * received.
         if attrs.get("expiry_date") and attrs.get("manufacturing_date"):
             if attrs["expiry_date"] <= attrs["manufacturing_date"]:
                 raise serializers.ValidationError(
                     {"expiry_date": "Expiry date must be after manufacturing date."}
                 )
         return attrs
-
-
-from decimal import Decimal   # noqa – needed in validate above
 
 
 # ─── Stock Transaction ───────────────────────────────────────────────────────

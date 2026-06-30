@@ -4,6 +4,7 @@ The :func:`custom_exception_handler` is wired into ``REST_FRAMEWORK`` settings
 and converts common exceptions into the standard envelope shape.
 """
 
+import structlog
 from django.db import IntegrityError
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework.views import exception_handler
@@ -19,6 +20,8 @@ from rest_framework.exceptions import (
 
 from . import error_codes
 from .responses import error_response
+
+log = structlog.get_logger(__name__)
 
 
 def custom_exception_handler(exc, context):
@@ -100,7 +103,14 @@ def custom_exception_handler(exc, context):
             detail=response.data,
         )
 
-    # Unknown / unhandled exception - do not leak details in production.
+    # Unknown / unhandled exception - log the full traceback so it appears in
+    # the Django server console, then return a safe generic response.
+    log.error(
+        "unhandled_exception",
+        exc_type=type(exc).__name__,
+        exc_message=str(exc),
+        exc_info=True,
+    )
     return error_response(
         code=error_codes.INTERNAL_SERVER_ERROR,
         message="An unexpected error occurred.",

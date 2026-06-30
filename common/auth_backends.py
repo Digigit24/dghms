@@ -42,6 +42,7 @@ class TenantUser:
         self.enabled_modules = user_data.get('enabled_modules', [])
         self.user_type = user_data.get('user_type', 'staff')
         self.is_patient = user_data.get('is_patient', False)
+        self.roles = user_data.get('roles', [])
         self._state = type('obj', (object,), {'adding': False, 'db': None})()
 
         # Mock groups attribute for compatibility with Django's group-based permissions

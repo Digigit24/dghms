@@ -541,7 +541,18 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def statistics(self, request):
         """Aggregate billing stats for this tenant. Respects active filters."""
-        qs = self.filter_queryset(self.get_queryset())
+        # Use a clean queryset to avoid Django 5.2's strict aggregate-within-aggregate
+        # check that fires when filter_queryset adds select_related or ordering
+        # annotations that shadow the 'total_amount' model field.
+        qs = IPDBilling.objects.filter(tenant_id=request.tenant_id)
+
+        # Mirror filterset_fields manually so ?payment_status= and ?admission= still work
+        payment_status = request.query_params.get('payment_status')
+        if payment_status:
+            qs = qs.filter(payment_status=payment_status)
+        admission_id = request.query_params.get('admission')
+        if admission_id:
+            qs = qs.filter(admission_id=admission_id)
 
         agg = qs.aggregate(
             total_bills=Count('id'),

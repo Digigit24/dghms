@@ -951,14 +951,14 @@ class OPDBillViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     hms_module = 'opd'
 
     action_permission_map = {
-        'list': 'view_bills',
-        'retrieve': 'view_bills',
-        'create': 'create_bill',
-        'update': 'edit_bill',
-        'partial_update': 'edit_bill',
-        'destroy': 'edit_bill',
-        'statistics': 'view_bills',
-        'record_payment': 'edit_bill',
+        'list': 'bill',
+        'retrieve': 'bill',
+        'create': 'bill',
+        'update': 'bill',
+        'partial_update': 'bill',
+        'destroy': 'bill',
+        'statistics': 'bill',
+        'record_payment': 'bill',
     }
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -1175,12 +1175,12 @@ class OPDBillItemViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     hms_module = 'opd'
 
     action_permission_map = {
-        'list': 'view_bills',
-        'retrieve': 'view_bills',
-        'create': 'create_bill',
-        'update': 'edit_bill',
-        'partial_update': 'edit_bill',
-        'destroy': 'edit_bill',
+        'list': 'bill',
+        'retrieve': 'bill',
+        'create': 'bill',
+        'update': 'bill',
+        'partial_update': 'bill',
+        'destroy': 'bill',
     }
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -1242,12 +1242,12 @@ class ProcedureMasterViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     hms_module = 'opd'
 
     action_permission_map = {
-        'list': 'view_procedure_bills',
-        'retrieve': 'view_procedure_bills',
-        'create': 'manage_procedures',
-        'update': 'manage_procedures',
-        'partial_update': 'manage_procedures',
-        'destroy': 'manage_procedures',
+        'list': 'bill',
+        'retrieve': 'bill',
+        'create': 'settings',
+        'update': 'settings',
+        'partial_update': 'settings',
+        'destroy': 'settings',
     }
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -1309,12 +1309,12 @@ class ProcedurePackageViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     hms_module = 'opd'
 
     action_permission_map = {
-        'list': 'view_procedure_bills',
-        'retrieve': 'view_procedure_bills',
-        'create': 'manage_procedures',
-        'update': 'manage_procedures',
-        'partial_update': 'manage_procedures',
-        'destroy': 'manage_procedures',
+        'list': 'bill',
+        'retrieve': 'bill',
+        'create': 'settings',
+        'update': 'settings',
+        'partial_update': 'settings',
+        'destroy': 'settings',
     }
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -1368,12 +1368,12 @@ class ClinicalNoteViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     hms_module = 'opd'
 
     action_permission_map = {
-        'list': 'view_clinical_notes',
-        'retrieve': 'view_clinical_notes',
-        'create': 'create_clinical_note',
-        'update': 'edit_clinical_note',
-        'partial_update': 'edit_clinical_note',
-        'destroy': 'edit_clinical_note',
+        'list': 'view',
+        'retrieve': 'view',
+        'create': 'consult',
+        'update': 'consult',
+        'partial_update': 'consult',
+        'destroy': 'consult',
     }
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -1430,12 +1430,12 @@ class VisitFindingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     hms_module = 'opd'
 
     action_permission_map = {
-        'list': 'view_findings',
-        'retrieve': 'view_findings',
-        'create': 'record_findings',
-        'update': 'record_findings',
-        'partial_update': 'record_findings',
-        'destroy': 'record_findings',
+        'list': 'view',
+        'retrieve': 'view',
+        'create': 'consult',
+        'update': 'consult',
+        'partial_update': 'consult',
+        'destroy': 'consult',
     }
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -1488,12 +1488,12 @@ class VisitAttachmentViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     hms_module = 'opd'
 
     action_permission_map = {
-        'list': 'view_visits',
-        'retrieve': 'view_visits',
-        'create': 'manage_attachments',
-        'update': 'manage_attachments',
-        'partial_update': 'manage_attachments',
-        'destroy': 'manage_attachments',
+        'list': 'view',
+        'retrieve': 'view',
+        'create': 'edit',
+        'update': 'edit',
+        'partial_update': 'edit',
+        'destroy': 'edit',
     }
     parser_classes = [MultiPartParser, FormParser]
 
@@ -1545,12 +1545,12 @@ class ClinicalNoteTemplateGroupViewSet(TenantViewSetMixin, viewsets.ModelViewSet
     hms_module = 'opd'
 
     action_permission_map = {
-        'list': 'view_clinical_notes',
-        'retrieve': 'view_clinical_notes',
-        'create': 'manage_templates',
-        'update': 'manage_templates',
-        'partial_update': 'manage_templates',
-        'destroy': 'manage_templates',
+        'list': 'view',
+        'retrieve': 'view',
+        'create': 'settings',
+        'update': 'settings',
+        'partial_update': 'settings',
+        'destroy': 'settings',
     }
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -1616,13 +1616,13 @@ class ClinicalNoteTemplateViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     hms_module = 'opd'
 
     action_permission_map = {
-        'list': 'view_clinical_notes',
-        'retrieve': 'view_clinical_notes',
-        'create': 'manage_templates',
-        'update': 'manage_templates',
-        'partial_update': 'manage_templates',
-        'destroy': 'manage_templates',
-        'duplicate': 'manage_templates',
+        'list': 'view',
+        'retrieve': 'view',
+        'create': 'settings',
+        'update': 'settings',
+        'partial_update': 'settings',
+        'destroy': 'settings',
+        'duplicate': 'settings',
     }
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -1758,12 +1758,12 @@ class ClinicalNoteTemplateFieldViewSet(TenantViewSetMixin, viewsets.ModelViewSet
     hms_module = 'opd'
 
     action_permission_map = {
-        'list': 'view_clinical_notes',
-        'retrieve': 'view_clinical_notes',
-        'create': 'manage_templates',
-        'update': 'manage_templates',
-        'partial_update': 'manage_templates',
-        'destroy': 'manage_templates',
+        'list': 'view',
+        'retrieve': 'view',
+        'create': 'settings',
+        'update': 'settings',
+        'partial_update': 'settings',
+        'destroy': 'settings',
     }
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -1824,12 +1824,12 @@ class ClinicalNoteTemplateFieldOptionViewSet(TenantViewSetMixin, viewsets.ModelV
     hms_module = 'opd'
 
     action_permission_map = {
-        'list': 'view_clinical_notes',
-        'retrieve': 'view_clinical_notes',
-        'create': 'manage_templates',
-        'update': 'manage_templates',
-        'partial_update': 'manage_templates',
-        'destroy': 'manage_templates',
+        'list': 'view',
+        'retrieve': 'view',
+        'create': 'settings',
+        'update': 'settings',
+        'partial_update': 'settings',
+        'destroy': 'settings',
     }
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -1887,16 +1887,16 @@ class ClinicalNoteTemplateResponseViewSet(TenantViewSetMixin, viewsets.ModelView
     parser_classes = [MultiPartParser, FormParser, JSONParser]  # For file upload support and JSON
 
     action_permission_map = {
-        'list': 'view_clinical_notes',
-        'retrieve': 'view_clinical_notes',
-        'create': 'create_clinical_note',
-        'update': 'edit_clinical_note',
-        'partial_update': 'edit_clinical_note',
-        'destroy': 'edit_clinical_note',
-        'compare': 'view_clinical_notes',
-        'mark_reviewed': 'edit_clinical_note',
-        'convert_to_template': 'create_clinical_note',
-        'apply_template': 'create_clinical_note',
+        'list': 'view',
+        'retrieve': 'view',
+        'create': 'consult',
+        'update': 'consult',
+        'partial_update': 'consult',
+        'destroy': 'consult',
+        'compare': 'view',
+        'mark_reviewed': 'consult',
+        'convert_to_template': 'consult',
+        'apply_template': 'consult',
     }
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -2225,12 +2225,12 @@ class ClinicalNoteTemplateFieldResponseViewSet(TenantViewSetMixin, viewsets.Mode
     hms_module = 'opd'
 
     action_permission_map = {
-        'list': 'view_clinical_notes',
-        'retrieve': 'view_clinical_notes',
-        'create': 'create_clinical_note',
-        'update': 'edit_clinical_note',
-        'partial_update': 'edit_clinical_note',
-        'destroy': 'edit_clinical_note',
+        'list': 'view',
+        'retrieve': 'view',
+        'create': 'consult',
+        'update': 'consult',
+        'partial_update': 'consult',
+        'destroy': 'consult',
     }
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]

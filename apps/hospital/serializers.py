@@ -26,8 +26,8 @@ class HospitalSerializer(serializers.ModelSerializer):
 
 
 class HospitalUpdateSerializer(serializers.ModelSerializer):
-    """Hospital update serializer"""
+    """Hospital update serializer — tenant_id is never accepted from the client."""
 
     class Meta:
         model = Hospital
-        exclude = ['id', 'created_at', 'updated_at']
+        exclude = ['id', 'tenant_id', 'created_at', 'updated_at']

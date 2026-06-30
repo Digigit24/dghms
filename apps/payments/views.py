@@ -424,7 +424,7 @@ class BillPaymentViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     permission_classes = [HMSPermission]
     hms_module = 'payments'
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ['bill_type', 'payment_mode', 'payment_date']
+    filterset_fields = ['bill_type', 'payment_mode', 'payment_date', 'opd_bill', 'ipd_bill']
     ordering_fields = ['payment_date', 'amount', 'created_at']
     ordering = ['-created_at']
 

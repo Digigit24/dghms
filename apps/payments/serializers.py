@@ -181,15 +181,29 @@ class AccountingPeriodSerializer(serializers.ModelSerializer):
 class BillPaymentSerializer(serializers.ModelSerializer):
     """Serializer for the unified BillPayment ledger model."""
 
+    bill_type_label    = serializers.SerializerMethodField()
+    payment_mode_label = serializers.SerializerMethodField()
+
     class Meta:
         model = BillPayment
         fields = [
-            "id", "tenant_id", "bill_type", "opd_bill", "ipd_bill",
+            "id", "tenant_id",
+            "bill_type", "bill_type_label",
+            "opd_bill", "ipd_bill",
             "bill_number", "patient_name", "encounter_number",
-            "amount", "payment_mode", "payment_date", "notes",
-            "recorded_by_user_id", "created_at", "updated_at",
+            "amount",
+            "payment_mode", "payment_mode_label",
+            "payment_date", "notes",
+            "recorded_by_user_id",
+            "created_at", "updated_at",
         ]
         read_only_fields = ["id", "tenant_id", "created_at", "updated_at"]
+
+    def get_bill_type_label(self, obj) -> str:
+        return obj.get_bill_type_display()
+
+    def get_payment_mode_label(self, obj) -> str:
+        return obj.get_payment_mode_display()
 
 
 class BillPaymentStatsSerializer(serializers.Serializer):

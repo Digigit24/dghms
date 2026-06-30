@@ -648,7 +648,7 @@ class StockTransactionViewSet(TenantViewSetMixin, viewsets.ReadOnlyModelViewSet)
                 supplier=supplier,
                 purchase_price=d.get("unit_cost", Decimal("0.00")),
                 quantity_received=quantity,
-                remaining_quantity=quantity,
+                remaining_quantity=Decimal("0"),  # _apply_transaction increments this via F()
                 created_by_user_id=request.user_id,
                 notes=d.get("notes", ""),
             )
