@@ -775,12 +775,18 @@ class DoctorProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def statistics(self, request):
         """Get doctor statistics"""
-        total = DoctorProfile.objects.count()
-        active = DoctorProfile.objects.filter(status='active').count()
-        on_leave = DoctorProfile.objects.filter(status='on_leave').count()
-        inactive = DoctorProfile.objects.filter(status='inactive').count()
+        # Tenant-scoped queryset (TenantViewSetMixin.get_queryset()); note this
+        # intentionally ignores the `specialty`/`available`/`city` query-param
+        # filters applied elsewhere in get_queryset() so stats reflect the
+        # tenant's full doctor roster.
+        queryset = DoctorProfile.objects.filter(tenant_id=request.tenant_id)
 
-        avg_stats = DoctorProfile.objects.aggregate(
+        total = queryset.count()
+        active = queryset.filter(status='active').count()
+        on_leave = queryset.filter(status='on_leave').count()
+        inactive = queryset.filter(status='inactive').count()
+
+        avg_stats = queryset.aggregate(
             avg_rating=Avg('average_rating'),
             avg_experience=Avg('years_of_experience'),
             avg_fee=Avg('consultation_fee'),

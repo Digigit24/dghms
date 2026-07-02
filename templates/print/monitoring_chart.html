@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Monitoring Chart</title>
+{% include "print/_print_base.css" %}
+</head>
+<body>
+<div class="print-page{% if page_break_before %} page-break-before{% endif %}">
+    {% include "print/_letterhead.html" %}
+
+    <div class="form-title">{{ structure.name|default:"Monitoring Chart" }}</div>
+
+    <div class="patient-info-bar">
+        <div><span class="field-label">UHID:</span> {{ uhid }}</div>
+        <div><span class="field-label">IPD No:</span> {{ ipd_no }}</div>
+        <div><span class="field-label">Patient Name:</span> {{ patient_name }}</div>
+        <div><span class="field-label">Age / Gender:</span> {{ age }} / {{ gender }}</div>
+        <div><span class="field-label">Record #:</span> {{ record.id }}</div>
+        <div><span class="field-label">Date:</span> {{ record.created_at|date:"d M Y" }}</div>
+    </div>
+
+    <table class="bordered dense">
+        <thead>
+            <tr>
+                <th>Time</th>
+                {% for col_key, col_label in columns %}
+                <th>{{ col_label }}</th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for slot in time_slots %}
+            <tr>
+                <td>{{ slot }}</td>
+                {% for col_key, col_label in columns %}
+                <td>&nbsp;</td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="section-title">Recorded Values (Latest Entry)</div>
+    <div class="field-grid-2col">
+        {% for section in sections %}
+            {% for field in section.section_fields %}
+                {% if field.field_type != "textarea" and field.field_type != "grid" %}
+                <div class="field-row">
+                    <span class="field-label">{{ field.label }}:</span>
+                    <span class="field-value">{{ field.display_value|default:"" }}</span>
+                </div>
+                {% endif %}
+            {% endfor %}
+        {% endfor %}
+    </div>
+
+    <div class="footnote">
+        Blank rows are provided for manual bedside charting where the digital record does not yet capture every 2-hour reading.
+    </div>
+
+    <div class="signature-row">
+        <div class="signature-box">Nurse Signature</div>
+        <div class="signature-box">Shift In-Charge Signature</div>
+    </div>
+</div>
+</body>
+</html>

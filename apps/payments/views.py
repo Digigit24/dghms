@@ -196,8 +196,11 @@ class TransactionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         """Generate transaction-wide statistics"""
         # Permission already checked by HMSPermission (view_reports)
 
+        # Tenant-scoped queryset (TenantViewSetMixin + any ownership filtering in get_queryset()).
+        queryset = self.get_queryset()
+
         # Aggregate statistics
-        stats = Transaction.objects.aggregate(
+        stats = queryset.aggregate(
             total_transactions=Count('id'),
             total_amount=Sum('amount'),
             total_payments=Sum('amount', filter=Q(transaction_type='payment')),
@@ -206,13 +209,13 @@ class TransactionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         )
 
         # Payment method breakdown
-        payment_method_breakdown = Transaction.objects.values('payment_method').annotate(
+        payment_method_breakdown = queryset.values('payment_method').annotate(
             count=Count('id'),
             total_amount=Sum('amount')
         )
 
         # Transaction type breakdown
-        transaction_type_breakdown = Transaction.objects.values('transaction_type').annotate(
+        transaction_type_breakdown = queryset.values('transaction_type').annotate(
             count=Count('id'),
             total_amount=Sum('amount')
         )
@@ -434,6 +437,20 @@ class BillPaymentViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             recorded_by_user_id=self.request.user_id,
         )
 
+    @extend_schema(
+        summary="Payment Collection Statistics",
+        description=(
+            "Aggregate payment statistics for the dashboard. Optional filters: "
+            "bill_type, date_from (YYYY-MM-DD), date_to (YYYY-MM-DD)."
+        ),
+        parameters=[
+            OpenApiParameter(name='bill_type', type=str, description='Filter by bill type (opd, ipd, etc.)'),
+            OpenApiParameter(name='date_from', type=str, description='Start date (YYYY-MM-DD)'),
+            OpenApiParameter(name='date_to', type=str, description='End date (YYYY-MM-DD)'),
+        ],
+        responses={200: OpenApiResponse(description="Payment collection statistics")},
+        tags=['Bill Payments'],
+    )
     @action(detail=False, methods=['GET'], url_path='stats')
     def stats(self, request):
         """

@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ structure.name|default:"Clinical Record" }}</title>
+{% include "print/_print_base.css" %}
+</head>
+<body>
+<div class="print-page{% if page_break_before %} page-break-before{% endif %}">
+    {% include "print/_letterhead.html" %}
+
+    <div class="form-title">{{ structure.name|default:"Clinical Record" }}</div>
+
+    <div class="patient-info-bar">
+        <div><span class="field-label">UHID:</span> {{ uhid }}</div>
+        <div><span class="field-label">IPD/OPD ID:</span> {{ ipd_no|default:encounter_id }}</div>
+        <div><span class="field-label">Patient Name:</span> {{ patient_name }}</div>
+        <div><span class="field-label">Age / Gender:</span> {{ age }} / {{ gender }}</div>
+        <div><span class="field-label">Encounter Type:</span> {{ encounter_type }}</div>
+        <div><span class="field-label">Record #:</span> {{ record.id }}</div>
+    </div>
+
+    {% for section in sections %}
+    <div class="section-title">{{ section.title }}</div>
+    <div class="field-grid-2col">
+        {% for field in section.section_fields %}
+            {% if field.field_type != "textarea" and field.field_type != "grid" and field.field_type != "heading" %}
+            <div class="field-row">
+                <span class="field-label">{{ field.label }}:</span>
+                <span class="field-value">{{ field.display_value|default:"" }}</span>
+            </div>
+            {% endif %}
+        {% endfor %}
+    </div>
+    {% for field in section.section_fields %}
+        {% if field.field_type == "textarea" %}
+        <div class="field-row" style="display: block;">
+            <div class="field-label" style="display: block; margin-bottom: 2px;">{{ field.label }}:</div>
+            <div class="field-value" style="display: block; min-height: 24px; white-space: pre-wrap;">{{ field.display_value|default:"" }}</div>
+        </div>
+        {% elif field.field_type == "grid" and field.display_value %}
+        <div class="field-row" style="display: block;">
+            <div class="field-label" style="display: block; margin-bottom: 2px;">{{ field.label }}:</div>
+            <table class="bordered dense">
+                <tbody>
+                    {% for row in field.display_value %}
+                    <tr>
+                        {% for cell in row.values %}
+                        <td>{{ cell }}</td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    {% endfor %}
+    {% endfor %}
+
+    {% if sections|length == 0 %}
+    <div class="text-muted" style="text-align: center; padding: 24px 0;">No form structure available.</div>
+    {% endif %}
+</div>
+</body>
+</html>

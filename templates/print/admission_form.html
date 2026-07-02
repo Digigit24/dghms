@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Admission Form</title>
+{% include "print/_print_base.css" %}
+</head>
+<body>
+<div class="print-page{% if page_break_before %} page-break-before{% endif %}">
+    {% include "print/_letterhead.html" %}
+
+    <div class="form-title">Admission Form</div>
+
+    <div class="patient-info-bar">
+        <div><span class="field-label">UHID:</span> {{ uhid }}</div>
+        <div><span class="field-label">IPD No:</span> {{ ipd_no }}</div>
+        <div><span class="field-label">Admission Date:</span> {{ admission_date|date:"d M Y, h:i A" }}</div>
+        <div><span class="field-label">Patient Name:</span> {{ patient_name }}</div>
+        <div><span class="field-label">Age / Gender:</span> {{ age }} / {{ gender }}</div>
+        <div><span class="field-label">Contact:</span> {{ contact }}</div>
+    </div>
+
+    <div class="section-title">Patient Details</div>
+    <div class="field-grid-2col">
+        <div class="field-row"><span class="field-label">Address:</span> <span class="field-value">{{ address }}</span></div>
+        <div class="field-row"><span class="field-label">Admission Type:</span> <span class="field-value">{{ admission_type }}</span></div>
+        <div class="field-row"><span class="field-label">Guardian Name:</span> <span class="field-value">{{ guardian_name }}</span></div>
+        <div class="field-row"><span class="field-label">Guardian Relation:</span> <span class="field-value">{{ guardian_relation }}</span></div>
+        <div class="field-row"><span class="field-label">Guardian Mobile:</span> <span class="field-value">{{ guardian_mobile }}</span></div>
+        <div class="field-row"><span class="field-label">Ward / Bed:</span> <span class="field-value">{{ ward.name }} {% if bed %}/ {{ bed.bed_number }}{% endif %}</span></div>
+    </div>
+
+    <div class="section-title">Admission Information</div>
+    <div class="field-row"><span class="field-label">Reason for Admission:</span> <span class="field-value">{{ reason }}</span></div>
+    <div class="field-row"><span class="field-label">Provisional Diagnosis:</span> <span class="field-value">{{ provisional_diagnosis }}</span></div>
+    {% if final_diagnosis %}
+    <div class="field-row"><span class="field-label">Final Diagnosis:</span> <span class="field-value">{{ final_diagnosis }}</span></div>
+    {% endif %}
+    <div class="field-grid-2col">
+        <div class="field-row"><span class="field-label">Status:</span> <span class="field-value">{{ status }}</span></div>
+        {% if discharge_date %}
+        <div class="field-row"><span class="field-label">Discharge Date:</span> <span class="field-value">{{ discharge_date|date:"d M Y, h:i A" }}</span></div>
+        {% endif %}
+    </div>
+
+    <div class="section-title">Insurance / Mediclaim</div>
+    <div class="field-grid-2col">
+        <div class="field-row"><span class="field-label">Has Mediclaim:</span> <span class="field-value">{{ has_mediclaim|yesno:"Yes,No" }}</span></div>
+        {% if has_mediclaim %}
+        <div class="field-row"><span class="field-label">TPA Name:</span> <span class="field-value">{{ tpa_name }}</span></div>
+        <div class="field-row"><span class="field-label">Claim Status:</span> <span class="field-value">{{ claim_status }}</span></div>
+        {% endif %}
+    </div>
+
+    {% if bed_transfers %}
+    <div class="section-title">Room / Bed Transfers</div>
+    <table class="bordered dense">
+        <thead>
+            <tr><th>Date</th><th>From Bed</th><th>To Bed</th><th>Reason</th></tr>
+        </thead>
+        <tbody>
+            {% for transfer in bed_transfers %}
+            <tr>
+                <td>{{ transfer.transfer_date|date:"d M Y, h:i A" }}</td>
+                <td>{{ transfer.from_bed.bed_number }}</td>
+                <td>{{ transfer.to_bed.bed_number }}</td>
+                <td>{{ transfer.reason }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    <div class="section-title">Medico-Legal Case (MLC)</div>
+    <div class="field-row">
+        <span class="checkbox">{% if is_mlc_case %}☑{% else %}☐{% endif %}</span>
+        <span class="field-label">This is a Medico-Legal Case</span>
+    </div>
+
+    <div class="signature-row">
+        <div class="signature-box">Patient / Guardian Signature</div>
+        <div class="signature-box">Admitting Doctor Signature</div>
+    </div>
+</div>
+</body>
+</html>

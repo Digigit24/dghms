@@ -281,6 +281,7 @@ class Command(BaseCommand):
             ClinicalFormSection,
             ClinicalPicklist,
             ClinicalPicklistItem,
+            FormSectionPlacement,
         )
 
         tenant_id = uuid.UUID(options["tenant_id"])
@@ -327,16 +328,26 @@ class Command(BaseCommand):
             },
         )
         for section_def in form_def.get("sections", []):
+            section_code = f"{form_def['code']}_{section_def['code']}"[:64]
             section, _ = ClinicalFormSection.objects.get_or_create(
                 tenant_id=tenant_id,
-                form=form,
-                code=section_def["code"],
+                code=section_code,
                 defaults={
                     "title": section_def["title"],
                     "description": section_def.get("description", ""),
+                    "is_system": form_def.get("is_system", True),
+                    "config": section_def.get("config", {}),
+                    "created_by_user_id": user_id,
+                },
+            )
+            FormSectionPlacement.objects.get_or_create(
+                tenant_id=tenant_id,
+                form=form,
+                section=section,
+                instance_key="",
+                defaults={
                     "display_order": section_def.get("display_order", 0),
                     "is_collapsed": section_def.get("is_collapsed", False),
-                    "config": section_def.get("config", {}),
                     "created_by_user_id": user_id,
                 },
             )
@@ -372,7 +383,7 @@ def _load_hospital_forms():
     spec = importlib.util.spec_from_file_location("_migration_0003", migration_path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod.NEW_SYSTEM_FORMS
+    return getattr(mod, "NEW_SYSTEM_FORMS", [])
 
 
 HOSPITAL_SYSTEM_FORMS = _load_hospital_forms()
@@ -391,6 +402,7 @@ def seed_hospital_system_forms(tenant_id, user_id=None):
         ClinicalFormSection,
         ClinicalPicklist,
         ClinicalPicklistItem,
+        FormSectionPlacement,
     )
 
     if isinstance(tenant_id, str):
@@ -444,13 +456,23 @@ def seed_hospital_system_forms(tenant_id, user_id=None):
             },
         )
         for sd in form_def["sections"]:
+            section_code = f"{form_def['code']}_{sd['code']}"[:64]
             section, _ = ClinicalFormSection.objects.get_or_create(
                 tenant_id=tenant_id,
-                form=form,
-                code=sd["code"],
+                code=section_code,
                 defaults={
                     "title": sd["title"],
                     "description": sd.get("description", ""),
+                    "is_system": form_def.get("is_system", True),
+                    "created_by_user_id": user_id,
+                },
+            )
+            FormSectionPlacement.objects.get_or_create(
+                tenant_id=tenant_id,
+                form=form,
+                section=section,
+                instance_key="",
+                defaults={
                     "display_order": sd["display_order"],
                     "is_collapsed": sd["is_collapsed"],
                     "created_by_user_id": user_id,
@@ -492,6 +514,7 @@ def seed_system_forms(tenant_id, user_id=None):
         ClinicalFormSection,
         ClinicalPicklist,
         ClinicalPicklistItem,
+        FormSectionPlacement,
     )
 
     if isinstance(tenant_id, str):
@@ -546,13 +569,23 @@ def seed_system_forms(tenant_id, user_id=None):
     )
 
     for section_def in form_def["sections"]:
+        section_code = f"{form_def['code']}_{section_def['code']}"[:64]
         section, _ = ClinicalFormSection.objects.get_or_create(
             tenant_id=tenant_id,
-            form=form,
-            code=section_def["code"],
+            code=section_code,
             defaults={
                 "title": section_def["title"],
                 "description": section_def["description"],
+                "is_system": form_def.get("is_system", True),
+                "created_by_user_id": user_id,
+            },
+        )
+        FormSectionPlacement.objects.get_or_create(
+            tenant_id=tenant_id,
+            form=form,
+            section=section,
+            instance_key="",
+            defaults={
                 "display_order": section_def["display_order"],
                 "is_collapsed": section_def["is_collapsed"],
                 "created_by_user_id": user_id,

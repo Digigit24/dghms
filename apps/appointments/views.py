@@ -267,6 +267,7 @@ class AppointmentViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
         # Create Visit
         visit = Visit.objects.create(
+            tenant_id=request.tenant_id,
             patient=appointment.patient,
             doctor=appointment.doctor,
             appointment=appointment,
@@ -389,32 +390,57 @@ class AppointmentViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
     @extend_schema(
         summary="Get appointment statistics",
-        description="Get statistical overview of appointments (Admin only)",
+        description=(
+            "Get statistical overview of appointments for the current tenant, "
+            "optionally restricted to a date range via date_from/date_to."
+        ),
+        parameters=[
+            OpenApiParameter(
+                name='date_from', type=str,
+                description='Filter appointments from this date (YYYY-MM-DD), inclusive.'
+            ),
+            OpenApiParameter(
+                name='date_to', type=str,
+                description='Filter appointments up to this date (YYYY-MM-DD), inclusive.'
+            ),
+        ],
         responses={200: OpenApiResponse(description="Appointment statistics")},
         tags=['Appointments']
     )
     @action(detail=False, methods=['get'])
     def statistics(self, request):
-        """Get appointment statistics (Super admin only)"""
-        # Super admins automatically have access via HMSPermission
-        # This is just for documentation purposes
+        """Get appointment statistics for the current tenant."""
+        # Tenant-scoped queryset (and any role-based scoping applied by get_queryset()).
+        queryset = self.get_queryset()
+
+        today = timezone.now().date()
+
+        date_from = request.query_params.get('date_from')
+        date_to = request.query_params.get('date_to')
+        if date_from:
+            queryset = queryset.filter(appointment_date__gte=date_from)
+        if date_to:
+            queryset = queryset.filter(appointment_date__lte=date_to)
 
         # Total appointments
-        total = Appointment.objects.count()
+        total = queryset.count()
 
         # Appointments by status
-        status_counts = Appointment.objects.values('status').annotate(count=Count('id'))
+        status_counts = queryset.values('status').annotate(count=Count('id'))
         status_breakdown = {item['status']: item['count'] for item in status_counts}
 
         # Appointments by priority
-        priority_counts = Appointment.objects.values('priority').annotate(count=Count('id'))
+        priority_counts = queryset.values('priority').annotate(count=Count('id'))
         priority_breakdown = {item['priority']: item['count'] for item in priority_counts}
 
         # Average consultation fee
-        avg_fee = Appointment.objects.aggregate(avg_fee=Avg('consultation_fee'))['avg_fee'] or 0
+        avg_fee = queryset.aggregate(avg_fee=Avg('consultation_fee'))['avg_fee'] or 0
 
-        # Paid vs Unpaid
-
+        # Today / checked-in / no-show counts (independent of date_from/date_to filters,
+        # always computed against the tenant-scoped base queryset)
+        today_count = self.get_queryset().filter(appointment_date=today).count()
+        checked_in = queryset.filter(status=Appointment.StatusChoices.CHECKED_IN).count()
+        no_show = queryset.filter(status=Appointment.StatusChoices.NO_SHOW).count()
 
         return Response({
             'success': True,
@@ -423,6 +449,8 @@ class AppointmentViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                 'status_breakdown': status_breakdown,
                 'priority_breakdown': priority_breakdown,
                 'average_consultation_fee': round(float(avg_fee), 2),
-
+                'today_count': today_count,
+                'checked_in': checked_in,
+                'no_show': no_show,
             }
         })

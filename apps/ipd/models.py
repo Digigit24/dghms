@@ -247,6 +247,32 @@ class Admission(models.Model):
         help_text="Current bed assignment"
     )
 
+    # Registration classification & doctors (additive — IPD Registration form)
+    ADMISSION_TYPE_CHOICES = [
+        ('regular', 'Regular'),
+        ('emergency', 'Emergency'),
+        ('transfer', 'Transfer'),
+        ('readmission', 'Readmission'),
+    ]
+    admission_type = models.CharField(
+        max_length=20,
+        choices=ADMISSION_TYPE_CHOICES,
+        default='regular',
+        help_text="Type of admission",
+    )
+    reference_doctor_id = models.UUIDField(
+        null=True, blank=True,
+        help_text="SuperAdmin User ID of the reference/referring doctor",
+    )
+    notify_reference_doctor = models.BooleanField(
+        default=False,
+        help_text="Whether to send an SMS to the reference doctor",
+    )
+    consulting_doctor_ids = models.JSONField(
+        default=list, blank=True,
+        help_text="List of SuperAdmin User IDs of consulting doctors (multiple allowed)",
+    )
+
     # Admission Information
     admission_date = models.DateTimeField(
         default=timezone.now,

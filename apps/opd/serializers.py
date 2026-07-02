@@ -119,7 +119,7 @@ class VisitCreateUpdateSerializer(serializers.ModelSerializer):
         model = Visit
         fields = [
             'patient', 'doctor', 'appointment', 'visit_date', 'visit_type',
-            'is_follow_up', 'referred_by', 'status', 'queue_position'
+            'is_follow_up', 'referred_by', 'notify_referring_doctor', 'status', 'queue_position'
         ]
 
     def validate(self, data):

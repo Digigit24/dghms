@@ -2,7 +2,7 @@ import csv
 import io
 from collections import OrderedDict
 
-from django.db.models import Q, Avg, Sum
+from django.db.models import Q, Avg, Sum, Count
 from django.http import HttpResponse, StreamingHttpResponse
 from django.utils import timezone
 
@@ -14,6 +14,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from common.drf_auth import HMSPermission, IsAuthenticated
 from common.mixins import TenantViewSetMixin
 from common.cache import CeliyoCache
+from common.permissions import IsTenantAuthenticated, HasCeliyoPermission
 
 from drf_spectacular.utils import (
     extend_schema, extend_schema_view,
@@ -183,7 +184,9 @@ class PatientProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         'update_allergy': 'edit',
         'delete_allergy': 'edit',
         'update_visit': 'edit',
-        'statistics': 'view',
+        # NOTE: 'statistics' permission is enforced separately via
+        # get_permissions() -> HasCeliyoPermission(hms.patients.view_reports),
+        # not via this HMSPermission action map.
         'activate': 'edit',
         'mark_deceased': 'edit',
         'export': 'export',
@@ -195,6 +198,22 @@ class PatientProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     search_fields = ['patient_id', 'first_name', 'last_name', 'middle_name', 'mobile_primary', 'email']
     ordering_fields = ['registration_date', 'last_visit_date', 'age', 'total_visits', 'first_name', 'last_name']
     ordering = ['-registration_date']
+
+    # HMS permission required for the `statistics` action specifically (see get_permissions()).
+    statistics_required_permission = 'hms.patients.view_reports'
+
+    def get_permissions(self):
+        """Per-action permission classes.
+
+        The `statistics` action uses the dedicated reporting permission
+        (hms.patients.view_reports) via IsTenantAuthenticated + HasCeliyoPermission,
+        rather than the legacy request.user.groups check. All other actions
+        keep the default HMSPermission-based CRUD mapping.
+        """
+        if self.action == 'statistics':
+            self.required_permission = self.statistics_required_permission
+            return [IsTenantAuthenticated(), HasCeliyoPermission()]
+        return super().get_permissions()
 
     # ----- serializers -----
     def get_serializer_class(self):
@@ -577,27 +596,34 @@ class PatientProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
     @extend_schema(
         summary="Get patient statistics",
-        description="Statistical overview of all patients (Admin only).",
+        description=(
+            "Statistical overview of all patients for the current tenant. "
+            "Requires the hms.patients.view_reports permission. Pass "
+            "?group_by=day to additionally receive a daily_trend of new "
+            "registrations (cached for 300 seconds)."
+        ),
+        parameters=[
+            OpenApiParameter(
+                name='group_by', type=str,
+                description='Set to "day" to include a daily_trend of new registrations (last 30 days).'
+            ),
+        ],
         responses={200: PatientStatisticsSerializer},
         tags=['Patients']
     )
     @action(detail=False, methods=['get'])
     def statistics(self, request):
+        """Tenant-scoped patient statistics. Gated by HasCeliyoPermission (hms.patients.view_reports)."""
+        group_by_day = request.query_params.get('group_by') == 'day'
+        cache_key = f"stats:patients:{request.tenant_id}" + (":trend" if group_by_day else "")
+
         cache = CeliyoCache()
-        cached = cache.get(f"stats:patients:{request.tenant_id}")
+        cached = cache.get(cache_key)
         if cached is not None:
             return Response(cached)
-        # Allow superadmins or Administrators
-        is_superadmin = getattr(request.user, 'is_super_admin', False)
-        is_administrator = request.user.groups.filter(name='Administrator').exists()
 
-        if not (is_superadmin or is_administrator):
-            return Response({'success': False, 'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
-
-        # Get base queryset filtered by tenant
-        base_qs = PatientProfile.objects.all()
-        if hasattr(request, 'tenant_id'):
-            base_qs = base_qs.filter(tenant_id=request.tenant_id)
+        # Tenant-scoped queryset — never query PatientProfile.objects directly.
+        base_qs = PatientProfile.objects.filter(tenant_id=request.tenant_id)
 
         total = base_qs.count()
         active = base_qs.filter(status='active').count()
@@ -605,9 +631,10 @@ class PatientProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         deceased = base_qs.filter(status='deceased').count()
 
         import datetime
+        today = datetime.date.today()
         patients_with_insurance = base_qs.filter(
             insurance_provider__isnull=False,
-            insurance_expiry_date__gte=datetime.date.today()
+            insurance_expiry_date__gte=today
         ).count()
         avg_age = base_qs.aggregate(avg=Avg('age'))['avg'] or 0
         total_visits = base_qs.aggregate(total=Sum('total_visits'))['total'] or 0
@@ -621,6 +648,8 @@ class PatientProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             if c > 0:
                 blood_dist[bg_code] = c
 
+        registrations_today = base_qs.filter(registration_date__date=today).count()
+
         data = {
             'total_patients': total,
             'active_patients': active,
@@ -630,13 +659,29 @@ class PatientProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             'average_age': round(avg_age, 1),
             'total_visits': total_visits,
             'gender_distribution': gender_dist,
-            'blood_group_distribution': blood_dist
+            'blood_group_distribution': blood_dist,
+            'registrations_today': registrations_today,
         }
+
+        if group_by_day:
+            from django.db.models.functions import TruncDate
+
+            start_date = today - datetime.timedelta(days=29)
+            daily_trend = list(
+                base_qs.filter(registration_date__date__gte=start_date)
+                       .annotate(day=TruncDate('registration_date'))
+                       .values('day')
+                       .annotate(registrations=Count('id'))
+                       .order_by('day')
+            )
+            data['daily_trend'] = [
+                {'date': str(row['day']), 'registrations': row['registrations'] or 0}
+                for row in daily_trend
+            ]
 
         s = PatientStatisticsSerializer(data)
         result = {'success': True, 'data': s.data}
-        cache = CeliyoCache()
-        cache.set(f"stats:patients:{request.tenant_id}", result, ttl=300)
+        cache.set(cache_key, result, ttl=300)
         return Response(result)
 
     @extend_schema(

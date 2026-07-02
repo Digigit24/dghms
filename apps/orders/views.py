@@ -378,8 +378,11 @@ class OrderViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         """Generate order-wide statistics"""
         # Permission already checked by HMSPermission (view_reports)
 
+        # Tenant-scoped queryset (TenantViewSetMixin + any ownership filtering in get_queryset()).
+        queryset = self.get_queryset()
+
         # Aggregate statistics
-        stats = Order.objects.aggregate(
+        stats = queryset.aggregate(
             total_orders=Count('id'),
             total_revenue=Sum('total_amount'),
             avg_order_value=Avg('total_amount'),
@@ -388,13 +391,13 @@ class OrderViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         )
 
         # Service type breakdown
-        service_breakdown = Order.objects.values('services_type').annotate(
+        service_breakdown = queryset.values('services_type').annotate(
             count=Count('id'),
             total_revenue=Sum('total_amount')
         )
 
         # Status breakdown
-        status_breakdown = Order.objects.values('status').annotate(
+        status_breakdown = queryset.values('status').annotate(
             count=Count('id'),
             total_revenue=Sum('total_amount')
         )

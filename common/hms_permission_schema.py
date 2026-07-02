@@ -65,7 +65,10 @@ HMS_PERMISSION_SCHEMA = {
             },
             "patients": {
                 "label": "Patients",
-                "actions": CRUD_EXPORT_ACTIONS,
+                "actions": {
+                    **CRUD_EXPORT_ACTIONS,
+                    "view_reports": boolean_action(),
+                },
             },
             "doctors": {
                 "label": "Doctors & Specialties",

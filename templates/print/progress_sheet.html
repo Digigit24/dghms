@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Progress / Round Notes</title>
+{% include "print/_print_base.css" %}
+</head>
+<body>
+<div class="print-page{% if page_break_before %} page-break-before{% endif %}">
+    {% include "print/_letterhead.html" %}
+
+    <div class="form-title">{{ structure.name|default:"Progress / Round Notes" }}</div>
+
+    <div class="patient-info-bar">
+        <div><span class="field-label">UHID:</span> {{ uhid }}</div>
+        <div><span class="field-label">IPD No:</span> {{ ipd_no }}</div>
+        <div><span class="field-label">Patient Name:</span> {{ patient_name }}</div>
+        <div><span class="field-label">Age / Gender:</span> {{ age }} / {{ gender }}</div>
+        <div><span class="field-label">Round #:</span> {{ occurrence_index }}</div>
+        <div><span class="field-label">Record #:</span> {{ record.id }}</div>
+    </div>
+
+    <table class="bordered dense">
+        <thead>
+            <tr>
+                <th style="width: 18%;">Date &amp; Time</th>
+                <th style="width: 41%;">Clinical Findings</th>
+                <th style="width: 41%;">Investigation &amp; Treatment</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>{{ record.created_at|date:"d M Y, h:i A" }}</td>
+                <td style="white-space: pre-wrap;">
+                    {% for section in sections %}
+                        {% for field in section.section_fields %}
+                            {% if "finding" in field.field_key or "clinical" in field.field_key %}
+                                {{ field.display_value|default:"" }}<br />
+                            {% endif %}
+                        {% endfor %}
+                    {% endfor %}
+                </td>
+                <td style="white-space: pre-wrap;">
+                    {% for section in sections %}
+                        {% for field in section.section_fields %}
+                            {% if "treatment" in field.field_key or "investigation" in field.field_key or "medication" in field.field_key %}
+                                {{ field.display_value|default:"" }}<br />
+                            {% endif %}
+                        {% endfor %}
+                    {% endfor %}
+                </td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="section-title">All Recorded Fields</div>
+    <div class="field-grid-2col">
+        {% for section in sections %}
+            {% for field in section.section_fields %}
+                {% if field.field_type != "textarea" and field.field_type != "grid" %}
+                <div class="field-row">
+                    <span class="field-label">{{ field.label }}:</span>
+                    <span class="field-value">{{ field.display_value|default:"" }}</span>
+                </div>
+                {% endif %}
+            {% endfor %}
+        {% endfor %}
+    </div>
+
+    <div class="footnote">Note: Medication orders must be written in CAPITALS only.</div>
+
+    <div class="signature-row">
+        <div class="signature-box">Doctor Name / Sign / Stamp</div>
+        <div class="signature-box">Date / Time</div>
+    </div>
+</div>
+</body>
+</html>

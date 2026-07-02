@@ -1,13 +1,16 @@
 # ipd/views.py
 import datetime
+import structlog
 from rest_framework import viewsets, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
+from django.db import transaction
 from django.db.models import IntegerField, Count, Q, Avg, Sum
 from django.db.models.expressions import RawSQL
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
 from common.mixins import TenantViewSetMixin
 from common.cache import CeliyoCache
 from common.drf_auth import HMSPermission
@@ -18,6 +21,8 @@ from .serializers import (
     AdmissionSerializer, AdmissionListSerializer,
     BedTransferSerializer, IPDBillingSerializer, IPDBillingListSerializer
 )
+
+log = structlog.get_logger(__name__)
 
 
 class WardViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
@@ -37,6 +42,42 @@ class WardViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     def perform_create(self, serializer):
         """Set tenant_id and created_by_user_id automatically."""
         serializer.save(tenant_id=self.request.tenant_id)
+
+    @extend_schema(
+        summary="Ward bed occupancy",
+        description=(
+            "Per-ward bed occupancy for the current tenant: total beds, "
+            "occupied beds, and occupancy rate (percentage)."
+        ),
+        responses={200: OpenApiResponse(description="Per-ward occupancy breakdown")},
+        tags=['IPD - Wards'],
+    )
+    @action(detail=False, methods=['get'])
+    def occupancy(self, request):
+        """Return per-ward bed occupancy counts and rate, tenant-scoped."""
+        wards = self.get_queryset().filter(is_active=True).annotate(
+            bed_total=Count('beds', filter=Q(beds__is_active=True)),
+            bed_occupied=Count('beds', filter=Q(beds__is_active=True, beds__is_occupied=True)),
+        ).order_by('floor', 'name')
+
+        data = []
+        for ward in wards:
+            total = ward.bed_total or 0
+            occupied = ward.bed_occupied or 0
+            rate = round(occupied / total * 100, 1) if total > 0 else 0.0
+            data.append({
+                'ward': ward.name,
+                'ward_id': ward.id,
+                'ward_type': ward.type,
+                'total_beds': total,
+                'occupied': occupied,
+                'rate': rate,
+            })
+
+        return Response({
+            'success': True,
+            'data': data,
+        })
 
 
 class BedViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
@@ -123,6 +164,120 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     def perform_update(self, serializer):
         super().perform_update(serializer)
         CeliyoCache().delete_pattern(f"ipd:active:{self.request.tenant_id}")
+
+    # ── IPD Registration (merged patient + admission) ─────────────────────────
+    def _registration_payload(self, admission, patient):
+        """Merged patient + admission + guardian payload for the Registration form."""
+        return {
+            "admission_pk": admission.id,
+            "admission_id": admission.admission_id,
+            "admission_date": admission.admission_date,
+            "admission_type": admission.admission_type,
+            "reason": admission.reason,
+            "provisional_diagnosis": admission.provisional_diagnosis,
+            "doctor_id": str(admission.doctor_id) if admission.doctor_id else None,
+            "reference_doctor_id": str(admission.reference_doctor_id) if admission.reference_doctor_id else None,
+            "notify_reference_doctor": admission.notify_reference_doctor,
+            "consulting_doctor_ids": admission.consulting_doctor_ids or [],
+            "ward": admission.ward_id,
+            "bed": admission.bed_id,
+            "patient": {
+                "id": patient.id,
+                "patient_id": patient.patient_id,
+                "title": patient.title,
+                "first_name": patient.first_name,
+                "middle_name": patient.middle_name,
+                "last_name": patient.last_name,
+                "gender": patient.gender,
+                "date_of_birth": patient.date_of_birth,
+                "age": patient.age,
+                "mobile_primary": patient.mobile_primary,
+                "blood_group": patient.blood_group,
+                "marital_status": patient.marital_status,
+                "aadhaar_number": patient.aadhaar_number,
+                "height": patient.height,
+                "weight": patient.weight,
+                "bmi": patient.bmi,
+                "address_line1": patient.address_line1,
+                "photo_data": patient.photo_data,
+                "guardian_first_name": patient.guardian_first_name,
+                "guardian_middle_name": patient.guardian_middle_name,
+                "guardian_last_name": patient.guardian_last_name,
+                "guardian_mobile": patient.guardian_mobile,
+                "guardian_gender": patient.guardian_gender,
+                "guardian_relation": patient.guardian_relation,
+                "guardian_address": patient.guardian_address,
+                "guardian_photo_data": patient.guardian_photo_data,
+            },
+        }
+
+    @action(detail=True, methods=["get", "patch"], url_path="registration")
+    def registration(self, request, pk=None):
+        """GET the merged registration data, or PATCH patient + admission together.
+
+        Additive: existing admission create/update endpoints are untouched. The
+        Registration form (front-end) uses this to edit demographics, guardian,
+        images, admission type and doctors in a single call.
+        """
+        admission = self.get_object()
+        patient = admission.patient
+
+        if request.method.lower() == "get":
+            return Response(self._registration_payload(admission, patient))
+
+        data = request.data or {}
+        patient_payload = data.get("patient") if isinstance(data.get("patient"), dict) else data
+
+        patient_fields = [
+            "title", "first_name", "middle_name", "last_name", "gender", "date_of_birth",
+            "mobile_primary", "blood_group", "marital_status", "aadhaar_number",
+            "height", "weight", "address_line1", "photo_data",
+            "guardian_first_name", "guardian_middle_name", "guardian_last_name",
+            "guardian_mobile", "guardian_gender", "guardian_relation",
+            "guardian_address", "guardian_photo_data",
+        ]
+        from django.utils.dateparse import parse_date
+
+        with transaction.atomic():
+            p_dirty = False
+            for f in patient_fields:
+                if f in patient_payload:
+                    val = patient_payload[f]
+                    if f in ("date_of_birth", "height", "weight") and val in ("", None):
+                        val = None
+                    elif f == "date_of_birth" and isinstance(val, str):
+                        # Coerce the string to a date so PatientProfile.save() can
+                        # compute age from date_of_birth.year.
+                        val = parse_date(val)
+                    setattr(patient, f, val)
+                    p_dirty = True
+            if p_dirty:
+                patient.save()  # recomputes age + bmi
+
+            a_dirty = False
+            for f in ["admission_date", "admission_type", "reason", "provisional_diagnosis",
+                      "notify_reference_doctor", "consulting_doctor_ids"]:
+                if f in data:
+                    if f == "admission_date" and not data[f]:
+                        continue
+                    setattr(admission, f, data[f])
+                    a_dirty = True
+            if "reference_doctor_id" in data:
+                admission.reference_doctor_id = data["reference_doctor_id"] or None
+                a_dirty = True
+            if data.get("doctor_id"):
+                admission.doctor_id = data["doctor_id"]
+                a_dirty = True
+            if a_dirty:
+                admission.save()
+
+        admission.refresh_from_db()
+        patient.refresh_from_db()
+        CeliyoCache().delete_pattern(f"ipd:active:{request.tenant_id}")
+        return action_response(
+            message="Registration saved.",
+            data=self._registration_payload(admission, patient),
+        )
 
     def _parse_date_range(self, request):
         today = datetime.date.today()
@@ -233,13 +388,36 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         serializer = self.get_serializer(admission)
         return Response(serializer.data)
 
+    @extend_schema(
+        summary="List Active Admissions",
+        description="Get all currently admitted patients for this tenant.",
+        responses={200: AdmissionListSerializer(many=True)},
+        tags=['IPD - Admissions'],
+    )
     @action(detail=False, methods=['get'])
     def active(self, request):
         """Get all active admissions."""
         admissions = self.get_queryset().filter(status='admitted')
         serializer = self.get_serializer(admissions, many=True)
-        return Response(serializer.data)
+        return Response({
+            'success': True,
+            'data': serializer.data
+        })
 
+    @extend_schema(
+        summary="IPD Admission Statistics",
+        description=(
+            "Aggregate statistics for IPD admissions. Optionally filter by "
+            "admission date range via date_from/date_to. Live bed occupancy "
+            "is always returned for the current tenant."
+        ),
+        parameters=[
+            OpenApiParameter(name='date_from', type=str, description='Filter admissions admitted on or after (YYYY-MM-DD).'),
+            OpenApiParameter(name='date_to', type=str, description='Filter admissions admitted on or before (YYYY-MM-DD).'),
+        ],
+        responses={200: OpenApiResponse(description="IPD admission statistics")},
+        tags=['IPD - Admissions'],
+    )
     @action(detail=False, methods=['get'])
     def statistics(self, request):
         """
@@ -350,6 +528,25 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             CeliyoCache().set(f"ipd:active:{request.tenant_id}", result, ttl=120)
         return Response(result)
 
+    @extend_schema(
+        summary="Per-doctor IPD admission statistics",
+        description=(
+            "Per-doctor IPD admission statistics for the IPD dashboard. Pass "
+            "doctor=me to restrict the result to the caller's own admissions "
+            "(resolved directly from the JWT user_id, since Admission.doctor_id "
+            "stores the SuperAdmin user id)."
+        ),
+        parameters=[
+            OpenApiParameter(name='date_from', type=str, description='Range start YYYY-MM-DD (default: today)'),
+            OpenApiParameter(name='date_to', type=str, description='Range end YYYY-MM-DD (default: date_from)'),
+            OpenApiParameter(name='date', type=str, description='Single day shortcut'),
+            OpenApiParameter(
+                name='doctor', type=str,
+                description='Set to "me" to restrict results to the requesting doctor only.'
+            ),
+        ],
+        tags=['IPD - Admissions'],
+    )
     @action(detail=False, methods=['get'])
     def doctor_stats(self, request):
         """
@@ -359,6 +556,7 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
           date_from - YYYY-MM-DD range start; default today
           date_to   - YYYY-MM-DD range end; default date_from
           date      - single day shortcut
+          doctor    - "me" to restrict to the requesting user's own admissions
         """
         date_from, date_to = self._parse_date_range(request)
 
@@ -366,6 +564,12 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             admission_date__date__gte=date_from,
             admission_date__date__lte=date_to,
         )
+
+        # ?doctor=me — Admission.doctor_id stores the SuperAdmin user_id
+        # directly (not a DoctorProfile FK), so we filter on request.user_id
+        # with no extra lookup required. Still tenant-scoped via get_queryset().
+        if request.query_params.get('doctor') == 'me':
+            qs = qs.filter(doctor_id=request.user_id)
 
         rows = list(
             qs.values('doctor_id').annotate(
@@ -538,34 +742,74 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         serializer = self.get_serializer(billing)
         return action_response("Payment recorded successfully.", data=serializer.data)
 
+    @extend_schema(
+        summary="IPD Billing Statistics",
+        description=(
+            "Aggregate billing statistics for this tenant. Supports filtering "
+            "by payment_status and admission via query parameters."
+        ),
+        parameters=[
+            OpenApiParameter(name='payment_status', type=str, description='Filter by payment status'),
+            OpenApiParameter(name='admission', type=int, description='Filter by admission ID'),
+        ],
+        responses={200: OpenApiResponse(description="IPD billing statistics")},
+        tags=['IPD - Billing'],
+    )
     @action(detail=False, methods=['get'])
     def statistics(self, request):
         """Aggregate billing stats for this tenant. Respects active filters."""
-        # Use a clean queryset to avoid Django 5.2's strict aggregate-within-aggregate
-        # check that fires when filter_queryset adds select_related or ordering
-        # annotations that shadow the 'total_amount' model field.
-        qs = IPDBilling.objects.filter(tenant_id=request.tenant_id)
+        try:
+            # Use a clean queryset to avoid Django 5.2's strict aggregate-within-aggregate
+            # check that fires when filter_queryset adds select_related or ordering
+            # annotations that shadow the 'total_amount' model field.
+            qs = IPDBilling.objects.filter(tenant_id=request.tenant_id)
 
-        # Mirror filterset_fields manually so ?payment_status= and ?admission= still work
-        payment_status = request.query_params.get('payment_status')
-        if payment_status:
-            qs = qs.filter(payment_status=payment_status)
-        admission_id = request.query_params.get('admission')
-        if admission_id:
-            qs = qs.filter(admission_id=admission_id)
+            # Mirror filterset_fields manually so ?payment_status= and ?admission= still work
+            payment_status = request.query_params.get('payment_status')
+            if payment_status:
+                qs = qs.filter(payment_status=payment_status)
+            admission_id = request.query_params.get('admission')
+            if admission_id:
+                qs = qs.filter(admission_id=admission_id)
 
-        agg = qs.aggregate(
-            total_bills=Count('id'),
-            total_amount=Sum('total_amount'),
-            paid_amount=Sum('received_amount', filter=Q(payment_status='paid')),
-            pending_amount=Sum('balance_amount', filter=Q(payment_status__in=['pending', 'partial'])),
-            cancelled_amount=Sum('total_amount', filter=Q(payment_status='cancelled')),
-        )
-        for key in ('total_amount', 'paid_amount', 'pending_amount', 'cancelled_amount'):
-            if agg[key] is None:
-                agg[key] = 0
+            # NOTE: IPDBilling.PAYMENT_STATUS_CHOICES is only
+            # unpaid / partial / paid — there is no 'cancelled' or 'pending'
+            # status on this model. 'pending_amount' previously filtered on
+            # payment_status__in=['pending', 'partial'], but 'pending' never
+            # matches any row, so it silently undercounted. 'cancelled_amount'
+            # has no matching status and always resolves to 0 — kept in the
+            # response shape for frontend (IPDBillStats) compatibility.
+            agg = qs.aggregate(
+                total_bills=Count('id'),
+                total_amount=Sum('total_amount'),
+                paid_amount=Sum('received_amount', filter=Q(payment_status='paid')),
+                pending_amount=Sum('balance_amount', filter=Q(payment_status__in=['unpaid', 'partial'])),
+                cancelled_amount=Sum('total_amount', filter=Q(payment_status='cancelled')),
+            )
+            for key in ('total_amount', 'paid_amount', 'pending_amount', 'cancelled_amount'):
+                if agg[key] is None:
+                    agg[key] = 0
 
-        return Response({'success': True, 'data': agg})
+            return Response({'success': True, 'data': agg})
+        except Exception as exc:
+            log.error(
+                "ipd_billing_statistics_failed",
+                tenant_id=str(getattr(request, 'tenant_id', None)),
+                error=str(exc),
+                exc_info=True,
+            )
+            return Response(
+                {
+                    'success': False,
+                    'error': {
+                        'code': 'INTERNAL_SERVER_ERROR',
+                        'message': 'Failed to compute billing statistics.',
+                        'field': None,
+                        'detail': {},
+                    },
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
     @action(detail=True, methods=['post'])
     def sync_clinical_charges(self, request, pk=None):
@@ -704,6 +948,7 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
             # Process PanchakarmaOrders
             panchakarma_orders = PanchakarmaOrder.objects.filter(
+                tenant_id=request.tenant_id,
                 admission=admission,
                 is_billed=False
             ).select_related()

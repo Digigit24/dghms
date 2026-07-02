@@ -5,13 +5,23 @@ from django.contrib.auth import authenticate, login
 from django.contrib.auth.views import LoginView
 from django.contrib import messages
 from django.conf import settings
+from django.db.models import Count, Q, Sum, F
 from django.http import JsonResponse
+from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from django.views import View
 import logging
+import structlog
+
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from common.permissions import IsTenantAuthenticated
 
 logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 
 class SuperAdminLoginView(LoginView):
@@ -378,6 +388,122 @@ def admin_logout_view(request):
     messages.success(request, 'Successfully logged out')
     return redirect('/admin/login/')
 
+
+
+class DashboardSummaryView(APIView):
+    """Unified, read-only dashboard summary composing headline numbers.
+
+    Aggregates tenant-scoped counts from OPD, IPD, Payments, and Inventory
+    into a single response for admin dashboards. This view intentionally
+    performs its own lightweight tenant-scoped aggregations (mirroring the
+    same field names and patterns used by each app's own `statistics`
+    actions) rather than duplicating their full business logic — it exists
+    purely to compose headline numbers, not to replace the per-module
+    statistics endpoints.
+    """
+
+    permission_classes = [IsTenantAuthenticated]
+
+    @extend_schema(
+        summary="Unified dashboard summary",
+        description=(
+            "Composes headline counts from OPD, IPD, Payments, and Inventory "
+            "for the current tenant into a single response. Intended for "
+            "admin dashboard landing pages."
+        ),
+        parameters=[
+            OpenApiParameter(
+                name='role', type=str,
+                description='Requesting dashboard role (e.g. "admin"). Currently informational only.'
+            ),
+        ],
+        responses={200: OpenApiResponse(description="Unified dashboard summary")},
+        tags=['Dashboard'],
+    )
+    def get(self, request):
+        """Return a composed summary of headline numbers for the tenant."""
+        tenant_id = request.tenant_id
+        today = timezone.now().date()
+
+        data = {
+            'role': request.query_params.get('role', 'admin'),
+            'generated_at': timezone.now().isoformat(),
+            'opd': self._opd_summary(tenant_id, today),
+            'ipd': self._ipd_summary(tenant_id, today),
+            'payments': self._payments_summary(tenant_id, today),
+            'inventory': self._inventory_summary(tenant_id),
+        }
+
+        log.info(
+            "dashboard_summary_requested",
+            tenant_id=str(tenant_id),
+            role=data['role'],
+        )
+
+        return Response({'success': True, 'data': data})
+
+    @staticmethod
+    def _opd_summary(tenant_id, today):
+        from apps.opd.models import Visit
+
+        qs = Visit.objects.filter(tenant_id=tenant_id, visit_date=today)
+        agg = qs.aggregate(
+            total_visits=Count('id'),
+            completed=Count('id', filter=Q(status='completed')),
+            waiting=Count('id', filter=Q(status='waiting')),
+        )
+        return {
+            'visits_today': agg['total_visits'] or 0,
+            'completed_today': agg['completed'] or 0,
+            'waiting_today': agg['waiting'] or 0,
+        }
+
+    @staticmethod
+    def _ipd_summary(tenant_id, today):
+        from apps.ipd.models import Admission, Bed
+
+        active_admissions = Admission.objects.filter(
+            tenant_id=tenant_id, status='admitted'
+        ).count()
+        bed_agg = Bed.objects.filter(tenant_id=tenant_id, is_active=True).aggregate(
+            total_beds=Count('id'),
+            occupied_beds=Count('id', filter=Q(is_occupied=True)),
+        )
+        total_beds = bed_agg['total_beds'] or 0
+        occupied_beds = bed_agg['occupied_beds'] or 0
+        occupancy_rate = round(occupied_beds / total_beds * 100, 1) if total_beds > 0 else 0.0
+        return {
+            'active_admissions': active_admissions,
+            'total_beds': total_beds,
+            'occupied_beds': occupied_beds,
+            'occupancy_rate': occupancy_rate,
+        }
+
+    @staticmethod
+    def _payments_summary(tenant_id, today):
+        from apps.payments.models import BillPayment
+
+        qs = BillPayment.objects.filter(tenant_id=tenant_id)
+        today_agg = qs.filter(payment_date=today).aggregate(
+            collected_today=Sum('amount'),
+            count_today=Count('id'),
+        )
+        return {
+            'collected_today': float(today_agg['collected_today'] or 0),
+            'transactions_today': today_agg['count_today'] or 0,
+        }
+
+    @staticmethod
+    def _inventory_summary(tenant_id):
+        from apps.inventory.models import InventoryItem
+
+        qs = InventoryItem.objects.filter(tenant_id=tenant_id, is_active=True)
+        total_items = qs.count()
+        low_stock_items = qs.filter(current_stock__lte=F('reorder_level')).count()
+        return {
+            'total_items': total_items,
+            'low_stock_items': low_stock_items,
+        }
 
 
 class HealthCheckView(View):

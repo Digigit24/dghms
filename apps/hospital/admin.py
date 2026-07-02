@@ -23,11 +23,20 @@ class HospitalAdmin(TenantModelAdmin):
         ('Services & Settings', {
             'fields': (
                 'working_hours', 'has_emergency',
-                'has_pharmacy', 'has_laboratory'
+                'has_pharmacy', 'has_laboratory', 'nav_style'
             )
         }),
         ('Additional Details', {
             'fields': ('registration_number', 'established_date')
+        }),
+        ('Print Letterhead', {
+            'fields': ('letterhead_config',),
+            'description': (
+                'Tenant-configurable print letterhead layout (logo, badge, '
+                'text lines, alignment). Edit via the Letterhead Designer in '
+                'Settings for a guided UI; raw JSON editing here follows the '
+                'schema documented on Hospital.letterhead_config.'
+            ),
         }),
         ('Timestamps', {
             'fields': ('tenant_id', 'created_at', 'updated_at'),

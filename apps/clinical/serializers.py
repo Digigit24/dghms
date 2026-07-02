@@ -18,14 +18,24 @@ def _tenant_id_from_context(context) -> _uuid.UUID | None:
     return getattr(request, "tenant_id", None) if request else None
 
 from .models import (  # noqa: E402
+    ClinicalDocumentInstance,
+    ClinicalDocumentTemplate,
     ClinicalFieldValue,
     ClinicalForm,
     ClinicalFormField,
+    ClinicalFormGroup,
+    ClinicalFormGroupItem,
     ClinicalFormGenerationRequest,
     ClinicalFormSection,
+    ClinicalFormTemplate,
     ClinicalPicklist,
+    ClinicalPicklistGroup,
+    ClinicalPicklistGroupMembership,
     ClinicalPicklistItem,
+    ClinicalPrintTemplate,
     ClinicalRecord,
+    FormSectionPlacement,
+    MrdChecklistLine,
     SavedFormSnapshot,
     UserFormPreference,
 )
@@ -50,7 +60,7 @@ class ClinicalFormFieldSerializer(TenantMixin, serializers.ModelSerializer):
         if tid is None:
             return value
         if not ClinicalFormSection.objects.filter(
-            Q(tenant_id=tid) | Q(form__is_system=True, form__tenant_id=_SYSTEM_TENANT_ID),
+            Q(tenant_id=tid) | Q(is_system=True, tenant_id=_SYSTEM_TENANT_ID),
             pk=value.pk,
         ).exists():
             raise serializers.ValidationError("Section not found or access denied.")
@@ -83,10 +93,22 @@ class ClinicalFormSectionSerializer(TenantMixin, serializers.ModelSerializer):
 
 
 class ClinicalFormSectionWriteSerializer(TenantMixin, serializers.ModelSerializer):
-    """Serializer for section writes (without nested fields)."""
+    """Serializer for reusable section definition writes."""
 
     class Meta:
         model = ClinicalFormSection
+        fields = "__all__"
+        read_only_fields = ["tenant_id"]
+
+
+class FormSectionPlacementSerializer(TenantMixin, serializers.ModelSerializer):
+    """Serializer for attaching reusable sections to forms."""
+
+    section_code = serializers.CharField(source="section.code", read_only=True)
+    section_title = serializers.CharField(source="section.title", read_only=True)
+
+    class Meta:
+        model = FormSectionPlacement
         fields = "__all__"
         read_only_fields = ["tenant_id"]
 
@@ -102,6 +124,18 @@ class ClinicalFormSectionWriteSerializer(TenantMixin, serializers.ModelSerialize
             raise serializers.ValidationError("Form not found or access denied.")
         return value
 
+    def validate_section(self, value):
+        """Ensure the section belongs to the request tenant or is a system section."""
+        tid = _tenant_id_from_context(self.context)
+        if tid is None:
+            return value
+        if not ClinicalFormSection.objects.filter(
+            Q(tenant_id=tid) | Q(is_system=True, tenant_id=_SYSTEM_TENANT_ID),
+            pk=value.pk,
+        ).exists():
+            raise serializers.ValidationError("Section not found or access denied.")
+        return value
+
 
 class ClinicalFormSerializer(TenantMixin, serializers.ModelSerializer):
     """Serializer for clinical form templates."""
@@ -115,7 +149,7 @@ class ClinicalFormSerializer(TenantMixin, serializers.ModelSerializer):
 class ClinicalFormStructureSerializer(serializers.ModelSerializer):
     """Read-only serializer that expands a form into sections and fields."""
 
-    sections = ClinicalFormSectionSerializer(many=True, read_only=True)
+    sections = serializers.SerializerMethodField()
 
     class Meta:
         model = ClinicalForm
@@ -136,6 +170,70 @@ class ClinicalFormStructureSerializer(serializers.ModelSerializer):
             "created_by_user_id",
             "sections",
         ]
+
+    def get_sections(self, form):
+        placements = (
+            form.section_placements.filter(is_active=True, section__is_active=True)
+            .select_related("section")
+            .prefetch_related("section__fields__picklist__items")
+            .order_by("display_order", "id")
+        )
+        result = []
+        for placement in placements:
+            section = placement.section
+            fields = []
+            for field in section.fields.filter(is_active=True).order_by("display_order", "id"):
+                field_data = ClinicalFormFieldSerializer(field, context=self.context).data
+                if field.picklist_id:
+                    field_data["picklist_items"] = ClinicalPicklistItemSerializer(
+                        field.picklist.items.filter(is_active=True).order_by("display_order", "id"),
+                        many=True,
+                    ).data
+                fields.append(field_data)
+            result.append(
+                {
+                    "id": section.id,
+                    "placement_id": placement.id,
+                    "instance_key": placement.instance_key,
+                    "tenant_id": section.tenant_id,
+                    "code": section.code,
+                    "title": placement.title_override or section.title,
+                    "description": section.description,
+                    "display_order": placement.display_order,
+                    "is_collapsed": placement.is_collapsed,
+                    "visibility_rule": placement.visibility_rule,
+                    "config": {**(section.config or {}), **(placement.config or {})},
+                    "is_active": section.is_active,
+                    "created_at": section.created_at,
+                    "updated_at": section.updated_at,
+                    "created_by_user_id": section.created_by_user_id,
+                    "section_fields": fields,
+                }
+            )
+        return result
+
+
+class ClinicalFormGroupItemSerializer(TenantMixin, serializers.ModelSerializer):
+    """Serializer for forms attached to clinical groups."""
+
+    form_code = serializers.CharField(source="form.code", read_only=True)
+    form_name = serializers.CharField(source="form.name", read_only=True)
+
+    class Meta:
+        model = ClinicalFormGroupItem
+        fields = "__all__"
+        read_only_fields = ["tenant_id"]
+
+
+class ClinicalFormGroupSerializer(TenantMixin, serializers.ModelSerializer):
+    """Serializer for clinical form group trees."""
+
+    items = ClinicalFormGroupItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ClinicalFormGroup
+        fields = "__all__"
+        read_only_fields = ["tenant_id"]
 
 
 # ---------------------------------------------------------------------------
@@ -159,6 +257,29 @@ class ClinicalPicklistSerializer(TenantMixin, serializers.ModelSerializer):
 
     class Meta:
         model = ClinicalPicklist
+        fields = "__all__"
+        read_only_fields = ["tenant_id"]
+
+
+class ClinicalPicklistGroupMembershipSerializer(TenantMixin, serializers.ModelSerializer):
+    """Serializer for picklist group membership."""
+
+    picklist_code = serializers.CharField(source="picklist.code", read_only=True)
+    picklist_name = serializers.CharField(source="picklist.name", read_only=True)
+
+    class Meta:
+        model = ClinicalPicklistGroupMembership
+        fields = "__all__"
+        read_only_fields = ["tenant_id"]
+
+
+class ClinicalPicklistGroupSerializer(TenantMixin, serializers.ModelSerializer):
+    """Serializer for picklist groups."""
+
+    memberships = ClinicalPicklistGroupMembershipSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ClinicalPicklistGroup
         fields = "__all__"
         read_only_fields = ["tenant_id"]
 
@@ -196,12 +317,15 @@ class ClinicalRecordListSerializer(TenantMixin, serializers.ModelSerializer):
             "form_name",
             "encounter_type",
             "encounter_id",
+            "occurrence_index",
             "patient_user_id",
             "status",
             "is_locked",
             "locked_by_user_id",
             "locked_at",
             "version",
+            "form_version",
+            "structure_snapshot",
             "is_active",
             "created_at",
             "updated_at",
@@ -235,6 +359,8 @@ class ClinicalRecordWriteSerializer(TenantMixin, serializers.ModelSerializer):
             "locked_by_user_id",
             "locked_at",
             "version",
+            "form_version",
+            "structure_snapshot",
             "created_by_user_id",
         ]
 
@@ -348,7 +474,10 @@ class FieldValueBulkUpsertItemSerializer(serializers.Serializer):
     value_number = serializers.DecimalField(max_digits=20, decimal_places=6, required=False, allow_null=True, default=None)
     value_boolean = serializers.BooleanField(required=False, allow_null=True, default=None)
     value_date = serializers.DateField(required=False, allow_null=True, default=None)
+    value_datetime = serializers.DateTimeField(required=False, allow_null=True, default=None)
+    value_time = serializers.TimeField(required=False, allow_null=True, default=None)
     value_json = serializers.JSONField(required=False, allow_null=True, default=None)
+    picklist_item_id = serializers.IntegerField(required=False, allow_null=True, default=None)
 
 
 class FieldValueBulkUpsertSerializer(serializers.Serializer):
@@ -384,6 +513,74 @@ def coerce_field_value(field, value_text: str) -> dict:
         from django.utils.dateparse import parse_datetime
         parsed = parse_datetime(str(value_text))
         if parsed:
-            result["value_date"] = parsed
+            result["value_datetime"] = parsed
+    elif field.field_type == ClinicalFormField.FieldType.TIME:
+        from django.utils.dateparse import parse_time
+        parsed = parse_time(str(value_text))
+        if parsed:
+            result["value_time"] = parsed
+    elif field.field_type in (
+        ClinicalFormField.FieldType.GRID,
+        ClinicalFormField.FieldType.MULTISELECT,
+        ClinicalFormField.FieldType.DATA_REF,
+    ):
+        result["value_json"] = value_text
 
     return result
+
+
+class ClinicalDocumentTemplateSerializer(TenantMixin, serializers.ModelSerializer):
+    """Serializer for document templates."""
+
+    class Meta:
+        model = ClinicalDocumentTemplate
+        fields = "__all__"
+        read_only_fields = ["tenant_id"]
+
+
+class ClinicalDocumentInstanceSerializer(TenantMixin, serializers.ModelSerializer):
+    """Serializer for document instances."""
+
+    template_code = serializers.CharField(source="template.code", read_only=True)
+    template_name = serializers.CharField(source="template.name", read_only=True)
+
+    class Meta:
+        model = ClinicalDocumentInstance
+        fields = "__all__"
+        read_only_fields = ["tenant_id"]
+
+
+class ClinicalPrintTemplateSerializer(TenantMixin, serializers.ModelSerializer):
+    """Serializer for print templates."""
+
+    class Meta:
+        model = ClinicalPrintTemplate
+        fields = "__all__"
+        read_only_fields = ["tenant_id"]
+
+
+class MrdChecklistLineSerializer(TenantMixin, serializers.ModelSerializer):
+    """Serializer for MRD checklist configuration lines."""
+
+    class Meta:
+        model = MrdChecklistLine
+        fields = "__all__"
+        read_only_fields = ["tenant_id"]
+
+
+class ClinicalFormTemplateSerializer(TenantMixin, serializers.ModelSerializer):
+    """Named, reusable field-value templates for a form (e.g. prescription templates)."""
+
+    form_code = serializers.CharField(source="form.code", read_only=True)
+
+    class Meta:
+        model = ClinicalFormTemplate
+        fields = "__all__"
+        read_only_fields = ["tenant_id", "created_by_user_id"]
+
+
+class EncounterFormsQuerySerializer(serializers.Serializer):
+    """Query params for encounter form resolution."""
+
+    encounter_type = serializers.ChoiceField(choices=["opd_visit", "ipd_admission", "generic"])
+    encounter_id = serializers.IntegerField()

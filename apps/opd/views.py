@@ -170,11 +170,6 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         # HMSPermission gates action access — no queryset-level role filter needed.
         return queryset
 
-    @extend_schema(
-        summary="Get Today's Visits",
-        description="Get all visits for today with queue information",
-        tags=['OPD - Visits']
-    )
     def perform_create(self, serializer):
         super().perform_create(serializer)
         CeliyoCache().delete_pattern(f"opd:today:{self.request.tenant_id}")
@@ -183,6 +178,12 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         super().perform_update(serializer)
         CeliyoCache().delete_pattern(f"opd:today:{self.request.tenant_id}")
 
+    @extend_schema(
+        summary="Get Today's Visits",
+        description="Get all visits scheduled for today with queue information.",
+        responses={200: VisitListSerializer(many=True)},
+        tags=['OPD - Visits']
+    )
     @action(detail=False, methods=['get'])
     def today(self, request):
         """Get today's visits"""
@@ -225,28 +226,47 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
     @extend_schema(
         summary="Call Next Patient",
-        description="Call the next patient in queue for a specific doctor",
+        description=(
+            "Call the next waiting patient in the OPD queue. If doctor_id is "
+            "provided, the oldest waiting visit assigned to that doctor is "
+            "prioritized; otherwise the oldest global waiting visit is called."
+        ),
         parameters=[
-            OpenApiParameter(name='doctor_id', type=int, required=True)
+            OpenApiParameter(
+                name='doctor_id', type=int, required=False,
+                description='Optional doctor ID to prioritize the queue for that doctor.'
+            )
         ],
+        responses={200: VisitDetailSerializer},
         tags=['OPD - Visits']
     )
     @action(detail=False, methods=['post'])
     def call_next(self, request):
         """Call next patient in queue"""
-        doctor_id = request.data.get('doctor_id')
-        if not doctor_id:
-            return Response(
-                {'success': False, 'error': 'doctor_id is required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        doctor_id = request.query_params.get('doctor_id') or request.data.get('doctor_id')
 
-        # Get next waiting patient
         today = date.today()
-        next_visit = self.get_queryset().filter(
+        base_qs = self.get_queryset().filter(
             visit_date=today,
             status='waiting'
-        ).order_by('entry_time').first()
+        )
+
+        next_visit = None
+        doctor_id_int = None
+        if doctor_id:
+            try:
+                doctor_id_int = int(doctor_id)
+            except (ValueError, TypeError):
+                return Response(
+                    {'success': False, 'error': 'doctor_id must be an integer'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            # Prioritize the oldest waiting visit already assigned to this doctor.
+            next_visit = base_qs.filter(doctor_id=doctor_id_int).order_by('entry_time').first()
+
+        if not next_visit:
+            # Fall back to the global queue.
+            next_visit = base_qs.order_by('entry_time').first()
 
         if not next_visit:
             return Response({
@@ -256,7 +276,8 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
         # Update visit status
         next_visit.status = 'called'
-        next_visit.doctor_id = doctor_id
+        if doctor_id_int:
+            next_visit.doctor_id = doctor_id_int
         next_visit.consultation_start_time = timezone.now()
         next_visit.save()
 
@@ -342,9 +363,21 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
     @extend_schema(
         summary="Get Visit Statistics",
-        description="Get statistics for visits (daily, weekly, monthly)",
+        description=(
+            "Get statistics for visits (daily, weekly, monthly). Pass "
+            "group_by=day to additionally receive a daily_trend series "
+            "(visits, completed, revenue per day) for the requested range, "
+            "cached for 300 seconds."
+        ),
         parameters=[
-            OpenApiParameter(name='period', type=str, description='day, week, month')
+            OpenApiParameter(name='period', type=str, description='day, week, month'),
+            OpenApiParameter(name='date', type=str, description='Specific date YYYY-MM-DD (overrides period)'),
+            OpenApiParameter(name='date_from', type=str, description='Range start YYYY-MM-DD (overrides period)'),
+            OpenApiParameter(name='date_to', type=str, description='Range end YYYY-MM-DD (overrides period)'),
+            OpenApiParameter(
+                name='group_by', type=str,
+                description='Set to "day" to include a daily_trend breakdown in the response.'
+            ),
         ],
         tags=['OPD - Visits']
     )
@@ -436,10 +469,62 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                 'pending_amount': agg['pending_amount'] or 0,
             }
         }
+
+        # Optional daily trend, e.g. ?group_by=day
+        group_by = request.query_params.get('group_by')
+        if group_by == 'day':
+            trend_cache_key = f"opd:visits:trend:{request.tenant_id}:{start_date}:{end_date}"
+            cache = CeliyoCache()
+            daily_trend = cache.get(trend_cache_key)
+            if daily_trend is None:
+                from django.db.models.functions import TruncDate
+
+                daily_trend = list(
+                    visits.annotate(day=TruncDate('visit_date'))
+                          .values('day')
+                          .annotate(
+                              visits=Count('id'),
+                              completed=Count('id', filter=Q(status='completed')),
+                              revenue=Sum('total_amount'),
+                          )
+                          .order_by('day')
+                )
+                daily_trend = [
+                    {
+                        'date': str(row['day']),
+                        'visits': row['visits'] or 0,
+                        'completed': row['completed'] or 0,
+                        'revenue': float(row['revenue'] or 0),
+                    }
+                    for row in daily_trend
+                ]
+                cache.set(trend_cache_key, daily_trend, ttl=300)
+            result['data']['daily_trend'] = daily_trend
+            # Trend responses are range-specific; skip the today-only cache below.
+            _use_cache = False
+
         if _use_cache:
             CeliyoCache().set(f"opd:today:{request.tenant_id}", result, ttl=120)
         return Response(result)
 
+    @extend_schema(
+        summary="Per-doctor visit statistics",
+        description=(
+            "Per-doctor aggregation of visit statistics for the admin dashboard. "
+            "Pass doctor=me to restrict the result to the caller's own doctor "
+            "profile (resolved from the JWT user_id)."
+        ),
+        parameters=[
+            OpenApiParameter(name='date_from', type=str, description='Range start YYYY-MM-DD (default: today)'),
+            OpenApiParameter(name='date_to', type=str, description='Range end YYYY-MM-DD (default: date_from)'),
+            OpenApiParameter(name='date', type=str, description='Single day shortcut (backward compat)'),
+            OpenApiParameter(
+                name='doctor', type=str,
+                description='Set to "me" to restrict results to the requesting doctor only.'
+            ),
+        ],
+        tags=['OPD - Visits'],
+    )
     @action(detail=False, methods=['get'])
     def doctor_stats(self, request):
         """
@@ -449,11 +534,14 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
           date_from — YYYY-MM-DD  (range start; default: today)
           date_to   — YYYY-MM-DD  (range end;   default: date_from)
           date      — YYYY-MM-DD  (single day shortcut, backward compat)
+          doctor    — "me" to restrict to the requesting user's own doctor profile
 
         If date_from/date_to are provided they take priority over date.
         """
         from django.db.models import ExpressionWrapper, DurationField
         import datetime as dt
+
+        from apps.doctors.models import DoctorProfile
 
         today = dt.date.today()
 
@@ -488,6 +576,28 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             visit_date__gte=date_from,
             visit_date__lte=date_to,
         )
+
+        # ?doctor=me — resolve the caller's own tenant-scoped doctor profile
+        # from the JWT user_id and restrict results to that doctor only.
+        if request.query_params.get('doctor') == 'me':
+            try:
+                own_doctor = DoctorProfile.objects.filter(
+                    tenant_id=request.tenant_id,
+                    user_id=request.user_id,
+                ).first()
+            except ValueError:
+                # request.user_id was not a valid UUID for this field lookup.
+                own_doctor = None
+
+            if own_doctor is None:
+                return Response({
+                    'success': True,
+                    'date_from': str(date_from),
+                    'date_to': str(date_to),
+                    'is_single_day': is_single_day,
+                    'data': [],
+                })
+            qs = qs.filter(doctor=own_doctor)
 
         doctor_rows = list(
             qs.values(
@@ -1077,7 +1187,8 @@ class OPDBillViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         else:
             start_date = today - timedelta(days=30)
 
-        bills = OPDBill.objects.filter(bill_date__date__gte=start_date)
+        # Tenant-scoped queryset — never query OPDBill.objects directly.
+        bills = self.get_queryset().filter(bill_date__date__gte=start_date)
 
         # Calculate statistics
         total_bills = bills.count()

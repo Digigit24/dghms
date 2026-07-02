@@ -1,6 +1,52 @@
 from django.db import models
+from django.core.cache import cache
 from django.core.validators import RegexValidator
 import datetime
+
+
+# --- UHID (patient_id) format resolution ---------------------------------------
+# LEGACY behaviour was a hardcoded, global "PAT{year}NNNN". NEW (2026): the
+# prefix / year / padding are configurable per tenant. Defaults below reproduce
+# the exact legacy scheme, so nothing changes for tenants that don't set a prefix.
+_DEFAULT_UHID_PREFIX = "PAT"
+_DEFAULT_UHID_INCLUDE_YEAR = True
+_DEFAULT_UHID_PADDING = 4
+
+
+def resolve_patient_id_format(tenant_id=None):
+    """Return (prefix, include_year, padding) for a tenant's UHID.
+
+    Resolution order (never raises; always falls back to the legacy default so
+    patient creation cannot break in production):
+      1. Django cache key ``tenant:{id}:patient_id_format`` — where the
+         admin.celiyo.com tenant-config JSON is expected to be synced
+         (dict: {"prefix", "include_year", "padding"}).
+      2. The local Hospital config row (hospital_config table).
+      3. Legacy default -> "PAT{year}NNNN".
+    """
+    try:
+        if tenant_id:
+            cached = cache.get(f"tenant:{tenant_id}:patient_id_format")
+            if isinstance(cached, dict) and cached.get("prefix"):
+                return (
+                    str(cached.get("prefix", _DEFAULT_UHID_PREFIX)),
+                    bool(cached.get("include_year", _DEFAULT_UHID_INCLUDE_YEAR)),
+                    int(cached.get("padding", _DEFAULT_UHID_PADDING)),
+                )
+        from apps.hospital.models import Hospital
+        cfg = (
+            Hospital.objects.filter(tenant_id=tenant_id).first()
+            if tenant_id else Hospital.objects.first()
+        )
+        if cfg and getattr(cfg, "patient_id_prefix", None):
+            return (
+                cfg.patient_id_prefix,
+                cfg.patient_id_include_year,
+                cfg.patient_id_padding,
+            )
+    except Exception:  # pragma: no cover - defensive: never block patient save
+        pass
+    return _DEFAULT_UHID_PREFIX, _DEFAULT_UHID_INCLUDE_YEAR, _DEFAULT_UHID_PADDING
 
 
 class PatientProfile(models.Model):
@@ -138,6 +184,22 @@ class PatientProfile(models.Model):
     )
     emergency_contact_relation = models.CharField(max_length=50, null=True, blank=True)
 
+    # Registration extras (additive — used by the IPD Registration form)
+    title = models.CharField(max_length=20, blank=True, default="", help_text="Mr, Mrs, Ms, Dr, Master, Baby, etc.")
+    aadhaar_number = models.CharField(max_length=20, blank=True, default="")
+    # Photo stored as a base64 data URL directly in the DB for now (S3 later).
+    photo_data = models.TextField(blank=True, default="", help_text="Base64 data URL of the patient photo.")
+
+    # Guardian / relative (additive)
+    guardian_first_name = models.CharField(max_length=100, blank=True, default="")
+    guardian_middle_name = models.CharField(max_length=100, blank=True, default="")
+    guardian_last_name = models.CharField(max_length=100, blank=True, default="")
+    guardian_mobile = models.CharField(max_length=15, blank=True, default="")
+    guardian_gender = models.CharField(max_length=10, blank=True, default="")
+    guardian_relation = models.CharField(max_length=50, blank=True, default="")
+    guardian_address = models.TextField(blank=True, default="")
+    guardian_photo_data = models.TextField(blank=True, default="", help_text="Base64 data URL of the guardian photo.")
+
     # Insurance
     insurance_provider = models.CharField(
         max_length=200,
@@ -196,9 +258,10 @@ class PatientProfile(models.Model):
         return f"{self.full_name} ({self.patient_id})"
 
     def save(self, *args, **kwargs):
-        # Generate patient ID
+        # Generate patient ID (UHID). Prefix/format is tenant-configurable (2026);
+        # defaults reproduce the legacy PAT{year}NNNN scheme.
         if not self.patient_id:
-            self.patient_id = self.generate_patient_id()
+            self.patient_id = self.generate_patient_id(self.tenant_id)
 
         # Calculate age
         if self.date_of_birth:
@@ -243,22 +306,30 @@ class PatientProfile(models.Model):
         return self.insurance_expiry_date > datetime.date.today()
 
     @classmethod
-    def generate_patient_id(cls):
-        """Generate unique patient ID: PAT2025XXXX"""
-        year = datetime.datetime.now().year
+    def generate_patient_id(cls, tenant_id=None):
+        """Generate a unique UHID.
+
+        LEGACY default: ``PAT{year}NNNN``. NEW (2026): prefix / year / padding
+        come from tenant config via ``resolve_patient_id_format``. The running
+        sequence is scoped by the *prefix* (and year, when included), which keeps
+        ``patient_id`` globally unique (the column is ``unique=True``) even across
+        tenants that share a prefix.
+        """
+        prefix, include_year, padding = resolve_patient_id_format(tenant_id)
+        stem = f"{prefix}{datetime.datetime.now().year}" if include_year else prefix
         last = cls.objects.filter(
-            patient_id__startswith=f'PAT{year}'
+            patient_id__startswith=stem
         ).order_by('-patient_id').first()
 
         if last:
             try:
-                num = int(last.patient_id[-4:]) + 1
-            except ValueError:
+                num = int(last.patient_id[len(stem):]) + 1
+            except (ValueError, TypeError):
                 num = 1
         else:
             num = 1
 
-        return f'PAT{year}{num:04d}'
+        return f'{stem}{num:0{padding}d}'
 
 
 class PatientVitals(models.Model):

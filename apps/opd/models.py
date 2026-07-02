@@ -86,6 +86,14 @@ class Visit(models.Model):
         related_name='referred_visits',
         help_text="Referring doctor if applicable"
     )
+    # Additive — mirrors IPD Admission.notify_reference_doctor so the OPD
+    # registration form can offer the same "Send SMS to Reference Doctor"
+    # toggle. Optional, defaults to False; existing rows get False on migrate.
+    notify_referring_doctor = models.BooleanField(
+        default=False,
+        blank=True,
+        help_text="Whether to send an SMS to the referring doctor",
+    )
     created_by_id = models.UUIDField(null=True, blank=True, help_text="User who created the visit")
 
     # Visit Information

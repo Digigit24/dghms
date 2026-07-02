@@ -101,7 +101,8 @@ class PatientProfileListSerializer(serializers.ModelSerializer):
     class Meta:
         model = PatientProfile
         fields = [
-            'id', 'patient_id', 'full_name', 'age', 'gender',
+            'id', 'patient_id', 'full_name', 'first_name', 'last_name', 'middle_name',
+            'date_of_birth', 'age', 'gender',
             'mobile_primary', 'email', 'blood_group',
             'city', 'status', 'registration_date',
             'last_visit_date', 'total_visits',
@@ -110,7 +111,12 @@ class PatientProfileListSerializer(serializers.ModelSerializer):
 
 
 class PatientProfileDetailSerializer(serializers.ModelSerializer):
-    """Detail view serializer for patients - all fields"""
+    """Detail view serializer for patients - all patient-facing fields.
+
+    Explicit field list (not `fields = '__all__'`) so internal audit columns
+    (`tenant_id`, `created_by_user_id`) are never sent to the client, per
+    CLAUDE.md §4/§12 rule 2 (human-readable, client-safe responses only).
+    """
     full_name = serializers.ReadOnlyField()
     full_address = serializers.ReadOnlyField()
     age = serializers.ReadOnlyField()
@@ -121,7 +127,23 @@ class PatientProfileDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PatientProfile
-        fields = '__all__'
+        fields = [
+            'id', 'user_id', 'patient_id',
+            'first_name', 'last_name', 'middle_name', 'date_of_birth', 'age', 'gender',
+            'mobile_primary', 'mobile_secondary', 'email',
+            'address_line1', 'address_line2', 'city', 'state', 'country', 'pincode',
+            'blood_group', 'height', 'weight', 'bmi',
+            'marital_status', 'occupation',
+            'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relation',
+            'title', 'aadhaar_number', 'photo_data',
+            'guardian_first_name', 'guardian_middle_name', 'guardian_last_name',
+            'guardian_mobile', 'guardian_gender', 'guardian_relation',
+            'guardian_address', 'guardian_photo_data',
+            'insurance_provider', 'insurance_policy_number', 'insurance_expiry_date',
+            'registration_date', 'last_visit_date', 'total_visits', 'status',
+            'created_at', 'updated_at',
+            'full_name', 'full_address', 'is_insurance_valid', 'vitals', 'allergies',
+        ]
 
 
 class PatientProfileCreateUpdateSerializer(serializers.ModelSerializer):
@@ -250,6 +272,9 @@ class PatientStatisticsSerializer(serializers.Serializer):
     total_visits = serializers.IntegerField()
     gender_distribution = serializers.DictField()
     blood_group_distribution = serializers.DictField()
+    # New-registration trend fields (computed, read-only; only present when requested)
+    registrations_today = serializers.IntegerField(required=False)
+    daily_trend = serializers.ListField(required=False, child=serializers.DictField())
 
 
 # =============================================================================
@@ -305,6 +330,21 @@ class PatientRegistrationSerializer(serializers.Serializer):
         required=False
     )
     occupation = serializers.CharField(max_length=100, required=False, allow_blank=True)
+
+    # Registration extras (OPTIONAL) — additive, mirrors PatientProfile's
+    # title/aadhaar/photo/guardian fields so this endpoint no longer silently
+    # drops them when a caller sends them.
+    title = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    aadhaar_number = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    photo_data = serializers.CharField(required=False, allow_blank=True)
+    guardian_first_name = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    guardian_middle_name = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    guardian_last_name = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    guardian_mobile = serializers.CharField(max_length=15, required=False, allow_blank=True)
+    guardian_gender = serializers.CharField(max_length=10, required=False, allow_blank=True)
+    guardian_relation = serializers.CharField(max_length=50, required=False, allow_blank=True)
+    guardian_address = serializers.CharField(required=False, allow_blank=True)
+    guardian_photo_data = serializers.CharField(required=False, allow_blank=True)
 
     # Emergency Contact (REQUIRED)
     emergency_contact_name = serializers.CharField(max_length=100, required=True)

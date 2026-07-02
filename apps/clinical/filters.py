@@ -24,12 +24,14 @@ class ClinicalRecordFilter(FilterSet):
 
     form = django_filters.NumberFilter(field_name="form", lookup_expr="exact")
     encounter_type = django_filters.CharFilter(field_name="encounter_type", lookup_expr="exact")
+    encounter_id = django_filters.NumberFilter(field_name="encounter_id", lookup_expr="exact")
+    occurrence_index = django_filters.NumberFilter(field_name="occurrence_index", lookup_expr="exact")
     status = django_filters.CharFilter(field_name="status", lookup_expr="exact")
     patient_user_id = django_filters.UUIDFilter(field_name="patient_user_id", lookup_expr="exact")
 
     class Meta:
         model = ClinicalRecord
-        fields = ["form", "encounter_type", "status", "patient_user_id"]
+        fields = ["form", "encounter_type", "encounter_id", "occurrence_index", "status", "patient_user_id"]
 
 
 class ClinicalPicklistItemFilter(FilterSet):

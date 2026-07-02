@@ -121,6 +121,9 @@ INSTALLED_APPS = [
 
     # Inventory Management
     'apps.inventory',
+
+    # Server-side print rendering (WeasyPrint)
+    'apps.printing',
 ]
 
 # --- Middleware ---

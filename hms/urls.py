@@ -5,7 +5,12 @@ from django.views.generic import RedirectView
 from common.admin_site import hms_admin_site
 
 # Import authentication views
-from common.views import superadmin_proxy_login_view, admin_logout_view, HealthCheckView
+from common.views import (
+    superadmin_proxy_login_view,
+    admin_logout_view,
+    HealthCheckView,
+    DashboardSummaryView,
+)
 
 # ✅ Import drf-spectacular views
 from drf_spectacular.views import (
@@ -50,6 +55,12 @@ urlpatterns = [
 
     # Inventory Management
     path('api/inventory/', include('apps.inventory.urls')),
+
+    # Server-side print rendering (WeasyPrint)
+    path('api/print/', include('apps.printing.urls')),
+
+    # Unified dashboard summary (composes OPD/IPD/Payments/Inventory headline numbers)
+    path('api/dashboard/summary/', DashboardSummaryView.as_view(), name='dashboard-summary'),
 
     # Nuvi API (No authentication required)
     path('api/', include('apps.nuviapi.urls')),

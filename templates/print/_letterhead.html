@@ -1,0 +1,38 @@
+{% comment %}
+Renders the tenant letterhead header block. Expects a `letterhead` context
+dict shaped exactly like the GET /api/hospital/config/letterhead/ JSON
+contract:
+
+{
+  "enabled": bool,
+  "show_logo": bool, "logo_url": str,
+  "show_badge": bool, "badge_url": str,
+  "alignment": "left"|"center",
+  "show_hairline": bool,
+  "text_lines": [{"id": str, "text": str, "style": "title"|"normal", "enabled": bool, "order": int}]
+}
+{% endcomment %}
+{% if letterhead.enabled %}
+<div style="display: flex; align-items: flex-start; justify-content: space-between; padding-bottom: 6px;">
+    <div style="display: flex; align-items: flex-start; gap: 10px; {% if letterhead.alignment == 'center' %}margin: 0 auto; text-align: center; flex-direction: column; align-items: center;{% endif %}">
+        {% if letterhead.show_logo and letterhead.logo_url %}
+        <img src="{{ letterhead.logo_url }}" alt="Logo" style="height: 42px; width: 42px; object-fit: contain; flex-shrink: 0;" />
+        {% endif %}
+        <div>
+            {% for line in letterhead.text_lines %}
+                {% if line.style == "title" %}
+                <div style="font-size: 13pt; font-weight: 700; line-height: 1.25;">{{ line.text }}</div>
+                {% else %}
+                <div style="font-size: 7.5pt; line-height: 1.4; color: #374151;">{{ line.text }}</div>
+                {% endif %}
+            {% endfor %}
+        </div>
+    </div>
+    {% if letterhead.show_badge and letterhead.badge_url %}
+    <img src="{{ letterhead.badge_url }}" alt="Badge" style="height: 46px; width: 46px; object-fit: contain; flex-shrink: 0;" />
+    {% endif %}
+</div>
+{% if letterhead.show_hairline %}
+<hr style="border: none; border-top: 1.5px solid #1f2937; margin: 0 0 8px;" />
+{% endif %}
+{% endif %}

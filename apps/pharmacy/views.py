@@ -13,6 +13,7 @@ from django.db.models import Sum, F
 from django.utils import timezone
 from datetime import timedelta
 from celery.result import AsyncResult
+from drf_spectacular.utils import OpenApiResponse, extend_schema
 
 from .models import (
     ProductCategory,
@@ -56,8 +57,8 @@ class ProductCategoryViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     ordering = ['name']
 
     def get_queryset(self):
-        """Filter active categories by default"""
-        queryset = self.queryset
+        """Tenant-scoped queryset; filter active categories by default."""
+        queryset = super().get_queryset()
 
         # Option to include inactive categories
         include_inactive = self.request.query_params.get('include_inactive', 'false')
@@ -112,8 +113,14 @@ class PharmacyProductViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     ordering = ['-created_at']
 
     def get_queryset(self):
-        """Filter and annotate products"""
-        queryset = self.queryset
+        """Filter and annotate products.
+
+        Delegates to ``TenantViewSetMixin.get_queryset()`` first so every
+        product query (list, retrieve, statistics, low_stock, etc.) is
+        scoped to ``request.tenant_id``. Previously this used ``self.queryset``
+        directly, bypassing tenant isolation entirely.
+        """
+        queryset = super().get_queryset()
 
         # Filter active products by default
         include_inactive = self.request.query_params.get('include_inactive', 'false')
@@ -190,6 +197,12 @@ class PharmacyProductViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             'data': serializer.data
         })
 
+    @extend_schema(
+        summary="Pharmacy Product Statistics",
+        description="Aggregate pharmacy product statistics for the dashboard.",
+        responses={200: OpenApiResponse(description="Pharmacy product statistics")},
+        tags=['Pharmacy - Products'],
+    )
     @action(detail=False, methods=['get'])
     def statistics(self, request):
         """Get pharmacy product statistics"""
@@ -214,7 +227,9 @@ class PharmacyProductViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             'expired_products': queryset.filter(
                 expiry_date__lt=timezone.now().date()
             ).count(),
-            'categories': ProductCategory.objects.filter(is_active=True).count(),
+            'categories': ProductCategory.objects.filter(
+                tenant_id=request.tenant_id, is_active=True
+            ).count(),
         }
 
         return Response({
@@ -540,8 +555,8 @@ class CartViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     }
 
     def get_queryset(self):
-        """Returns all carts for admin view"""
-        return self.queryset.all()
+        """Returns tenant-scoped carts for admin view"""
+        return super().get_queryset()
 
     @action(detail=False, methods=['post'])
     def add_item(self, request):
@@ -733,8 +748,14 @@ class PharmacyOrderViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     ordering = ['-created_at']
 
     def get_queryset(self):
-        """Returns all orders for admin view"""
-        return self.queryset.all()
+        """Tenant-scoped orders queryset (admin/staff view of all tenant orders).
+
+        Previously this bypassed ``TenantViewSetMixin.get_queryset()`` by
+        returning ``self.queryset.all()`` directly, which leaked pharmacy
+        orders across tenants on list/retrieve/statistics. Delegate to the
+        mixin so ``.filter(tenant_id=request.tenant_id)`` is always applied.
+        """
+        return super().get_queryset()
 
     def create(self, request):
         """Create order from cart"""
@@ -851,6 +872,12 @@ class PharmacyOrderViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             'data': serializer.data
         })
 
+    @extend_schema(
+        summary="Pharmacy Order Statistics",
+        description="Aggregate pharmacy order statistics for the dashboard.",
+        responses={200: OpenApiResponse(description="Pharmacy order statistics")},
+        tags=['Pharmacy - Orders'],
+    )
     @action(detail=False, methods=['get'])
     def statistics(self, request):
         """Get order statistics for current user"""

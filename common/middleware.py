@@ -12,10 +12,10 @@ import threading
 import jwt
 import structlog
 from django.conf import settings
+from django.http import JsonResponse
 from django.utils.deprecation import MiddlewareMixin
 
 from .auth_backends import TenantUser
-from .responses import error_response
 from . import error_codes
 
 logger = structlog.get_logger(__name__)
@@ -50,6 +50,26 @@ def _clean_public_path(path, public_prefixes, exact_paths):
     if path in exact_paths:
         return True
     return any(path.startswith(prefix) for prefix in public_prefixes)
+
+
+def middleware_error_response(code, message, status=400, field=None, detail=None):
+    """Return a JSON error response from middleware.
+
+    DRF Response objects are finalized by DRF views. Middleware runs before DRF,
+    so returning a DRF Response here can raise accepted_renderer errors.
+    """
+    return JsonResponse(
+        {
+            "success": False,
+            "error": {
+                "code": code,
+                "message": message,
+                "field": field,
+                "detail": detail or {},
+            },
+        },
+        status=status,
+    )
 
 
 class JWTAuthenticationMiddleware(MiddlewareMixin):
@@ -93,7 +113,7 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
                 path=request.path,
                 method=request.method,
             )
-            return error_response(
+            return middleware_error_response(
                 code=error_codes.JWT_MISSING,
                 message="Authorization header required.",
                 status=401,
@@ -106,7 +126,7 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
                 "jwt_malformed_header",
                 path=request.path,
             )
-            return error_response(
+            return middleware_error_response(
                 code=error_codes.JWT_MALFORMED,
                 message="Invalid authorization header format. Use 'Bearer <token>'.",
                 status=401,
@@ -118,7 +138,7 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
                 path=request.path,
                 scheme=scheme,
             )
-            return error_response(
+            return middleware_error_response(
                 code=error_codes.JWT_MALFORMED,
                 message="Invalid authorization scheme. Use Bearer token.",
                 status=401,
@@ -130,7 +150,7 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
 
         if not secret_key:
             logger.error("jwt_secret_not_configured")
-            return error_response(
+            return middleware_error_response(
                 code=error_codes.INTERNAL_SERVER_ERROR,
                 message="JWT secret not configured.",
                 status=500,
@@ -148,7 +168,7 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
                 "jwt_expired",
                 path=request.path,
             )
-            return error_response(
+            return middleware_error_response(
                 code=error_codes.JWT_EXPIRED,
                 message="Token has expired.",
                 status=401,
@@ -159,7 +179,7 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
                 path=request.path,
                 error=str(exc),
             )
-            return error_response(
+            return middleware_error_response(
                 code=error_codes.JWT_INVALID,
                 message=f"Invalid token: {exc}",
                 status=401,
@@ -181,7 +201,7 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
                 path=request.path,
                 missing=missing,
             )
-            return error_response(
+            return middleware_error_response(
                 code=error_codes.JWT_INVALID,
                 message=f"Missing required token claims: {', '.join(missing)}",
                 status=401,
@@ -195,7 +215,7 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
                 email=payload.get("email"),
                 modules=enabled_modules,
             )
-            return error_response(
+            return middleware_error_response(
                 code=error_codes.MODULE_NOT_ENABLED,
                 message="HMS module not enabled for this user.",
                 status=403,
@@ -233,7 +253,7 @@ class JWTAuthenticationMiddleware(MiddlewareMixin):
                     token_tenant=str(request.tenant_id),
                     requested_tenant=str(requested_tenant_id),
                 )
-                return error_response(
+                return middleware_error_response(
                     code=error_codes.TENANT_MISMATCH,
                     message="You can only access your own tenant.",
                     status=403,
