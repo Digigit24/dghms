@@ -1,0 +1,166 @@
+    )
+    @action(detail=True, methods=["post"], url_path="snapshot")
+    def snapshot(self, request, pk=None):
+        """Create a saved snapshot for this record."""
+        if not check_permission(request, HMSPermissions.CLINICAL_CREATE):
+            raise PermissionDenied("No permission to create snapshots.")
+        record = self.get_object()
+        name = request.data.get("name") or f"Snapshot {timezone.now().isoformat()}"
+        snapshot_data = {
+            "record_id": record.id,
+            "form_id": record.form_id,
+            "form_code": record.form.code,
+            "version": record.version,
+            "status": record.status,
+            "field_values": ClinicalFieldValueSerializer(
+                record.field_values.filter(is_active=True), many=True
+            ).data,
+        }
+        snapshot = SavedFormSnapshot.objects.create(
+            tenant_id=record.tenant_id,
+            record=record,
+            name=name,
+            snapshot_data=snapshot_data,
+            created_by_user_id=request.user_id,
+        )
+        _audit(
+            tenant_id=record.tenant_id,
+            record_id=record.id,
+            action=ClinicalRecordAuditLog.Action.SNAPSHOT_CREATED,
+            user_id=request.user_id,
+            metadata={"snapshot_id": snapshot.id, "name": name},
+        )
+        return action_response(
+            message="Snapshot created.",
+            data=SavedFormSnapshotSerializer(snapshot).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+# ---------------------------------------------------------------------------
+# UserFormPreference
+# ---------------------------------------------------------------------------
+
+
+@extend_schema_view(
+    list=extend_schema(
+        summary="List form preferences",
+        description="List current user's form preferences.",
+        tags=["Clinical Preferences"],
+        responses={200: UserFormPreferenceSerializer(many=True)},
+    ),
+    retrieve=extend_schema(
+        summary="Retrieve a form preference",
+        description="Retrieve a form preference.",
+        tags=["Clinical Preferences"],
+        responses={200: UserFormPreferenceSerializer},
+    ),
+    create=extend_schema(
+        summary="Create a form preference",
+        description="Save display preferences for a form.",
+        tags=["Clinical Preferences"],
+        responses={201: UserFormPreferenceSerializer},
+    ),
+    update=extend_schema(
+        summary="Update a form preference",
+        description="Replace a form preference.",
+        tags=["Clinical Preferences"],
+        responses={200: UserFormPreferenceSerializer},
+    ),
+    partial_update=extend_schema(
+        summary="Patch a form preference",
+        description="Partially update a form preference.",
+        tags=["Clinical Preferences"],
+        responses={200: UserFormPreferenceSerializer},
+    ),
+    destroy=extend_schema(
+        summary="Delete a form preference",
+        description="Delete a form preference.",
+        tags=["Clinical Preferences"],
+        responses={204: None},
+    ),
+)
+class UserFormPreferenceViewSet(PatientAccessMixin, TenantViewSetMixin, viewsets.ModelViewSet):
+    """CRUD for per-user form display preferences."""
+
+    queryset = UserFormPreference.objects.select_related("form")
+    serializer_class = UserFormPreferenceSerializer
+    permission_classes = [IsTenantAuthenticated, HMSPermission]
+    hms_module = "clinical"
+    pagination_class = StandardPagination
+
+    def get_queryset(self):
+        if not (check_permission(self.request, HMSPermissions.CLINICAL_VIEW) or check_permission(self.request, HMSPermissions.CLINICAL_CREATE) or check_permission(self.request, HMSPermissions.CLINICAL_EDIT)):
+            raise PermissionDenied("No permission to view form preferences.")
+        qs = super().get_queryset()
+        # Patients/staff should only see their own preferences.
+        return qs.filter(user_id=self.request.user_id)
+
+    def perform_create(self, serializer):
+        if not check_permission(self.request, HMSPermissions.CLINICAL_CREATE):
+            raise PermissionDenied("No permission to create form preferences.")
+        serializer.save(user_id=self.request.user_id, created_by_user_id=self.request.user_id)
+
+    def perform_update(self, serializer):
+        if not check_permission(self.request, HMSPermissions.CLINICAL_EDIT):
+            raise PermissionDenied("No permission to update form preferences.")
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if not check_permission(self.request, HMSPermissions.CLINICAL_DELETE):
+            raise PermissionDenied("No permission to delete form preferences.")
+        instance.delete()
+
+
+# ---------------------------------------------------------------------------
+# SavedFormSnapshot
+# ---------------------------------------------------------------------------
+
+
+class SavedFormSnapshotViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
+    """CRUD for saved form snapshots."""
+
+    queryset = SavedFormSnapshot.objects.select_related("record")
+    serializer_class = SavedFormSnapshotSerializer
+    permission_classes = [IsTenantAuthenticated, HMSPermission]
+    hms_module = "clinical"
+    pagination_class = StandardPagination
+
+    def perform_create(self, serializer):
+        if not check_permission(self.request, HMSPermissions.CLINICAL_CREATE):
+            raise PermissionDenied("No permission to create snapshots.")
+        serializer.save(created_by_user_id=self.request.user_id)
+
+    def perform_destroy(self, instance):
+        if not check_permission(self.request, HMSPermissions.CLINICAL_DELETE):
+            raise PermissionDenied("No permission to delete snapshots.")
+        instance.delete()
+
+
+class ClinicalFormTemplateViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
+    """Named, reusable field-value templates for a form (e.g. prescription templates).
+
+    Filter by form with ``?form=<id>``. Create with ``{form, name, values}``.
+    """
+
+    queryset = ClinicalFormTemplate.objects.select_related("form").filter(is_active=True)
+    serializer_class = ClinicalFormTemplateSerializer
+    permission_classes = [IsTenantAuthenticated, HMSPermission]
+    hms_module = "clinical"
+    pagination_class = StandardPagination
+    filterset_fields = ["form"]
+
+    def perform_create(self, serializer):
+        if not check_permission(self.request, HMSPermissions.CLINICAL_CREATE):
+            raise PermissionDenied("No permission to create templates.")
+        serializer.save(created_by_user_id=self.request.user_id)
+
+    def perform_update(self, serializer):
+        if not check_permission(self.request, HMSPermissions.CLINICAL_EDIT):
+            raise PermissionDenied("No permission to update templates.")
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if not check_permission(self.request, HMSPermissions.CLINICAL_DELETE):
+            raise PermissionDenied("No permission to delete templates.")
+        instance.delete()

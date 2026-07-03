@@ -196,43 +196,16 @@ class TransactionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         """Generate transaction-wide statistics"""
         # Permission already checked by HMSPermission (view_reports)
 
-        # Tenant-scoped queryset (TenantViewSetMixin + any ownership filtering in get_queryset()).
-        queryset = self.get_queryset()
+        from .services.stats import compute_transaction_statistics
 
-        # Aggregate statistics
-        stats = queryset.aggregate(
-            total_transactions=Count('id'),
-            total_amount=Sum('amount'),
-            total_payments=Sum('amount', filter=Q(transaction_type='payment')),
-            total_expenses=Sum('amount', filter=Q(transaction_type='expense')),
-            total_refunds=Sum('amount', filter=Q(transaction_type='refund'))
-        )
-
-        # Payment method breakdown
-        payment_method_breakdown = queryset.values('payment_method').annotate(
-            count=Count('id'),
-            total_amount=Sum('amount')
-        )
-
-        # Transaction type breakdown
-        transaction_type_breakdown = queryset.values('transaction_type').annotate(
-            count=Count('id'),
-            total_amount=Sum('amount')
-        )
+        # Tenant-scoped queryset (TenantViewSetMixin + any ownership filtering
+        # in get_queryset()). Aggregation is shared with the consolidated
+        # dashboard endpoint — see apps/payments/services/stats.py.
+        data = compute_transaction_statistics(self.get_queryset())
 
         return Response({
             'success': True,
-            'data': {
-                'overall_stats': {
-                    'total_transactions': stats['total_transactions'],
-                    'total_amount': float(stats['total_amount'] or 0),
-                    'total_payments': float(stats['total_payments'] or 0),
-                    'total_expenses': float(stats['total_expenses'] or 0),
-                    'total_refunds': float(stats['total_refunds'] or 0)
-                },
-                'payment_method_breakdown': list(payment_method_breakdown),
-                'transaction_type_breakdown': list(transaction_type_breakdown)
-            }
+            'data': data
         })
 
     @extend_schema(

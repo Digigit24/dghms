@@ -1,6 +1,6 @@
 # ipd/models.py
 from django.db import models, transaction, IntegrityError, connection
-from django.contrib.contenttypes.fields import GenericRelation
+from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from django.contrib.contenttypes.models import ContentType
 from django.core.validators import MinValueValidator, MaxValueValidator
 from decimal import Decimal
@@ -752,7 +752,7 @@ class IPDBilling(models.Model):
                     is_new_instance = self.pk is None
 
                     if not self.bill_number:
-                        self.bill_number = self.generate_bill_number()
+                        self.bill_number = self._generate_bill_number()
 
                     # Check if this is a signal-triggered save
                     is_signal_save = 'update_fields' in save_kwargs
@@ -795,15 +795,22 @@ class IPDBilling(models.Model):
         if last_exception:
             raise last_exception
 
-    @staticmethod
-    def generate_bill_number():
-        """Generate unique bill number: IPD-BILL/YYYYMMDD/###"""
+    def _generate_bill_number(self):
+        """Generate unique bill number: IPD-BILL/YYYYMMDD/###
+
+        Scoped per tenant_id (CLAUDE.md tenant isolation rules) — previously
+        this counted ALL bills for the day across every tenant, which both
+        leaked cross-tenant sequence information and made numbering
+        non-deterministic per tenant. Must be an instance method (not
+        @staticmethod) since it needs self.tenant_id.
+        """
         from datetime import date
         today = date.today()
         date_str = today.strftime('%Y%m%d')
 
-        # Get count of bills for today
+        # Get count of bills for today, scoped to this tenant only
         today_count = IPDBilling.objects.filter(
+            tenant_id=self.tenant_id,
             bill_date__date=today
         ).count() + 1
 
@@ -845,7 +852,14 @@ class IPDBilling(models.Model):
         self.balance_amount = self.payable_amount - self.received_amount
 
         # Update payment status
-        if self.received_amount >= self.payable_amount:
+        # NOTE: payable_amount > 0 is required for 'paid' — a brand-new bill
+        # with no items yet has payable_amount == received_amount == 0, and
+        # 0 >= 0 is True, so without this guard every empty bill was
+        # incorrectly marked 'paid' the instant it was created (before any
+        # item was ever added). That falsely triggered the BILL_LOCKED guard
+        # on bill-item create/update/delete, making it look like there was no
+        # way to add items to a fresh bill at all.
+        if self.payable_amount > Decimal('0.00') and self.received_amount >= self.payable_amount:
             self.payment_status = 'paid'
             self.balance_amount = Decimal('0.00')
         elif self.received_amount > Decimal('0.00'):
@@ -966,6 +980,7 @@ class IPDBilling(models.Model):
                 'quantity': days_to_bill,
                 'unit_price': bed_charge_per_day,
                 'system_calculated_price': bed_charge_per_day,
+                'total_price': bed_charge_per_day * days_to_bill,
                 'notes': notes,
             }
         )
@@ -991,6 +1006,7 @@ class IPDBillItem(models.Model):
         ('Surgery', 'Surgery'),
         ('Therapy', 'Therapy'),
         ('Package', 'Package'),
+        ('Service', 'Service'),
         ('Other', 'Other'),
     ]
 
@@ -1039,6 +1055,33 @@ class IPDBillItem(models.Model):
         validators=[MinValueValidator(Decimal('0.00'))],
         help_text="Total price for this item"
     )
+    is_price_overridden = models.BooleanField(
+        default=False,
+        help_text="Flag indicating if unit_price was manually changed from system_calculated_price"
+    )
+
+    # Origin GFK — what this line item was generated FROM.
+    # For source='Bed' items this points at the Admission itself (the dedup
+    # key used by IPDBilling.get_bed_day_info()/add_bed_charges() to compute
+    # already-billed bed-days across ALL bills for the admission — NOT at any
+    # clinical order/model). For catalog-sourced items (Procedure/Package/
+    # Service/Investigation-backed Lab/Radiology items) it points at the
+    # catalog row itself. For fully custom/manual items it is left null.
+    origin_content_type = models.ForeignKey(
+        ContentType,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text="Type of the source record (Admission for bed charges, or a catalog row)",
+        related_name='+'
+    )
+    origin_object_id = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="ID of the source record referenced by origin_content_type"
+    )
+    origin = GenericForeignKey('origin_content_type', 'origin_object_id')
+
     notes = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1049,7 +1092,105 @@ class IPDBillItem(models.Model):
         indexes = [
             models.Index(fields=["tenant_id"]),
             models.Index(fields=["tenant_id", "bill"]),
+            models.Index(fields=["origin_content_type", "origin_object_id"]),
         ]
 
     def __str__(self):
         return f"{self.item_name} x{self.quantity} = {self.total_price}"
+
+
+class IPDBillTemplate(models.Model):
+    """
+    IPD Bill Template Model - Reusable set of line items for fast bill creation.
+
+    Tenants can save a bill's line items as a template (or hand-craft one)
+    and re-apply it to future bills. Bed charges are always auto-computed
+    per bill (see IPDBilling.add_bed_charges) so 'Bed' is never a valid
+    source for a template item — enforced in IPDBillTemplateItemSerializer.
+    """
+
+    # Primary Fields
+    id = models.AutoField(primary_key=True)
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
+
+    name = models.CharField(max_length=200, help_text="Template name")
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+
+    created_by_user_id = models.UUIDField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="User who created this template"
+    )
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'ipd_bill_templates'
+        ordering = ['name']
+        verbose_name = 'IPD Bill Template'
+        verbose_name_plural = 'IPD Bill Templates'
+        indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'is_active']),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+class IPDBillTemplateItem(models.Model):
+    """
+    IPD Bill Template Item Model - A single line item within a bill template.
+
+    'Bed' must never be saved as source here — bed charges are always
+    computed per-bill from the admission's actual length of stay, never
+    part of a reusable template. Enforced in the serializer's validate().
+    """
+
+    # Primary Fields
+    id = models.AutoField(primary_key=True)
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
+
+    template = models.ForeignKey(
+        IPDBillTemplate,
+        on_delete=models.CASCADE,
+        related_name='items',
+        help_text="Bill template this item belongs to"
+    )
+    item_name = models.CharField(max_length=200, help_text="Description of the item/service")
+    source = models.CharField(
+        max_length=20,
+        choices=IPDBillItem.SOURCE_CHOICES,
+        default='Other',
+        help_text="Source/category of the charge (never 'Bed')"
+    )
+    default_quantity = models.PositiveIntegerField(default=1)
+    default_unit_price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal('0.00'))],
+        help_text="Default unit price applied when this template is used"
+    )
+
+    is_active = models.BooleanField(default=True)
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'ipd_bill_template_items'
+        ordering = ['id']
+        verbose_name = 'IPD Bill Template Item'
+        verbose_name_plural = 'IPD Bill Template Items'
+        indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'template']),
+        ]
+
+    def __str__(self):
+        return f"{self.item_name} ({self.template.name})"

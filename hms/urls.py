@@ -9,7 +9,6 @@ from common.views import (
     superadmin_proxy_login_view,
     admin_logout_view,
     HealthCheckView,
-    DashboardSummaryView,
 )
 
 # ✅ Import drf-spectacular views
@@ -59,8 +58,9 @@ urlpatterns = [
     # Server-side print rendering (WeasyPrint)
     path('api/print/', include('apps.printing.urls')),
 
-    # Unified dashboard summary (composes OPD/IPD/Payments/Inventory headline numbers)
-    path('api/dashboard/summary/', DashboardSummaryView.as_view(), name='dashboard-summary'),
+    # Consolidated dashboard (single summary endpoint replacing ~13 stats calls;
+    # each section mirrors the `data` shape of its standalone endpoint)
+    path('api/dashboard/', include('apps.dashboard.urls')),
 
     # Nuvi API (No authentication required)
     path('api/', include('apps.nuviapi.urls')),

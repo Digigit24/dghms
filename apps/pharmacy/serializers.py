@@ -193,8 +193,19 @@ class PharmacyOrderSerializer(TenantMixin, serializers.ModelSerializer):
 
 
 class PrescriptionItemSerializer(TenantMixin, serializers.ModelSerializer):
-    """Serializer for prescription line items."""
+    """Serializer for prescription line items.
 
+    NOTE: the model stores the medicine name in ``medicine_name`` — the
+    public API key ``drug_name`` is kept as an alias for compatibility with
+    the originally documented contract. The previous version referenced
+    non-model fields (``drug_name``/``instructions``) directly, which made
+    every prescription endpoint (and /api/schema/) raise
+    ImproperlyConfigured.
+    """
+
+    drug_name = serializers.CharField(
+        source="medicine_name", required=False, allow_blank=True
+    )
     inventory_item_name = serializers.SerializerMethodField()
 
     class Meta:
@@ -202,17 +213,25 @@ class PrescriptionItemSerializer(TenantMixin, serializers.ModelSerializer):
         model = PrescriptionItem
         fields = [
             "id", "prescription", "drug_name", "dosage", "frequency",
-            "duration", "quantity", "instructions", "created_at", "updated_at",
+            "duration", "quantity", "inventory_item_name",
+            "created_at", "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
 
-    def get_inventory_item_name(self, obj):
-        return obj.drug_name
+    def get_inventory_item_name(self, obj) -> str:
+        return obj.medicine_name
 
 
 class PrescriptionSerializer(TenantMixin, serializers.ModelSerializer):
-    """Serializer for Prescription model."""
+    """Serializer for Prescription model.
 
+    ``doctor_user_id`` is kept as the public API key; it maps to the model's
+    ``created_by_user_id`` (the prescribing user's SuperAdmin UUID).
+    """
+
+    doctor_user_id = serializers.UUIDField(
+        source="created_by_user_id", read_only=True
+    )
     items = PrescriptionItemSerializer(many=True, read_only=True)
 
     class Meta:

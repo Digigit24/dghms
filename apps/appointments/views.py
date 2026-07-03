@@ -351,18 +351,18 @@ class AppointmentViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def today(self, request):
         """Get today's appointments"""
-        from datetime import date
-        today = date.today()
+        from .services.stats import compute_today_appointments
 
-        appointments = self.get_queryset().filter(
-            appointment_date=today
-        ).order_by('appointment_time')
-
-        serializer = self.get_serializer(appointments, many=True)
+        # Shared computation with the consolidated dashboard endpoint —
+        # see apps/appointments/services/stats.py. Passing this viewset's
+        # queryset preserves any role-based scoping from get_queryset().
+        data = compute_today_appointments(
+            self.get_queryset(), context=self.get_serializer_context()
+        )
         return Response({
             'success': True,
-            'count': appointments.count(),
-            'data': serializer.data
+            'count': len(data),
+            'data': data
         })
 
     @extend_schema(

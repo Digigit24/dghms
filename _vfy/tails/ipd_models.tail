@@ -1,0 +1,22 @@
+        validators=[MinValueValidator(Decimal('0.00'))],
+        help_text="Default unit price applied when this template is used"
+    )
+
+    is_active = models.BooleanField(default=True)
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'ipd_bill_template_items'
+        ordering = ['id']
+        verbose_name = 'IPD Bill Template Item'
+        verbose_name_plural = 'IPD Bill Template Items'
+        indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'template']),
+        ]
+
+    def __str__(self):
+        return f"{self.item_name} ({self.template.name})"

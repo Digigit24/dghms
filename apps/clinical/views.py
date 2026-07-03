@@ -22,7 +22,12 @@ from common.mixins import CachedFormStructureMixin, PatientAccessMixin, TenantVi
 from common.pagination import StandardPagination
 from common.responses import action_response, error_response
 
-from .filters import ClinicalFormFilter, ClinicalPicklistItemFilter, ClinicalRecordFilter
+from .filters import (
+    ClinicalFormFilter,
+    ClinicalFormSectionFilter,
+    ClinicalPicklistItemFilter,
+    ClinicalRecordFilter,
+)
 from .models import (
     ClinicalDocumentInstance,
     ClinicalDocumentTemplate,
@@ -573,7 +578,9 @@ class ClinicalFormSectionViewSet(
     permission_classes = [IsTenantAuthenticated, HMSPermission]
     hms_module = "clinical"
     pagination_class = StandardPagination
-    filterset_fields = ["form"]
+    # ?form=<id> resolves via FormSectionPlacement (the section model has no
+    # direct FK to form) — see ClinicalFormSectionFilter for details.
+    filterset_class = ClinicalFormSectionFilter
 
     def get_queryset(self):
         if not (check_permission(self.request, HMSPermissions.CLINICAL_VIEW) or check_permission(self.request, HMSPermissions.CLINICAL_CREATE) or check_permission(self.request, HMSPermissions.CLINICAL_EDIT)):
@@ -1427,6 +1434,163 @@ class ClinicalRecordViewSet(
 
         return action_response(
             message=f"{len(upserted)} field value(s) upserted.",
+            data=ClinicalFieldValueSerializer(upserted, many=True).data,
+        )
+
+    # Picklist codes shared between OPD and IPD forms for cross-encounter
+    # import. Chief Complaints, Past History, Diagnosis and Investigations
+    # all use the SAME ClinicalPicklist (config.picklist_code) on both sides
+    # even though the underlying field_key differs (e.g. OPD's "diagnosis"
+    # vs IPD's "provisional_diagnosis") — matching by picklist_code is the
+    # only stable link between the two forms' otherwise independently
+    # authored sections (see apps/clinical/seeds/forms_opd.py + forms_ipd.py).
+    IMPORTABLE_PICKLIST_CODES = ("chief_complaints", "past_history", "diagnosis", "investigations")
+
+    @extend_schema(
+        summary="Import Chief Complaints / Diagnosis / Investigations from OPD",
+        description=(
+            "Copies field values for the shared Chief Complaints, Past History, "
+            "Diagnosis and Investigations fields from the patient's most recent "
+            "OPD clinical record into this (IPD) record, matched by "
+            "config.picklist_code. By default, only fields that are still empty "
+            "on this record are filled in; pass {\"overwrite\": true} to replace "
+            "existing values too."
+        ),
+        tags=["Clinical Records"],
+        responses={200: ClinicalFieldValueSerializer(many=True)},
+    )
+    @action(detail=True, methods=["post"], url_path="import-from-opd")
+    def import_from_opd(self, request, pk=None):
+        """Copy Chief Complaints/Diagnosis/Investigations values from the patient's latest OPD record."""
+        if not check_permission(request, HMSPermissions.CLINICAL_EDIT):
+            raise PermissionDenied("No permission to edit clinical records.")
+
+        record = self.get_object()
+        if record.is_locked:
+            return error_response(
+                code=error_codes.RECORD_LOCKED,
+                message="Record is locked; unlock before editing values.",
+                status=status.HTTP_409_CONFLICT,
+            )
+        if not record.patient_user_id:
+            return error_response(
+                code=error_codes.VALIDATION_ERROR,
+                message="This record has no linked patient, so OPD history cannot be looked up.",
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        tenant_id = request.tenant_id
+        user_id = request.user_id
+        overwrite = bool(request.data.get("overwrite"))
+
+        # Target fields: fields on THIS record's form whose picklist_code is
+        # one of the shared codes above.
+        target_fields = list(
+            ClinicalFormField.objects.filter(
+                Q(tenant_id=tenant_id) | Q(tenant_id=_SYSTEM_TENANT_ID),
+                section__form_placements__form=record.form,
+                section__form_placements__is_active=True,
+                is_active=True,
+            ).distinct()
+        )
+        target_by_picklist_code = {}
+        for f in target_fields:
+            code = (f.config or {}).get("picklist_code")
+            if code in self.IMPORTABLE_PICKLIST_CODES:
+                target_by_picklist_code[code] = f
+
+        if not target_by_picklist_code:
+            return error_response(
+                code=error_codes.FIELD_NOT_FOUND,
+                message="This form has no Chief Complaints, Diagnosis, or Investigations fields to import into.",
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Source: the patient's most recent active OPD record (any form), so
+        # this works regardless of which specific OPD form was filled.
+        source_record = (
+            ClinicalRecord.objects.filter(
+                tenant_id=tenant_id,
+                encounter_type="opd_visit",
+                patient_user_id=record.patient_user_id,
+                is_active=True,
+            )
+            .order_by("-created_at")
+            .first()
+        )
+        if not source_record:
+            return error_response(
+                code=error_codes.NO_SOURCE_RECORD_FOUND,
+                message="No OPD clinical record was found for this patient yet.",
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        source_values = ClinicalFieldValue.objects.filter(
+            tenant_id=tenant_id,
+            record=source_record,
+            is_active=True,
+            field__config__picklist_code__in=list(target_by_picklist_code.keys()),
+        ).select_related("field")
+
+        existing_target_values = {
+            fv.field_id: fv
+            for fv in ClinicalFieldValue.objects.filter(
+                tenant_id=tenant_id, record=record, field__in=target_by_picklist_code.values()
+            )
+        }
+
+        value_columns = [
+            "value_text", "value_number", "value_boolean",
+            "value_date", "value_datetime", "value_time", "value_json",
+        ]
+
+        upserted = []
+        imported_field_ids = []
+        with transaction.atomic():
+            for source_fv in source_values:
+                code = (source_fv.field.config or {}).get("picklist_code")
+                target_field = target_by_picklist_code.get(code)
+                if not target_field:
+                    continue
+                existing = existing_target_values.get(target_field.id)
+                if existing and not overwrite:
+                    has_value = existing.picklist_item_id or any(
+                        getattr(existing, col) not in (None, "") for col in value_columns
+                    )
+                    if has_value:
+                        continue  # don't clobber values the user already entered
+                defaults = {col: getattr(source_fv, col) for col in value_columns}
+                defaults["picklist_item_id"] = source_fv.picklist_item_id
+                defaults["created_by_user_id"] = user_id
+                value_obj, _created = ClinicalFieldValue.objects.update_or_create(
+                    tenant_id=tenant_id,
+                    record=record,
+                    field=target_field,
+                    defaults=defaults,
+                )
+                upserted.append(value_obj)
+                imported_field_ids.append(target_field.id)
+
+        if not upserted:
+            return action_response(
+                message="No new values to import — the OPD record has no matching data, or this record is already filled.",
+                data=[],
+            )
+
+        _audit(
+            tenant_id=record.tenant_id,
+            record_id=record.id,
+            action=ClinicalRecordAuditLog.Action.FIELD_VALUES_UPSERTED,
+            user_id=user_id,
+            metadata={
+                "field_ids": sorted(imported_field_ids),
+                "source": "import_from_opd",
+                "source_record_id": source_record.id,
+            },
+        )
+
+        return action_response(
+            message=f"Imported {len(upserted)} field value(s) from OPD.",
             data=ClinicalFieldValueSerializer(upserted, many=True).data,
         )
 

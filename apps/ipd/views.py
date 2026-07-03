@@ -6,23 +6,51 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied
 from django_filters.rest_framework import DjangoFilterBackend
+from django.contrib.contenttypes.models import ContentType
 from django.utils import timezone
 from django.db import transaction
 from django.db.models import IntegerField, Count, Q, Avg, Sum
 from django.db.models.expressions import RawSQL
-from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse, OpenApiExample
 from common.mixins import TenantViewSetMixin
 from common.cache import CeliyoCache
 from common.drf_auth import HMSPermission
-from common.responses import error_response, action_response
-from .models import Ward, Bed, Admission, BedTransfer, IPDBilling, IPDBillItem
+from common.responses import error_response, action_response, success_response
+from common import error_codes
+from .models import (
+    Ward, Bed, Admission, BedTransfer, IPDBilling, IPDBillItem,
+    IPDBillTemplate, IPDBillTemplateItem,
+)
 from .serializers import (
     WardSerializer, BedSerializer, BedListSerializer,
     AdmissionSerializer, AdmissionListSerializer,
-    BedTransferSerializer, IPDBillingSerializer, IPDBillingListSerializer
+    BedTransferSerializer, IPDBillingSerializer, IPDBillingListSerializer,
+    IPDBillItemSerializer, IPDBillTemplateSerializer, IPDBillTemplateListSerializer,
+    IPDBillTemplateFromBillRequestSerializer, IPDBillTemplateApplyRequestSerializer,
+)
+from .services.stats import (
+    compute_admission_statistics,
+    compute_billing_statistics,
+    compute_ipd_doctor_stats,
 )
 
 log = structlog.get_logger(__name__)
+
+# Cached wards+beds list TTL (occupancy counts are embedded, so every
+# ward/bed/admission write busts this — see _bust_ward_cache call sites).
+WARD_LIST_CACHE_TTL = 300
+
+
+def _bust_ward_cache(tenant_id) -> None:
+    """Bust the cached wards+beds occupancy list for a tenant."""
+    try:
+        CeliyoCache().delete_pattern(f"ipd:wards:{tenant_id}*")
+    except Exception as exc:
+        log.warning(
+            "ipd_ward_cache_bust_failed",
+            tenant_id=str(tenant_id),
+            error=str(exc),
+        )
 
 
 class WardViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
@@ -39,9 +67,57 @@ class WardViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     ordering_fields = ['name', 'floor', 'created_at']
     ordering = ['floor', 'name']
 
+    def get_queryset(self):
+        """Tenant-scoped wards annotated with bed occupancy counts.
+
+        WardSerializer reads available_beds_count / occupied_beds_count /
+        total_active_beds_count from these annotations; without them each
+        ward row fell back to three per-object COUNT queries (N+1).
+        """
+        return super().get_queryset().annotate(
+            available_beds_count=Count(
+                'beds', filter=Q(beds__is_occupied=False, beds__is_active=True)
+            ),
+            occupied_beds_count=Count(
+                'beds', filter=Q(beds__is_occupied=True, beds__is_active=True)
+            ),
+            total_active_beds_count=Count('beds', filter=Q(beds__is_active=True)),
+        )
+
+    def list(self, request, *args, **kwargs):
+        """Cached wards list (`ipd:wards:{tenant_id}`).
+
+        Only the unfiltered default listing is cached; any query params
+        (filters/search/pagination) bypass the cache. The cache is busted on
+        every ward/bed write and on admission create/discharge/transfer
+        because occupancy counts are embedded in the response.
+        """
+        if request.query_params:
+            return super().list(request, *args, **kwargs)
+
+        cache = CeliyoCache()
+        cache_key = f"ipd:wards:{request.tenant_id}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
+
+        response = super().list(request, *args, **kwargs)
+        if response.status_code == 200:
+            cache.set(cache_key, response.data, ttl=WARD_LIST_CACHE_TTL)
+        return response
+
     def perform_create(self, serializer):
         """Set tenant_id and created_by_user_id automatically."""
         serializer.save(tenant_id=self.request.tenant_id)
+        _bust_ward_cache(self.request.tenant_id)
+
+    def perform_update(self, serializer):
+        super().perform_update(serializer)
+        _bust_ward_cache(self.request.tenant_id)
+
+    def perform_destroy(self, instance):
+        super().perform_destroy(instance)
+        _bust_ward_cache(self.request.tenant_id)
 
     @extend_schema(
         summary="Ward bed occupancy",
@@ -101,13 +177,35 @@ class BedViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     def perform_create(self, serializer):
         """Set tenant_id automatically."""
         serializer.save(tenant_id=self.request.tenant_id)
+        _bust_ward_cache(self.request.tenant_id)
+
+    def perform_update(self, serializer):
+        super().perform_update(serializer)
+        _bust_ward_cache(self.request.tenant_id)
+
+    def perform_destroy(self, instance):
+        super().perform_destroy(instance)
+        _bust_ward_cache(self.request.tenant_id)
 
     @action(detail=False, methods=['get'])
     def available(self, request):
-        """Get all available beds."""
+        """
+        Get available beds, optionally scoped to a ward via ?ward=<id>.
+
+        NOTE: this is a custom @action, so DjangoFilterBackend (which powers
+        filterset_fields on the plain list endpoint) never runs against it —
+        the ward query param has to be applied manually here. The response is
+        also explicitly wrapped in {"results": [...]} to match every other
+        list endpoint in this API (StandardPagination's shape); returning a
+        bare array here previously made frontend callers that read
+        `response.results` silently get `undefined`.
+        """
         beds = self.get_queryset().filter(is_occupied=False, status='available', is_active=True)
+        ward_id = request.query_params.get('ward')
+        if ward_id:
+            beds = beds.filter(ward_id=ward_id)
         serializer = self.get_serializer(beds, many=True)
-        return Response(serializer.data)
+        return Response({'results': serializer.data})
 
 
 from .filters import AdmissionFilter  # noqa: E402
@@ -133,7 +231,19 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     filterset_class = AdmissionFilter
 
     def get_queryset(self):
-        """Select related + annotate length-of-stay at DB level."""
+        """
+        Select related + annotate length-of-stay at DB level.
+
+        The bill_total/bill_paid billing-snapshot annotation is deliberately
+        NOT added here even though it's only used by the list row card —
+        this get_queryset() is shared by 'active'/'doctor_stats', which call
+        qs.aggregate(Count(...)) / qs.annotate(Count(...)) on top of it. A
+        Sum() over the 'ipd_bills' reverse relation LEFT JOINs in every bill
+        row; stacking a Count()/Avg() aggregate on top of that inflates every
+        number by the number of joined bill rows (classic annotate-then-
+        aggregate fan-out). It's added only for 'list' below, since that's
+        the only action whose serializer (AdmissionListSerializer) exposes it.
+        """
         today = timezone.now().date()
         return Admission.objects.filter(
             tenant_id=self.request.tenant_id
@@ -148,6 +258,23 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             )
         )
 
+    def list(self, request, *args, **kwargs):
+        """
+        Only the list row card needs bill_total/bill_paid (AdmissionListSerializer
+        declares them; AdmissionSerializer used everywhere else does not), so
+        the annotation is added here rather than in get_queryset() — see that
+        method's docstring for why it can't live there.
+        """
+        queryset = self.filter_queryset(self.get_queryset()).annotate(
+            bill_total=Sum('ipd_bills__payable_amount'),
+            bill_paid=Sum('ipd_bills__received_amount'),
+        )
+        page = self.paginate_queryset(queryset)
+        serializer = self.get_serializer(page if page is not None else queryset, many=True)
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
+        return Response(serializer.data)
+
     def get_serializer_class(self):
         if self.action == 'list':
             return AdmissionListSerializer
@@ -160,10 +287,12 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             created_by_user_id=self.request.user_id
         )
         CeliyoCache().delete_pattern(f"ipd:active:{self.request.tenant_id}")
+        _bust_ward_cache(self.request.tenant_id)  # bed occupancy embedded in wards list
 
     def perform_update(self, serializer):
         super().perform_update(serializer)
         CeliyoCache().delete_pattern(f"ipd:active:{self.request.tenant_id}")
+        _bust_ward_cache(self.request.tenant_id)
 
     # ── IPD Registration (merged patient + admission) ─────────────────────────
     def _registration_payload(self, admission, patient):
@@ -181,6 +310,11 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             "consulting_doctor_ids": admission.consulting_doctor_ids or [],
             "ward": admission.ward_id,
             "bed": admission.bed_id,
+            "has_mediclaim": admission.has_mediclaim,
+            "tpa_name": admission.tpa_name,
+            "claim_status": admission.claim_status,
+            "claim_reference_number": admission.claim_reference_number,
+            "claim_notes": admission.claim_notes,
             "patient": {
                 "id": patient.id,
                 "patient_id": patient.patient_id,
@@ -238,6 +372,54 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         ]
         from django.utils.dateparse import parse_date
 
+        # Ward/bed allotment — validated up front (pure reads, no writes) so
+        # a bed-validation failure can never happen after patient/admission
+        # fields have already been written inside the atomic block below.
+        # Only for admissions that don't have a bed yet: once a bed is
+        # assigned, changing it must go through the dedicated Bed Transfer
+        # flow (BedTransfer), not this endpoint — the front-end disables the
+        # selector accordingly, but we guard here too so this call can never
+        # silently steal a bed transfer.
+        ward_to_set = None
+        bed_to_set = None
+        if admission.bed_id is None and ("ward" in data or "bed" in data):
+            if data.get("bed"):
+                try:
+                    bed_to_set = Bed.objects.filter(tenant_id=request.tenant_id).get(pk=data["bed"])
+                except Bed.DoesNotExist:
+                    return error_response(
+                        code=error_codes.BED_NOT_FOUND,
+                        message="Selected bed was not found.",
+                        status=status.HTTP_404_NOT_FOUND,
+                        field="bed",
+                    )
+                requested_ward_id = data.get("ward")
+                if requested_ward_id and bed_to_set.ward_id != int(requested_ward_id):
+                    return error_response(
+                        code=error_codes.BED_WARD_MISMATCH,
+                        message="Selected bed does not belong to the selected ward.",
+                        status=status.HTTP_400_BAD_REQUEST,
+                        field="bed",
+                    )
+                if bed_to_set.is_occupied or bed_to_set.status != "available":
+                    return error_response(
+                        code=error_codes.BED_UNAVAILABLE,
+                        message="Selected bed is no longer available. Please choose another bed.",
+                        status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        field="bed",
+                    )
+                ward_to_set = bed_to_set.ward
+            elif data.get("ward"):
+                try:
+                    ward_to_set = Ward.objects.filter(tenant_id=request.tenant_id).get(pk=data["ward"])
+                except Ward.DoesNotExist:
+                    return error_response(
+                        code=error_codes.WARD_NOT_FOUND,
+                        message="Selected ward was not found.",
+                        status=status.HTTP_404_NOT_FOUND,
+                        field="ward",
+                    )
+
         with transaction.atomic():
             p_dirty = False
             for f in patient_fields:
@@ -249,6 +431,10 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                         # Coerce the string to a date so PatientProfile.save() can
                         # compute age from date_of_birth.year.
                         val = parse_date(val)
+                    elif val is None:
+                        # Text columns are blank-able but NOT nullable — treat
+                        # JSON null as "clear the field" instead of erroring.
+                        val = ""
                     setattr(patient, f, val)
                     p_dirty = True
             if p_dirty:
@@ -256,7 +442,9 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
             a_dirty = False
             for f in ["admission_date", "admission_type", "reason", "provisional_diagnosis",
-                      "notify_reference_doctor", "consulting_doctor_ids"]:
+                      "notify_reference_doctor", "consulting_doctor_ids",
+                      "has_mediclaim", "tpa_name", "claim_status",
+                      "claim_reference_number", "claim_notes"]:
                 if f in data:
                     if f == "admission_date" and not data[f]:
                         continue
@@ -268,12 +456,23 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             if data.get("doctor_id"):
                 admission.doctor_id = data["doctor_id"]
                 a_dirty = True
+
+            if ward_to_set is not None:
+                admission.ward = ward_to_set
+                a_dirty = True
+            if bed_to_set is not None:
+                admission.bed = bed_to_set
+                a_dirty = True
+
             if a_dirty:
                 admission.save()
+            if bed_to_set is not None:
+                bed_to_set.mark_occupied()
 
         admission.refresh_from_db()
         patient.refresh_from_db()
         CeliyoCache().delete_pattern(f"ipd:active:{request.tenant_id}")
+        _bust_ward_cache(request.tenant_id)  # bed may have been allotted above
         return action_response(
             message="Registration saved.",
             data=self._registration_payload(admission, patient),
@@ -306,33 +505,6 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             date_from, date_to = date_to, date_from
 
         return date_from, date_to
-
-    def _enrich_doctor_rows(self, rows):
-        from apps.doctors.models import DoctorProfile
-
-        doctor_ids = [row['doctor_id'] for row in rows if row.get('doctor_id')]
-        profiles = (
-            DoctorProfile.objects
-            .filter(tenant_id=self.request.tenant_id, user_id__in=doctor_ids)
-            .prefetch_related('specialties')
-        )
-        profile_map = {str(profile.user_id): profile for profile in profiles}
-
-        for row in rows:
-            doctor_key = str(row.get('doctor_id') or '')
-            profile = profile_map.get(doctor_key)
-            if profile:
-                row['doctor_name'] = profile.full_name
-                row['doctor_specialty'] = ', '.join(s.name for s in profile.specialties.all()) or None
-            else:
-                row['doctor_name'] = f"Doctor {doctor_key[:8]}" if doctor_key else "Unassigned"
-                row['doctor_specialty'] = None
-
-            avg_stay = row.get('avg_length_of_stay_days')
-            row['avg_length_of_stay_days'] = round(float(avg_stay), 1) if avg_stay is not None else None
-            row['doctor'] = doctor_key
-
-        return rows
 
     @action(detail=True, methods=['post'])
     def discharge(self, request, pk=None):
@@ -385,6 +557,11 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             discharge_date=discharge_datetime
         )
 
+        # Discharge frees the bed and changes admission counts — bust both
+        # the IPD statistics cache and the wards+beds occupancy cache.
+        CeliyoCache().delete_pattern(f"ipd:active:{request.tenant_id}")
+        _bust_ward_cache(request.tenant_id)
+
         serializer = self.get_serializer(admission)
         return Response(serializer.data)
 
@@ -431,8 +608,6 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         plus live bed occupancy. When dates are given, admission counts are
         scoped to that range (bed occupancy is always live / real-time).
         """
-        today = datetime.date.today()
-
         # --- Date range (optional, no default to today) ---
         def _parse(val):
             try:
@@ -453,79 +628,18 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         date_from = _parse(date_from_str)
         date_to   = _parse(date_to_str)
 
-        # --- Admission queryset (scoped to tenant, optionally by date) ---
-        qs = self.get_queryset()
-        if date_from:
-            qs = qs.filter(admission_date__date__gte=date_from)
-        if date_to:
-            qs = qs.filter(admission_date__date__lte=date_to)
-
-        agg = qs.aggregate(
-            total_admissions=Count('id'),
-            currently_admitted=Count('id', filter=Q(status='admitted')),
-            discharged_today=Count(
-                'id',
-                filter=Q(status='discharged', discharge_date__date=today)
-            ),
-            discharged=Count('id', filter=Q(status='discharged')),
-            transferred=Count('id', filter=Q(status='transferred')),
-            absconded=Count('id', filter=Q(status='absconded')),
-            referred=Count('id', filter=Q(status='referred')),
-            death=Count('id', filter=Q(status='death')),
-            mediclaim=Count('id', filter=Q(has_mediclaim=True)),
-            claim_not_started=Count('id', filter=Q(claim_status='not_started')),
-            claim_documents_pending=Count('id', filter=Q(claim_status='documents_pending')),
-            claim_submitted=Count('id', filter=Q(claim_status='submitted')),
-            claim_under_review=Count('id', filter=Q(claim_status='under_review')),
-            claim_approved=Count('id', filter=Q(claim_status='approved')),
-            claim_rejected=Count('id', filter=Q(claim_status='rejected')),
-            claim_settled=Count('id', filter=Q(claim_status='settled')),
-        )
-
-        avg_result = qs.filter(
-            status='discharged',
-            discharge_date__isnull=False,
-            admission_date__isnull=False,
-        ).aggregate(avg_stay=Avg('los_days'))
-
-        # --- Live bed occupancy (never date-filtered) ---
-        bed_agg = Bed.objects.filter(
-            tenant_id=request.tenant_id, is_active=True
-        ).aggregate(
-            total_beds=Count('id'),
-            occupied_beds=Count('id', filter=Q(is_occupied=True)),
-            available_beds=Count('id', filter=Q(is_occupied=False, status='available')),
-        )
-        total_beds    = bed_agg['total_beds']    or 0
-        occupied_beds = bed_agg['occupied_beds'] or 0
-        available_beds = bed_agg['available_beds'] or 0
-        occupancy_rate = round(occupied_beds / total_beds * 100, 1) if total_beds > 0 else 0
-
+        # Shared computation with the consolidated dashboard endpoint —
+        # see apps/ipd/services/stats.py (tenant-scoped inside the service).
         result = {
             'success': True,
             'date_from': str(date_from) if date_from else None,
             'date_to':   str(date_to)   if date_to   else None,
-            'data': {
-                **{k: (v or 0) for k, v in agg.items()},
-                'avg_length_of_stay_days': (
-                    round(avg_result['avg_stay'], 1)
-                    if avg_result.get('avg_stay') else None
-                ),
-                # Live bed stats
-                'total_beds':     total_beds,
-                'occupied_beds':  occupied_beds,
-                'available_beds': available_beds,
-                'occupancy_rate': occupancy_rate,
-                'by_tpa': list(
-                    qs.filter(has_mediclaim=True)
-                    .values('tpa_name')
-                    .annotate(count=Count('id'))
-                    .order_by('-count')
-                ),
-            }
+            'data': compute_admission_statistics(
+                request.tenant_id, date_from=date_from, date_to=date_to
+            ),
         }
         if _use_cache:
-            CeliyoCache().set(f"ipd:active:{request.tenant_id}", result, ttl=120)
+            CeliyoCache().set(f"ipd:active:{request.tenant_id}", result, ttl=60)
         return Response(result)
 
     @extend_schema(
@@ -560,41 +674,19 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         """
         date_from, date_to = self._parse_date_range(request)
 
-        qs = self.get_queryset().filter(
-            admission_date__date__gte=date_from,
-            admission_date__date__lte=date_to,
-        )
-
         # ?doctor=me — Admission.doctor_id stores the SuperAdmin user_id
         # directly (not a DoctorProfile FK), so we filter on request.user_id
-        # with no extra lookup required. Still tenant-scoped via get_queryset().
+        # with no extra lookup required.
+        doctor_user_id = None
         if request.query_params.get('doctor') == 'me':
-            qs = qs.filter(doctor_id=request.user_id)
+            doctor_user_id = request.user_id
 
-        rows = list(
-            qs.values('doctor_id').annotate(
-                admissions_count=Count('id'),
-                active=Count('id', filter=Q(status='admitted')),
-                discharged=Count('id', filter=Q(status='discharged')),
-                transferred=Count('id', filter=Q(status='transferred')),
-                mediclaim_count=Count('id', filter=Q(has_mediclaim=True)),
-                claim_pending=Count(
-                    'id',
-                    filter=Q(claim_status__in=[
-                        'not_started',
-                        'documents_pending',
-                        'submitted',
-                        'under_review',
-                    ])
-                ),
-                claim_approved=Count('id', filter=Q(claim_status='approved')),
-                claim_rejected=Count('id', filter=Q(claim_status='rejected')),
-                claim_settled=Count('id', filter=Q(claim_status='settled')),
-                avg_length_of_stay_days=Avg('los_days'),
-            ).order_by('-admissions_count')
+        # Shared computation with the consolidated dashboard endpoint —
+        # see apps/ipd/services/stats.py (single-pass aggregation + one
+        # DoctorProfile query for enrichment).
+        rows = compute_ipd_doctor_stats(
+            request.tenant_id, date_from, date_to, doctor_user_id=doctor_user_id
         )
-
-        rows = self._enrich_doctor_rows(rows)
 
         return Response({
             'success': True,
@@ -625,12 +717,19 @@ class BedTransferViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             tenant_id=self.request.tenant_id,
             performed_by_user_id=self.request.user_id
         )
+        # Transfer flips is_occupied on two beds — bust the wards+beds cache.
+        _bust_ward_cache(self.request.tenant_id)
 
 
 class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """ViewSet for IPD Billing management."""
 
-    queryset = IPDBilling.objects.select_related('admission', 'admission__patient')
+    # select_related admission/patient/bed covers admission_id, patient_name
+    # and get_bed_day_info(); prefetch_related('items') covers the nested
+    # items list in IPDBilling(List)Serializer (was an N+1 on list).
+    queryset = IPDBilling.objects.select_related(
+        'admission', 'admission__patient', 'admission__bed'
+    ).prefetch_related('items')
     hms_module = 'ipd'
     permission_classes = [HMSPermission]
 
@@ -649,6 +748,12 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         """
         Create a new IPD Billing instance.
         The admission_id should be provided in the request data.
+
+        After the bill is saved, if the admission has a bed assigned, this
+        automatically computes remaining unbilled bed-days (via
+        IPDBilling.get_bed_day_info()/add_bed_charges()) and inserts the Bed
+        line item on the new bill when remaining_days > 0, so the frontend
+        sees the auto-added room charge immediately in the response.
         """
         admission_id = request.data.get('admission')
         if not admission_id:
@@ -677,9 +782,24 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             billed_by_id=request.user_id,
             admission=admission
         )
+        billing = serializer.instance
 
-        headers = self.get_success_headers(serializer.data)
-        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+        if admission.bed_id:
+            billing.add_bed_charges()
+            billing.refresh_from_db()
+
+        log.info(
+            "ipd_bill_created",
+            tenant_id=str(request.tenant_id),
+            bill_id=billing.id,
+            admission_id=admission.id,
+        )
+
+        # Re-serialize so the response reflects any auto-added bed item and
+        # the recalculated totals from add_bed_charges().
+        output_serializer = self.get_serializer(billing)
+        headers = self.get_success_headers(output_serializer.data)
+        return Response(output_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
     @action(detail=True, methods=['post'])
     def add_bed_charges(self, request, pk=None):
@@ -759,36 +879,16 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     def statistics(self, request):
         """Aggregate billing stats for this tenant. Respects active filters."""
         try:
-            # Use a clean queryset to avoid Django 5.2's strict aggregate-within-aggregate
-            # check that fires when filter_queryset adds select_related or ordering
-            # annotations that shadow the 'total_amount' model field.
-            qs = IPDBilling.objects.filter(tenant_id=request.tenant_id)
-
-            # Mirror filterset_fields manually so ?payment_status= and ?admission= still work
-            payment_status = request.query_params.get('payment_status')
-            if payment_status:
-                qs = qs.filter(payment_status=payment_status)
-            admission_id = request.query_params.get('admission')
-            if admission_id:
-                qs = qs.filter(admission_id=admission_id)
-
-            # NOTE: IPDBilling.PAYMENT_STATUS_CHOICES is only
-            # unpaid / partial / paid — there is no 'cancelled' or 'pending'
-            # status on this model. 'pending_amount' previously filtered on
-            # payment_status__in=['pending', 'partial'], but 'pending' never
-            # matches any row, so it silently undercounted. 'cancelled_amount'
-            # has no matching status and always resolves to 0 — kept in the
-            # response shape for frontend (IPDBillStats) compatibility.
-            agg = qs.aggregate(
-                total_bills=Count('id'),
-                total_amount=Sum('total_amount'),
-                paid_amount=Sum('received_amount', filter=Q(payment_status='paid')),
-                pending_amount=Sum('balance_amount', filter=Q(payment_status__in=['unpaid', 'partial'])),
-                cancelled_amount=Sum('total_amount', filter=Q(payment_status='cancelled')),
+            # Shared computation with the consolidated dashboard endpoint —
+            # see apps/ipd/services/stats.py. The service builds a clean
+            # tenant-scoped queryset (avoids Django 5.2's strict
+            # aggregate-within-aggregate check) and mirrors the
+            # ?payment_status= / ?admission= filters manually.
+            agg = compute_billing_statistics(
+                request.tenant_id,
+                payment_status=request.query_params.get('payment_status'),
+                admission_id=request.query_params.get('admission'),
             )
-            for key in ('total_amount', 'paid_amount', 'pending_amount', 'cancelled_amount'):
-                if agg[key] is None:
-                    agg[key] = 0
 
             return Response({'success': True, 'data': agg})
         except Exception as exc:
@@ -811,6 +911,20 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
+    @extend_schema(
+        summary="Sync clinical charges to IPD bill",
+        description=(
+            "Identifies all unbilled clinical orders (diagnostics, medicine, "
+            "procedures, packages, panchakarma) for this bill's admission, "
+            "creates IPDBillItem entries for them, links each source order "
+            "back to its new bill item, and finally re-syncs bed charges via "
+            "add_bed_charges(). Idempotent: orders already linked to a bill "
+            "item (bill_item_content_type is not null) are skipped on repeat "
+            "calls."
+        ),
+        responses={200: IPDBillingSerializer},
+        tags=['IPD - Billing'],
+    )
     @action(detail=True, methods=['post'])
     def sync_clinical_charges(self, request, pk=None):
         """
@@ -821,8 +935,6 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         3. Updates the source Orders to link them to these new Bill Items.
         4. Runs add_bed_charges() to ensure bed charges are up to date.
         """
-        from django.db import transaction
-        from django.contrib.contenttypes.models import ContentType
         from apps.diagnostics.models import (
             Requisition, DiagnosticOrder, MedicineOrder,
             ProcedureOrder, PackageOrder
@@ -835,8 +947,7 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         if admission.tenant_id != request.tenant_id:
             raise PermissionDenied("Access denied")
 
-        created_items = []
-        updated_orders = []
+        created_count = 0
 
         with transaction.atomic():
             admission_ct = ContentType.objects.get_for_model(admission)
@@ -856,20 +967,21 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             for order in diagnostic_orders:
                 item = IPDBillItem.objects.create(
                     tenant_id=request.tenant_id,
-                    billing=billing,
+                    bill=billing,
                     item_name=order.investigation.name,
-                    source='Lab' if order.investigation.category == 'laboratory' else 'Radiology',
+                    source='Lab' if order.investigation.category != 'radiology' else 'Radiology',
                     quantity=1,
                     unit_price=order.price,
                     system_calculated_price=order.price,
+                    total_price=order.price,
                     origin_content_type=ContentType.objects.get_for_model(order),
                     origin_object_id=order.pk,
                     notes=f"Test: {order.investigation.code}"
                 )
-                created_items.append(item)
-                order.bill_item_link = item
+                order.bill_item_content_type = ContentType.objects.get_for_model(item)
+                order.bill_item_object_id = item.pk
                 order.save(update_fields=['bill_item_content_type', 'bill_item_object_id'])
-                updated_orders.append(order)
+                created_count += 1
 
             # Process MedicineOrders
             medicine_orders = MedicineOrder.objects.filter(
@@ -881,20 +993,21 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             for order in medicine_orders:
                 item = IPDBillItem.objects.create(
                     tenant_id=request.tenant_id,
-                    billing=billing,
+                    bill=billing,
                     item_name=order.product.product_name,
                     source='Pharmacy',
                     quantity=order.quantity,
                     unit_price=order.price,
                     system_calculated_price=order.price,
+                    total_price=order.price * order.quantity,
                     origin_content_type=ContentType.objects.get_for_model(order),
                     origin_object_id=order.pk,
                     notes=f"Medicine - Qty: {order.quantity}"
                 )
-                created_items.append(item)
-                order.bill_item_link = item
+                order.bill_item_content_type = ContentType.objects.get_for_model(item)
+                order.bill_item_object_id = item.pk
                 order.save(update_fields=['bill_item_content_type', 'bill_item_object_id'])
-                updated_orders.append(order)
+                created_count += 1
 
             # Process ProcedureOrders
             procedure_orders = ProcedureOrder.objects.filter(
@@ -906,20 +1019,21 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             for order in procedure_orders:
                 item = IPDBillItem.objects.create(
                     tenant_id=request.tenant_id,
-                    billing=billing,
+                    bill=billing,
                     item_name=order.procedure.name,
                     source='Procedure',
                     quantity=order.quantity,
                     unit_price=order.price,
                     system_calculated_price=order.price,
+                    total_price=order.price * order.quantity,
                     origin_content_type=ContentType.objects.get_for_model(order),
                     origin_object_id=order.pk,
                     notes=f"Procedure - Qty: {order.quantity}"
                 )
-                created_items.append(item)
-                order.bill_item_link = item
+                order.bill_item_content_type = ContentType.objects.get_for_model(item)
+                order.bill_item_object_id = item.pk
                 order.save(update_fields=['bill_item_content_type', 'bill_item_object_id'])
-                updated_orders.append(order)
+                created_count += 1
 
             # Process PackageOrders
             package_orders = PackageOrder.objects.filter(
@@ -931,42 +1045,425 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             for order in package_orders:
                 item = IPDBillItem.objects.create(
                     tenant_id=request.tenant_id,
-                    billing=billing,
+                    bill=billing,
                     item_name=order.package.name,
                     source='Package',
                     quantity=order.quantity,
                     unit_price=order.price,
                     system_calculated_price=order.price,
+                    total_price=order.price * order.quantity,
                     origin_content_type=ContentType.objects.get_for_model(order),
                     origin_object_id=order.pk,
                     notes=f"Package - Qty: {order.quantity}"
                 )
-                created_items.append(item)
-                order.bill_item_link = item
+                order.bill_item_content_type = ContentType.objects.get_for_model(item)
+                order.bill_item_object_id = item.pk
                 order.save(update_fields=['bill_item_content_type', 'bill_item_object_id'])
-                updated_orders.append(order)
+                created_count += 1
 
-            # Process PanchakarmaOrders
+            # Process PanchakarmaOrders — this model has no admission/is_billed
+            # fields; it only has content_type/object_id (EncounterMixin) and
+            # the bill_item_content_type/bill_item_object_id/bill_item_link
+            # GFK trio, mirroring the DiagnosticOrder pattern above.
             panchakarma_orders = PanchakarmaOrder.objects.filter(
                 tenant_id=request.tenant_id,
-                admission=admission,
-                is_billed=False
-            ).select_related()
-            for order in panchakarma_orders:
-                order.is_billed = True
-                updated_orders.append(order)
+                content_type=admission_ct,
+                object_id=admission.pk,
+                bill_item_content_type__isnull=True
+            ).select_related('therapy')
 
-        return Response({"status": "ok"})
+            for order in panchakarma_orders:
+                item = IPDBillItem.objects.create(
+                    tenant_id=request.tenant_id,
+                    bill=billing,
+                    item_name=order.therapy.name,
+                    source='Therapy',
+                    quantity=1,
+                    unit_price=order.therapy.base_charge,
+                    system_calculated_price=order.therapy.base_charge,
+                    total_price=order.therapy.base_charge,
+                    origin_content_type=ContentType.objects.get_for_model(order),
+                    origin_object_id=order.pk,
+                    notes=f"Therapy: {order.therapy.code}" if order.therapy.code else "Therapy"
+                )
+                order.bill_item_content_type = ContentType.objects.get_for_model(item)
+                order.bill_item_object_id = item.pk
+                order.save(update_fields=['bill_item_content_type', 'bill_item_object_id'])
+                created_count += 1
+
+            # Bed charges are synced last, as promised in the docstring.
+            billing.add_bed_charges()
+
+        billing.refresh_from_db()
+        log.info(
+            "ipd_bill_clinical_charges_synced",
+            tenant_id=str(request.tenant_id),
+            bill_id=billing.id,
+            admission_id=admission.id,
+            items_created=created_count,
+        )
+
+        serializer = self.get_serializer(billing)
+        return Response(serializer.data)
 
 
 class IPDBillItemViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
-    """ViewSet for IPD bill line items."""
+    """ViewSet for IPD Bill Item management (line items within an IPD bill).
 
-    from .models import IPDBillItem
-    queryset = IPDBillItem.objects.all()
-    permission_classes = [HMSPermission]
+    Supports create, retrieve, list, update/partial_update (editable price,
+    quantity, item_name, notes), and delete. Editing or deleting an item on
+    a bill whose payment_status == 'paid' is blocked with a 422 business-rule
+    error (BILL_LOCKED) — mirrors the pre-existing frontend behavior that
+    already disables delete on paid bills, now enforced server-side too.
+    """
+
+    queryset = IPDBillItem.objects.select_related('bill')
+    serializer_class = IPDBillItemSerializer
     hms_module = 'ipd'
+    permission_classes = [HMSPermission]
+
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['bill', 'source']
+    ordering_fields = ['created_at', 'total_price']
+    ordering = ['-created_at']
+
+    def _bill_is_locked(self, bill):
+        return bill.payment_status == 'paid'
+
+    def perform_create(self, serializer):
+        """Set tenant_id and compute total_price before the first save.
+
+        total_price has no model default (NOT NULL, no default=) and is
+        read_only on the serializer (clients never set it directly), so it
+        must be computed here from unit_price * quantity before create() —
+        otherwise every bill item creation would fail with a NOT NULL
+        violation.
+        """
+        unit_price = serializer.validated_data.get('unit_price')
+        quantity = serializer.validated_data.get('quantity', 1)
+        instance = serializer.save(
+            tenant_id=self.request.tenant_id,
+            total_price=unit_price * quantity,
+        )
+        log.info(
+            "ipd_bill_item_created",
+            tenant_id=str(self.request.tenant_id),
+            bill_id=instance.bill_id,
+            item_id=instance.id,
+            source=instance.source,
+            is_price_overridden=instance.is_price_overridden,
+        )
+
+    @extend_schema(
+        summary="Create IPD bill item",
+        description=(
+            "Create a line item on an IPD bill. Optionally pass catalog_type "
+            "('procedure', 'package', 'service', 'investigation') and "
+            "catalog_id to snapshot item_name/source/system_calculated_price "
+            "from the tenant-scoped catalog row; unit_price may still be "
+            "supplied to override the snapshot immediately. Blocked with "
+            "422 BILL_LOCKED if the target bill is already fully paid."
+        ),
+        responses={201: IPDBillItemSerializer},
+        tags=['IPD - Billing'],
+    )
+    def create(self, request, *args, **kwargs):
+        bill_id = request.data.get('bill')
+        if bill_id:
+            bill = IPDBilling.objects.filter(tenant_id=request.tenant_id, pk=bill_id).first()
+            if bill is not None and self._bill_is_locked(bill):
+                return error_response(
+                    code=error_codes.BILL_LOCKED,
+                    message="This bill is fully paid and cannot be edited.",
+                    status=422,
+                )
+        return super().create(request, *args, **kwargs)
+
+    @extend_schema(
+        summary="Update IPD bill item",
+        description=(
+            "Edit unit_price, quantity, item_name, or notes on a bill item. "
+            "total_price and is_price_overridden are recomputed automatically, "
+            "and the parent IPDBilling's derived totals (total_amount, "
+            "payable_amount, balance_amount, payment_status) are recalculated "
+            "and saved. Blocked with 422 BILL_LOCKED if the parent bill is "
+            "already fully paid."
+        ),
+        responses={200: IPDBillItemSerializer},
+        tags=['IPD - Billing'],
+    )
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if self._bill_is_locked(instance.bill):
+            return error_response(
+                code=error_codes.BILL_LOCKED,
+                message="This bill is fully paid and cannot be edited.",
+                status=422,
+            )
+        return super().update(request, *args, **kwargs)
+
+    @extend_schema(
+        summary="Partially update IPD bill item",
+        description=(
+            "Partial update variant of the update action above — same "
+            "recompute/lock-guard behavior."
+        ),
+        responses={200: IPDBillItemSerializer},
+        tags=['IPD - Billing'],
+    )
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if self._bill_is_locked(instance.bill):
+            return error_response(
+                code=error_codes.BILL_LOCKED,
+                message="This bill is fully paid and cannot be edited.",
+                status=422,
+            )
+        return super().partial_update(request, *args, **kwargs)
+
+    @extend_schema(
+        summary="Delete IPD bill item",
+        description="Delete a bill item. Blocked with 422 BILL_LOCKED if the parent bill is already fully paid.",
+        responses={204: None},
+        tags=['IPD - Billing'],
+    )
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if self._bill_is_locked(instance.bill):
+            return error_response(
+                code=error_codes.BILL_LOCKED,
+                message="This bill is fully paid and cannot be edited.",
+                status=422,
+            )
+        return super().destroy(request, *args, **kwargs)
+
+    def perform_update(self, serializer):
+        """Recompute total_price and trigger the parent bill's totals to recalculate."""
+        instance = serializer.save(
+            total_price=serializer.validated_data.get('unit_price', serializer.instance.unit_price)
+            * serializer.validated_data.get('quantity', serializer.instance.quantity)
+        )
+        instance.bill._calculate_derived_totals()
+        instance.bill.save(update_fields=[
+            'total_amount', 'discount_amount', 'payable_amount',
+            'balance_amount', 'payment_status',
+        ])
+        log.info(
+            "ipd_bill_item_updated",
+            tenant_id=str(self.request.tenant_id),
+            bill_id=instance.bill_id,
+            item_id=instance.id,
+            is_price_overridden=instance.is_price_overridden,
+        )
+
+    def perform_destroy(self, instance):
+        bill = instance.bill
+        instance.delete()
+        bill._calculate_derived_totals()
+        bill.save(update_fields=[
+            'total_amount', 'discount_amount', 'payable_amount',
+            'balance_amount', 'payment_status',
+        ])
+        log.info(
+            "ipd_bill_item_deleted",
+            tenant_id=str(self.request.tenant_id),
+            bill_id=bill.id,
+        )
+
+
+class IPDBillTemplateViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
+    """ViewSet for reusable IPD bill templates.
+
+    Standard CRUD (tenant-scoped) with nested items writable on create, plus
+    two custom actions: from_bill (snapshot an existing bill's non-Bed items
+    into a new template) and apply (bulk-create fresh bill items on a bill
+    from a template's items).
+    """
+
+    queryset = IPDBillTemplate.objects.prefetch_related('items')
+    hms_module = 'ipd'
+    permission_classes = [HMSPermission]
+
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['is_active']
+    search_fields = ['name', 'description']
+    ordering_fields = ['name', 'created_at']
+    ordering = ['name']
 
     def get_serializer_class(self):
-        from .serializers import IPDBillingSerializer
-        return IPDBillingSerializer
+        if self.action == 'list':
+            return IPDBillTemplateListSerializer
+        return IPDBillTemplateSerializer
+
+    @extend_schema(
+        summary="List IPD bill templates",
+        description="List reusable IPD bill templates for this tenant.",
+        responses={200: IPDBillTemplateListSerializer},
+        tags=['IPD - Bill Templates'],
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @extend_schema(
+        summary="Create IPD bill template",
+        description=(
+            "Create a bill template, optionally with a nested `items` list of "
+            "{item_name, source, default_quantity, default_unit_price}. Any "
+            "item with source='Bed' is rejected with a 400 — bed charges are "
+            "always auto-computed per bill, never part of a reusable template."
+        ),
+        responses={201: IPDBillTemplateSerializer},
+        tags=['IPD - Bill Templates'],
+    )
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
+    def perform_create(self, serializer):
+        serializer.save(
+            tenant_id=self.request.tenant_id,
+            created_by_user_id=self.request.user_id,
+        )
+
+    @extend_schema(
+        summary="Create a bill template from an existing bill",
+        description=(
+            "Copies all of the given bill's current line items EXCEPT any "
+            "with source='Bed' into a new IPDBillTemplate + "
+            "IPDBillTemplateItems. Returns the created template with nested "
+            "items (201)."
+        ),
+        request=IPDBillTemplateFromBillRequestSerializer,
+        examples=[
+            OpenApiExample(
+                "FromBillRequest",
+                value={"bill": 42, "name": "Standard Delivery Package", "description": "Optional notes"},
+                request_only=True,
+            ),
+        ],
+        responses={201: IPDBillTemplateSerializer},
+        tags=['IPD - Bill Templates'],
+    )
+    @action(detail=False, methods=['post'], url_path='from_bill')
+    def from_bill(self, request):
+        bill_id = request.data.get('bill')
+        name = request.data.get('name')
+        description = request.data.get('description', '')
+
+        if not bill_id or not name:
+            return error_response(
+                code=error_codes.VALIDATION_ERROR,
+                message="'bill' and 'name' are required.",
+                status=400,
+            )
+
+        bill = IPDBilling.objects.filter(tenant_id=request.tenant_id, pk=bill_id).first()
+        if bill is None:
+            return error_response(
+                code=error_codes.BILL_NOT_FOUND,
+                message="Bill not found for this tenant.",
+                status=404,
+            )
+
+        with transaction.atomic():
+            template = IPDBillTemplate.objects.create(
+                tenant_id=request.tenant_id,
+                name=name,
+                description=description,
+                created_by_user_id=request.user_id,
+            )
+            source_items = bill.items.exclude(source='Bed')
+            for item in source_items:
+                IPDBillTemplateItem.objects.create(
+                    tenant_id=request.tenant_id,
+                    template=template,
+                    item_name=item.item_name,
+                    source=item.source,
+                    default_quantity=item.quantity,
+                    default_unit_price=item.unit_price,
+                )
+
+        log.info(
+            "ipd_bill_template_created_from_bill",
+            tenant_id=str(request.tenant_id),
+            template_id=template.id,
+            bill_id=bill.id,
+        )
+
+        serializer = IPDBillTemplateSerializer(template, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @extend_schema(
+        summary="Apply a bill template to a bill",
+        description=(
+            "Bulk-creates fresh IPDBillItem rows on the given bill from this "
+            "template's items. Each new item gets a fresh "
+            "system_calculated_price = default_unit_price, "
+            "unit_price = default_unit_price, is_price_overridden=False, and "
+            "no origin link back to the template — the copies are "
+            "independent so later template edits never retroactively change "
+            "past bills. Triggers the bill's derived totals to recalculate. "
+            "Returns the list of newly created IPDBillItems."
+        ),
+        request=IPDBillTemplateApplyRequestSerializer,
+        examples=[OpenApiExample("ApplyRequest", value={"bill": 42}, request_only=True)],
+        responses={200: IPDBillItemSerializer(many=True)},
+        tags=['IPD - Bill Templates'],
+    )
+    @action(detail=True, methods=['post'])
+    def apply(self, request, pk=None):
+        template = self.get_object()
+        bill_id = request.data.get('bill')
+        if not bill_id:
+            return error_response(
+                code=error_codes.VALIDATION_ERROR,
+                message="'bill' is required.",
+                status=400,
+            )
+
+        bill = IPDBilling.objects.filter(tenant_id=request.tenant_id, pk=bill_id).first()
+        if bill is None:
+            return error_response(
+                code=error_codes.BILL_NOT_FOUND,
+                message="Bill not found for this tenant.",
+                status=404,
+            )
+
+        if bill.payment_status == 'paid':
+            return error_response(
+                code=error_codes.BILL_LOCKED,
+                message="This bill is fully paid and cannot be edited.",
+                status=422,
+            )
+
+        created_items = []
+        with transaction.atomic():
+            for template_item in template.items.filter(is_active=True):
+                new_item = IPDBillItem.objects.create(
+                    tenant_id=request.tenant_id,
+                    bill=bill,
+                    item_name=template_item.item_name,
+                    source=template_item.source,
+                    quantity=template_item.default_quantity,
+                    unit_price=template_item.default_unit_price,
+                    system_calculated_price=template_item.default_unit_price,
+                    total_price=template_item.default_unit_price * template_item.default_quantity,
+                    is_price_overridden=False,
+                )
+                created_items.append(new_item)
+
+            bill._calculate_derived_totals()
+            bill.save(update_fields=[
+                'total_amount', 'discount_amount', 'payable_amount',
+                'balance_amount', 'payment_status',
+            ])
+
+        log.info(
+            "ipd_bill_template_applied",
+            tenant_id=str(request.tenant_id),
+            template_id=template.id,
+            bill_id=bill.id,
+            items_created=len(created_items),
+        )
+
+        serializer = IPDBillItemSerializer(created_items, many=True, context={'request': request})
+        return success_response(data=serializer.data, message="Template applied to bill.")

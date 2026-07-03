@@ -144,6 +144,21 @@ class Hospital(models.Model):
         help_text="Tenant-configurable print letterhead layout (logo, badge, text lines, alignment)",
     )
 
+    # --- Tenant UI theme -------------------------------------------------------
+    # Configures the tenant-wide primary colour shown in all frontend pages.
+    # The frontend reads this once on startup and applies it as the default
+    # primary colour; individual users may override it in their own preferences.
+    #
+    # JSON schema (all keys optional, add more as needed):
+    # {
+    #   "primary_color": "#3b82f6"   ← hex colour string
+    # }
+    theme_config = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Tenant-wide UI theme. JSON: { \"primary_color\": \"#hexcolour\" }",
+    )
+
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -3,7 +3,7 @@
 import django_filters
 from django_filters.rest_framework import FilterSet
 
-from .models import ClinicalForm, ClinicalPicklistItem, ClinicalRecord
+from .models import ClinicalForm, ClinicalFormSection, ClinicalPicklistItem, ClinicalRecord
 
 
 class ClinicalFormFilter(FilterSet):
@@ -32,6 +32,26 @@ class ClinicalRecordFilter(FilterSet):
     class Meta:
         model = ClinicalRecord
         fields = ["form", "encounter_type", "encounter_id", "occurrence_index", "status", "patient_user_id"]
+
+
+class ClinicalFormSectionFilter(FilterSet):
+    """Filter for form sections.
+
+    ClinicalFormSection has no direct ``form`` FK — sections attach to forms
+    via FormSectionPlacement. The previous ``filterset_fields = ["form"]`` on
+    the viewset raised ``TypeError: 'Meta.fields' must not contain non-model
+    field names`` on every list request (and broke /api/schema/ generation).
+    This keeps the documented ``?form=<id>`` query param but resolves it
+    through the placement relation.
+    """
+
+    form = django_filters.NumberFilter(
+        field_name="form_placements__form", lookup_expr="exact", distinct=True
+    )
+
+    class Meta:
+        model = ClinicalFormSection
+        fields = ["form"]
 
 
 class ClinicalPicklistItemFilter(FilterSet):

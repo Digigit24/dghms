@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>OPD Visit Slip</title>
+{% include "print/_print_base.css" %}
+</head>
+<body>
+<div class="print-page{% if page_break_before %} page-break-before{% endif %}">
+    {% include "print/_print_footer.html" %}
+    {% include "print/_letterhead.html" %}
+
+    <div class="form-title">OPD Visit Slip</div>
+
+    <div class="patient-info-bar">
+        <div><span class="field-label">UHID:</span> {{ uhid }}</div>
+        <div><span class="field-label">OPD No:</span> {{ opd_no }}</div>
+        <div><span class="field-label">Visit Date:</span> {{ visit_date|date:"d M Y" }}</div>
+        <div><span class="field-label">Patient Name:</span> {{ patient_name }}</div>
+        <div><span class="field-label">Age / Gender:</span> {{ age }} / {{ gender }}</div>
+        <div><span class="field-label">Contact:</span> {{ contact }}</div>
+    </div>
+
+    <div class="section-title">Patient Details</div>
+    <div class="field-grid-2col">
+        <div class="field-row"><span class="field-label">Address:</span> <span class="field-value">{{ address }}</span></div>
+        <div class="field-row"><span class="field-label">Blood Group:</span> <span class="field-value">{{ blood_group }}</span></div>
+        <div class="field-row"><span class="field-label">Guardian Name:</span> <span class="field-value">{{ guardian_name }}</span></div>
+        <div class="field-row"><span class="field-label">Guardian Relation:</span> <span class="field-value">{{ guardian_relation }}</span></div>
+        <div class="field-row"><span class="field-label">Guardian Mobile:</span> <span class="field-value">{{ guardian_mobile }}</span></div>
+    </div>
+
+    <div class="section-title">Visit Information</div>
+    <div class="field-grid-2col">
+        <div class="field-row"><span class="field-label">Entry Time:</span> <span class="field-value">{{ entry_time|date:"d M Y, h:i A" }}</span></div>
+        <div class="field-row"><span class="field-label">Visit Type:</span> <span class="field-value">{{ visit_type }}</span></div>
+        <div class="field-row"><span class="field-label">Priority:</span> <span class="field-value">{{ priority }}</span></div>
+        <div class="field-row"><span class="field-label">Status:</span> <span class="field-value">{{ status }}</span></div>
+        <div class="field-row"><span class="field-label">Consulting Doctor:</span> <span class="field-value">{{ doctor_name }}</span></div>
+        {% if queue_position %}
+        <div class="field-row"><span class="field-label">Queue Position:</span> <span class="field-value">{{ queue_position }}</span></div>
+        {% endif %}
+    </div>
+
+    {% if referred_by_name %}
+    <div class="section-title">Reference Doctor</div>
+    <div class="field-grid-2col">
+        <div class="field-row"><span class="field-label">Referred By:</span> <span class="field-value">{{ referred_by_name }}</span></div>
+        <div class="field-row">
+            <span class="checkbox">{% if notify_referring_doctor %}☑{% else %}☐{% endif %}</span>
+            <span class="field-label">Notify Referring Doctor (SMS)</span>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if consultation_start_time or consultation_end_time %}
+    <div class="section-title">Consultation Timing</div>
+    <div class="field-grid-2col">
+        {% if consultation_start_time %}
+        <div class="field-row"><span class="field-label">Started:</span> <span class="field-value">{{ consultation_start_time|date:"d M Y, h:i A" }}</span></div>
+        {% endif %}
+        {% if consultation_end_time %}
+        <div class="field-row"><span class="field-label">Ended:</span> <span class="field-value">{{ consultation_end_time|date:"d M Y, h:i A" }}</span></div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% if follow_up_required %}
+    <div class="section-title">Follow-up</div>
+    <div class="field-grid-2col">
+        <div class="field-row"><span class="field-label">Follow-up Date:</span> <span class="field-value">{{ follow_up_date|date:"d M Y" }}</span></div>
+    </div>
+    {% if follow_up_notes %}
+    <div class="field-row"><span class="field-label">Follow-up Notes:</span> <span class="field-value">{{ follow_up_notes }}</span></div>
+    {% endif %}
+    {% endif %}
+
+    <div class="signature-row">
+        <div class="signature-box">Patient / Guardian Signature</div>
+        <div class="signature-box">Doctor Signature</div>
+    </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,63 @@
+    if form_code == FORM_ADMISSION:
+        context.update(_admission_context(tenant_id, record_id))
+    elif form_code == FORM_OPD_VISIT:
+        context.update(_opd_visit_context(tenant_id, record_id))
+    elif form_code == FORM_IPD_BILL:
+        context.update(_ipd_bill_context(tenant_id, record_id))
+    elif form_code == FORM_OPD_BILL:
+        context.update(_opd_bill_context(tenant_id, record_id))
+    elif form_code == FORM_MONITORING_CHART:
+        context.update(_clinical_record_context(tenant_id, record_id, language))
+        context["time_slots"] = MONITORING_CHART_TIME_SLOTS
+        context["columns"] = MONITORING_CHART_COLUMNS
+    else:
+        # nursing_paper, progress_sheet, clinical_form all share the generic
+        # ClinicalRecord-driven context; templates render different subsets.
+        context.update(_clinical_record_context(tenant_id, record_id, language))
+
+    return template_name, context
+
+
+def render_print_html(form_code: str, tenant_id: uuid.UUID, record_id: int, letterhead: bool, language: str) -> str:
+    """Render a single record's print template to an HTML string."""
+    template_name, context = build_print_context(form_code, tenant_id, record_id, letterhead, language)
+    return render_to_string(template_name, context)
+
+
+def render_batch_html(
+    form_code: str,
+    tenant_id: uuid.UUID,
+    record_ids: list[int],
+    letterhead: bool,
+    language: str,
+) -> str:
+    """Render many records of the same ``form_code`` into one HTML document.
+
+    Each record's body is wrapped in a container with
+    ``page-break-before: always`` (except the first) so WeasyPrint paginates
+    them as separate pages in a single PDF. The letterhead renders on every
+    page because it lives inside each per-record template, not hoisted out.
+    """
+    if form_code not in REGISTERED_FORM_CODES:
+        raise PrintFormCodeError(f"Unknown print form code: {form_code!r}.")
+
+    pages = []
+    for index, record_id in enumerate(record_ids):
+        template_name, context = build_print_context(form_code, tenant_id, record_id, letterhead, language)
+        context["is_batch"] = True
+        context["page_break_before"] = index > 0
+        pages.append(render_to_string(template_name, context))
+
+    return "\n".join(pages)
+
+
+def render_pdf_from_html(html: str) -> bytes:
+    """Convert an HTML string to PDF bytes using WeasyPrint.
+
+    Imported lazily so the rest of this module (and the view layer's error
+    handling / URL wiring) can be exercised without WeasyPrint's native
+    dependencies (Pango/Cairo) being installed in every environment.
+    """
+    from weasyprint import HTML
+
+    return HTML(string=html).write_pdf()

@@ -4,7 +4,7 @@ from django.db import transaction, models
 from decimal import Decimal
 
 from .models import (
-    Visit, OPDBill, OPDBillItem, ProcedureMaster, ProcedurePackage,
+    Visit, OPDBill, OPDBillItem, ProcedureMaster, ProcedurePackage, Service,
   ClinicalNote,
     VisitFinding, VisitAttachment,
     ClinicalNoteTemplateGroup, ClinicalNoteTemplate,
@@ -23,13 +23,14 @@ class VisitListSerializer(serializers.ModelSerializer):
 
     patient_name = serializers.CharField(source='patient.full_name', read_only=True)
     patient_id = serializers.CharField(source='patient.patient_id', read_only=True)
+    patient_photo = serializers.CharField(source='patient.photo_data', read_only=True, allow_blank=True)
     doctor_name = serializers.CharField(source='doctor.full_name', read_only=True)
     waiting_time = serializers.SerializerMethodField()
 
     class Meta:
         model = Visit
         fields = [
-            'id', 'visit_number', 'patient', 'patient_name', 'patient_id',
+            'id', 'visit_number', 'patient', 'patient_name', 'patient_id', 'patient_photo',
             'doctor', 'doctor_name', 'visit_date', 'visit_type', 'priority', 'status',
             'queue_position', 'payment_status', 'total_amount', 'balance_amount',
             'waiting_time', 'entry_time', 'is_follow_up',
@@ -304,6 +305,57 @@ class ProcedureMasterCreateUpdateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         """Create procedure master with tenant_id"""
+        request = self.context.get('request')
+
+        # Add tenant_id from request context
+        if request and hasattr(request, 'tenant_id'):
+            validated_data['tenant_id'] = request.tenant_id
+
+        return super().create(validated_data)
+
+
+# ============================================================================
+# SERVICE SERIALIZERS
+# ============================================================================
+
+class ServiceListSerializer(serializers.ModelSerializer):
+    """Serializer for listing services"""
+
+    class Meta:
+        model = Service
+        fields = [
+            'id', 'name', 'code', 'category', 'default_charge', 'is_active'
+        ]
+
+
+class ServiceDetailSerializer(serializers.ModelSerializer):
+    """Detailed service serializer"""
+
+    class Meta:
+        model = Service
+        fields = '__all__'
+        read_only_fields = ['created_at', 'updated_at']
+
+
+class ServiceCreateUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for creating/updating services"""
+
+    class Meta:
+        model = Service
+        fields = [
+            'name', 'code', 'category', 'description',
+            'default_charge', 'is_active'
+        ]
+
+    def validate_code(self, value):
+        """Validate unique code"""
+        if self.instance is None:  # Only for creation
+            if Service.objects.filter(code=value).exists():
+                raise serializers.ValidationError("Service code already exists")
+        return value
+
+    def create(self, validated_data):
+        """Create service with tenant_id"""
         request = self.context.get('request')
 
         # Add tenant_id from request context

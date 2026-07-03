@@ -1,0 +1,22 @@
+class IPDBillTemplateListSerializer(serializers.ModelSerializer):
+    """Lightweight serializer for listing bill templates (no nested items)."""
+
+    item_count = serializers.IntegerField(source='items.count', read_only=True)
+
+    class Meta:
+        model = IPDBillTemplate
+        fields = ['id', 'name', 'description', 'is_active', 'item_count', 'created_at', 'updated_at']
+
+
+class IPDBillTemplateFromBillRequestSerializer(serializers.Serializer):
+    """Request body for POST /ipd/bill-templates/from_bill/."""
+
+    bill = serializers.IntegerField(help_text="ID of the IPDBilling to snapshot into a new template.")
+    name = serializers.CharField(max_length=200, help_text="Name for the new template.")
+    description = serializers.CharField(required=False, allow_blank=True, help_text="Optional template description.")
+
+
+class IPDBillTemplateApplyRequestSerializer(serializers.Serializer):
+    """Request body for POST /ipd/bill-templates/{id}/apply/."""
+
+    bill = serializers.IntegerField(help_text="ID of the IPDBilling to apply this template's items to.")

@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>OPD Bill</title>
+{% include "print/_print_base.css" %}
+<style>
+    .totals-block {
+        margin-top: 10px;
+        display: flex;
+        justify-content: flex-end;
+    }
+
+    .totals-table {
+        width: 260px;
+        font-size: 8.5pt;
+    }
+
+    .totals-table td {
+        padding: 2px 4px;
+    }
+
+    .totals-table .totals-label {
+        text-align: left;
+        color: #374151;
+    }
+
+    .totals-table .totals-value {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .totals-table .totals-final td {
+        border-top: 1.5px solid #1f2937;
+        font-weight: 700;
+        padding-top: 4px;
+    }
+
+    .payment-status-badge {
+        display: inline-block;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        font-size: 8pt;
+    }
+</style>
+</head>
+<body>
+<div class="print-page{% if page_break_before %} page-break-before{% endif %}">
+    {% include "print/_print_footer.html" %}
+    {% include "print/_letterhead.html" %}
+
+    <div class="form-title">OPD Bill</div>
+
+    <div class="patient-info-bar">
+        <div><span class="field-label">Bill No:</span> {{ bill_number }}</div>
+        <div><span class="field-label">Bill Date:</span> {{ bill_date|date:"d M Y, h:i A" }}</div>
+        <div><span class="field-label">UHID:</span> {{ uhid }}</div>
+        <div><span class="field-label">OPD No:</span> {{ opd_no }}</div>
+        <div><span class="field-label">Patient Name:</span> {{ patient_name }}</div>
+        <div><span class="field-label">Age / Gender:</span> {{ age }} / {{ gender }}</div>
+    </div>
+
+    <div class="section-title">Visit Details</div>
+    <div class="field-grid-2col">
+        <div class="field-row"><span class="field-label">Contact:</span> <span class="field-value">{{ contact }}</span></div>
+        <div class="field-row"><span class="field-label">Doctor:</span> <span class="field-value">{{ doctor_name }}</span></div>
+        <div class="field-row"><span class="field-label">Visit Date:</span> <span class="field-value">{{ visit_date|date:"d M Y" }}</span></div>
+        <div class="field-row"><span class="field-label">Type:</span> <span class="field-value">{{ opd_type }} ({{ charge_type }})</span></div>
+        {% if diagnosis %}
+        <div class="field-row"><span class="field-label">Diagnosis:</span> <span class="field-value">{{ diagnosis }}</span></div>
+        {% endif %}
+    </div>
+
+    <div class="section-title">Bill Items</div>
+    <table class="bordered dense">
+        <thead>
+            <tr>
+                <th>Item</th>
+                <th>Source</th>
+                <th>Qty</th>
+                <th>Unit Price</th>
+                <th>Total</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in items %}
+            <tr>
+                <td>{{ item.item_name }}</td>
+                <td>{{ item.get_source_display }}</td>
+                <td>{{ item.quantity }}</td>
+                <td>{{ item.unit_price }}</td>
+                <td>{{ item.total_price }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="5" class="text-muted">No items on this bill.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="totals-block">
+        <table class="totals-table">
+            <tr>
+                <td class="totals-label">Subtotal</td>
+                <td class="totals-value">{{ total_amount }}</td>
+            </tr>
+            <tr>
+                <td class="totals-label">Discount{% if discount_percent %} ({{ discount_percent }}%){% endif %}</td>
+                <td class="totals-value">- {{ discount_amount }}</td>
+            </tr>
+            <tr class="totals-final">
+                <td class="totals-label">Payable Amount</td>
+                <td class="totals-value">{{ payable_amount }}</td>
+            </tr>
+            <tr>
+                <td class="totals-label">Received</td>
+                <td class="totals-value">{{ received_amount }}</td>
+            </tr>
+            <tr>
+                <td class="totals-label">Balance Due</td>
+                <td class="totals-value">{{ balance_amount }}</td>
+            </tr>
+            <tr>
+                <td class="totals-label">Payment Status</td>
+                <td class="totals-value"><span class="payment-status-badge">{{ payment_status }}</span></td>
+            </tr>
+            <tr>
+                <td class="totals-label">Payment Mode</td>
+                <td class="totals-value">{{ payment_mode }}</td>
+            </tr>
+        </table>
+    </div>
+
+    {% if remarks %}
+    <div class="section-title">Remarks</div>
+    <div class="field-row"><span class="field-value">{{ remarks }}</span></div>
+    {% endif %}
+
+    <div class="signature-row">
+        <div class="signature-box">Patient / Guardian Signature</div>
+        <div class="signature-box">Billing Officer Signature</div>
+    </div>
+</div>
+</body>
+</html>

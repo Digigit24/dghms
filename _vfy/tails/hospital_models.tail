@@ -1,0 +1,32 @@
+            {
+                "id": "address",
+                "text": full_address_line,
+                "style": "normal",
+                "enabled": True,
+                "order": 1,
+            },
+            {
+                "id": "email",
+                "text": f"E-mail : {self.email}" if self.email else "",
+                "style": "normal",
+                "enabled": True,
+                "order": 2,
+            },
+            {
+                "id": "contact",
+                "text": contact_line,
+                "style": "normal",
+                "enabled": True,
+                "order": 3,
+            },
+        ]
+
+        return {
+            "show_logo": bool(self.logo),
+            "logo_url": self.logo or "",
+            "show_badge": False,
+            "badge_url": "",
+            "alignment": "left",
+            "show_hairline": True,
+            "text_lines": text_lines,
+        }

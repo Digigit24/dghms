@@ -156,6 +156,28 @@ class PatientProfileCreateUpdateSerializer(serializers.ModelSerializer):
         model = PatientProfile
         exclude = ['patient_id', 'age', 'bmi', 'created_by_user_id']
 
+    def to_internal_value(self, data):
+        """Treat JSON ``null`` as "clear this field" for text fields.
+
+        The profile form round-trips every field and sends ``null`` for
+        anything left empty (aadhaar_number, guardian_*, etc.). The model
+        stores these as ``CharField(blank=True)`` (not null), so DRF would
+        reject ``null`` with "This field may not be null." Coerce ``null`` to
+        ``""`` for every non-nullable char-based field instead of erroring —
+        an obvious correct interpretation (see MCP-friendly API rule 3).
+        """
+        if isinstance(data, dict):
+            data = data.copy()
+            for name, field in self.fields.items():
+                if (
+                    name in data
+                    and data[name] is None
+                    and isinstance(field, serializers.CharField)
+                    and not field.allow_null
+                ):
+                    data[name] = ""
+        return super().to_internal_value(data)
+
     def validate_user_id(self, value):
         """Validate user_id format (UUID from SuperAdmin)"""
         if value is None:

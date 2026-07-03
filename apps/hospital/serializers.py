@@ -28,6 +28,7 @@ class HospitalSerializer(serializers.ModelSerializer):
             'registration_number', 'established_date',
             'nav_style', 'nav_style_label',
             'letterhead_config',
+            'theme_config',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']

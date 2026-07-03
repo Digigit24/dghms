@@ -11,9 +11,10 @@ All record lookups are scoped to ``request.tenant_id`` (never a
 client-supplied identifier), per CLAUDE.md §3. Permission reuses the same
 checks as the source viewsets: ``hms.clinical.view`` for ClinicalRecord-backed
 forms (nursing_paper, monitoring_chart, progress_sheet, clinical_form — see
-apps/clinical/views.py::ClinicalRecordViewSet.get_queryset) and
+apps/clinical/views.py::ClinicalRecordViewSet.get_queryset),
 ``hms.ipd.view`` for the Admission-backed admission_form (see
-apps/ipd/views.py::AdmissionViewSet, hms_module='ipd').
+apps/ipd/views.py::AdmissionViewSet, hms_module='ipd'), and
+``hms.opd.view`` for the Visit/OPDBill-backed opd_visit_form and opd_bill.
 """
 
 from __future__ import annotations
@@ -36,6 +37,9 @@ from common.responses import error_response
 
 from .rendering import (
     FORM_ADMISSION,
+    FORM_OPD_BILL,
+    FORM_OPD_VISIT,
+    FORM_IPD_BILL,
     PrintFormCodeError,
     PrintNotFoundError,
     REGISTERED_FORM_CODES,
@@ -53,16 +57,20 @@ MAX_BATCH_SIZE = 100
 class CanViewPrintSource(BasePermission):
     """Checks the permission of the underlying record type for a print request.
 
-    ``admission_form`` reads an ``Admission`` (IPD app) so it requires
-    ``hms.ipd.view``. Every other registered form code reads a
+    ``admission_form`` and ``ipd_bill`` read an ``Admission``/``IPDBilling``
+    (IPD app) so they require ``hms.ipd.view``. ``opd_visit_form`` and
+    ``opd_bill`` read a ``Visit``/``OPDBill`` (OPD app) so they require
+    ``hms.opd.view``. Every other registered form code reads a
     ``ClinicalRecord`` so it requires ``hms.clinical.view`` — the exact same
     permission gate used by ``ClinicalRecordViewSet.get_queryset()``.
     """
 
     def has_permission(self, request, view) -> bool:
         form_code = request.query_params.get("form") or (request.data or {}).get("form")
-        if form_code == FORM_ADMISSION:
+        if form_code in (FORM_ADMISSION, FORM_IPD_BILL):
             return check_permission(request, "hms.ipd.view")
+        if form_code in (FORM_OPD_VISIT, FORM_OPD_BILL):
+            return check_permission(request, HMSPermissions.OPD_VIEW)
         return check_permission(request, HMSPermissions.CLINICAL_VIEW)
 
 

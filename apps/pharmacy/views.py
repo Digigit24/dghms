@@ -206,31 +206,15 @@ class PharmacyProductViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def statistics(self, request):
         """Get pharmacy product statistics"""
-        queryset = self.get_queryset()
+        from .services.stats import compute_product_statistics
 
-        stats = {
-            'total_products': queryset.count(),
-            'active_products': queryset.filter(is_active=True).count(),
-            'inactive_products': queryset.filter(is_active=False).count(),
-            'in_stock_products': queryset.filter(quantity__gt=0, is_active=True).count(),
-            'out_of_stock_products': queryset.filter(quantity=0, is_active=True).count(),
-            'low_stock_products': queryset.filter(
-                quantity__lte=F('minimum_stock_level'),
-                quantity__gt=0,
-                is_active=True
-            ).count(),
-            'near_expiry_products': queryset.filter(
-                expiry_date__lte=timezone.now().date() + timedelta(days=90),
-                expiry_date__gte=timezone.now().date(),
-                is_active=True
-            ).count(),
-            'expired_products': queryset.filter(
-                expiry_date__lt=timezone.now().date()
-            ).count(),
-            'categories': ProductCategory.objects.filter(
-                tenant_id=request.tenant_id, is_active=True
-            ).count(),
-        }
+        # Shared computation with the consolidated dashboard endpoint —
+        # see apps/pharmacy/services/stats.py. Passing this viewset's
+        # queryset preserves the endpoint's filter behaviour
+        # (include_inactive, category_name, in_stock, low_stock).
+        stats = compute_product_statistics(
+            request.tenant_id, queryset=self.get_queryset()
+        )
 
         return Response({
             'success': True,
@@ -880,20 +864,12 @@ class PharmacyOrderViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     )
     @action(detail=False, methods=['get'])
     def statistics(self, request):
-        """Get order statistics for current user"""
-        queryset = self.get_queryset()
+        """Get tenant-wide pharmacy order statistics"""
+        from .services.stats import compute_order_statistics
 
-        stats = {
-            'total_orders': queryset.count(),
-            'pending_orders': queryset.filter(status='pending').count(),
-            'processing_orders': queryset.filter(status='processing').count(),
-            'shipped_orders': queryset.filter(status='shipped').count(),
-            'delivered_orders': queryset.filter(status='delivered').count(),
-            'cancelled_orders': queryset.filter(status='cancelled').count(),
-            'total_spent': queryset.filter(
-                payment_status='paid'
-            ).aggregate(total=Sum('total_amount'))['total'] or 0,
-        }
+        # Shared computation with the consolidated dashboard endpoint —
+        # see apps/pharmacy/services/stats.py (tenant-scoped in the service).
+        stats = compute_order_statistics(request.tenant_id)
 
         return Response({
             'success': True,

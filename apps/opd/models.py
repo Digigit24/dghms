@@ -697,6 +697,73 @@ class ProcedureMaster(models.Model):
         return f"{self.code} - {self.name}"
 
 
+class Service(models.Model):
+    """
+    Service Model - Master data for miscellaneous billable hospital services.
+
+    Mirrors ProcedureMaster's shape for non-procedure line items that
+    recur across bills — legacy line items like Registration Charges,
+    Nursing Charges, RMO Charges, Consultation, BMW Charges, ECG, Monitor,
+    etc. Kept as a separate catalog from ProcedureMaster so procedures/tests
+    and general services can evolve independently.
+    """
+
+    CATEGORY_CHOICES = [
+        ('nursing', 'Nursing'),
+        ('registration', 'Registration'),
+        ('administrative', 'Administrative'),
+        ('equipment', 'Equipment'),
+        ('miscellaneous', 'Miscellaneous'),
+        ('other', 'Other'),
+    ]
+
+    # Primary Fields
+    id = models.AutoField(primary_key=True)
+    tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
+    name = models.CharField(max_length=200)
+    code = models.CharField(
+        max_length=50,
+        help_text="Unique service code per tenant"
+    )
+    category = models.CharField(
+        max_length=30,
+        choices=CATEGORY_CHOICES,
+        default='other',
+    )
+    default_charge = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        validators=[MinValueValidator(Decimal('0.00'))]
+    )
+    description = models.TextField(blank=True)
+
+    # Status
+    is_active = models.BooleanField(default=True)
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'services'
+        ordering = ['category', 'name']
+        verbose_name = 'Service'
+        verbose_name_plural = 'Services'
+        unique_together = [['tenant_id', 'code']]
+        indexes = [
+            models.Index(fields=['tenant_id']),
+            models.Index(fields=['tenant_id', 'category']),
+            models.Index(fields=['tenant_id', 'is_active']),
+            models.Index(fields=['code'], name='service_code_idx'),
+            models.Index(fields=['category'], name='service_category_idx'),
+            models.Index(fields=['is_active'], name='service_active_idx'),
+        ]
+
+    def __str__(self):
+        return f"{self.code} - {self.name}"
+
+
 class ProcedurePackage(models.Model):
     """
     Procedure Package Model - Bundled procedures.

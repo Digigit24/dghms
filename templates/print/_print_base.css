@@ -1,7 +1,38 @@
 <style>
+    /* A4 with uniform margins across every print template: 16mm left/right,
+       15mm top (letterhead renders inside the body flow on every page), and
+       20mm bottom to leave room for the running footer margin boxes below.
+       Individual templates must NOT declare their own @page rules. */
     @page {
         size: A4;
-        margin: 15mm;
+        margin: 15mm 16mm 20mm 16mm;
+
+        @bottom-left {
+            content: string(footer-meta);
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 7pt;
+            color: #6b7280;
+        }
+
+        @bottom-right {
+            content: "Page " counter(page) " of " counter(pages);
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 7pt;
+            color: #6b7280;
+        }
+    }
+
+    /* Source element for the @bottom-left running footer string (set by
+       print/_print_footer.html). Collapsed so it takes no layout space; it
+       must NOT be display:none, because unrendered elements can't contribute
+       string-set values in WeasyPrint. */
+    .print-footer-meta {
+        string-set: footer-meta content();
+        display: block;
+        height: 0;
+        overflow: hidden;
+        font-size: 0;
+        line-height: 0;
     }
 
     * {

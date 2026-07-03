@@ -1,0 +1,8 @@
+{% comment %}
+Sets the running footer string for WeasyPrint's @page @bottom-left margin box
+(see .print-footer-meta / @page in _print_base.css). The element itself is
+collapsed to zero height so it never affects page layout; browsers rendering
+the iframe preview simply ignore string-set/@page margin boxes. Include this
+once at the top of every print template's .print-page container.
+{% endcomment %}
+<div class="print-footer-meta">Generated on {% now "d M Y, h:i A" %}</div>

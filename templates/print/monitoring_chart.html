@@ -7,6 +7,7 @@
 </head>
 <body>
 <div class="print-page{% if page_break_before %} page-break-before{% endif %}">
+    {% include "print/_print_footer.html" %}
     {% include "print/_letterhead.html" %}
 
     <div class="form-title">{{ structure.name|default:"Monitoring Chart" }}</div>

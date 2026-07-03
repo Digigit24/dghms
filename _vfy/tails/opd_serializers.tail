@@ -1,0 +1,5 @@
+            if queryset.exists():
+                raise serializers.ValidationError(
+                    "You already have a template with this name"
+                )
+        return value

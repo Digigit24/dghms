@@ -7,6 +7,7 @@ from .views import (
     OPDBillViewSet,
     OPDBillItemViewSet,
     ProcedureMasterViewSet,
+    ServiceViewSet,
     ProcedurePackageViewSet,
     ClinicalNoteViewSet,
     VisitFindingViewSet,
@@ -28,6 +29,7 @@ router.register(r'visits', VisitViewSet, basename='visit')
 router.register(r'opd-bills', OPDBillViewSet, basename='opd-bill')
 router.register(r'opd-bill-items', OPDBillItemViewSet, basename='opd-bill-item')
 router.register(r'procedure-masters', ProcedureMasterViewSet, basename='procedure-master')
+router.register(r'services', ServiceViewSet, basename='service')
 router.register(r'procedure-packages', ProcedurePackageViewSet, basename='procedure-package')
 
 router.register(r'clinical-notes', ClinicalNoteViewSet, basename='clinical-note')

@@ -1,0 +1,2 @@
+    show_hairline = serializers.BooleanField()
+    text_lines = serializers.ListField(child=serializers.DictField())

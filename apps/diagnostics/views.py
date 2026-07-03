@@ -1,12 +1,14 @@
 from celery.result import AsyncResult
 from django.http import HttpResponse
 from django.utils import timezone
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
+from django_filters.rest_framework import DjangoFilterBackend
 
 from common.drf_auth import HMSPermission
+from common.pagination import StandardPagination
 from .import_export import (
     InvestigationExporter,
     InvestigationFilePreview,
@@ -55,6 +57,13 @@ class InvestigationViewSet(viewsets.ModelViewSet):
     serializer_class = InvestigationSerializer
     permission_classes = [HMSPermission]
     hms_module = 'diagnostics'
+    pagination_class = StandardPagination
+
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['category', 'is_active']
+    search_fields = ['name', 'code']
+    ordering_fields = ['name', 'category', 'base_charge']
+    ordering = ['name']
 
     def get_queryset(self):
         qs = super().get_queryset()

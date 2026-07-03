@@ -14,6 +14,12 @@ import django_filters
 from common.drf_auth import HMSPermission, IsAuthenticated
 from common.mixins import TenantViewSetMixin
 from .filters import VisitFilter
+from .services.stats import (
+    compute_bill_statistics,
+    compute_doctor_stats,
+    compute_visit_daily_trend,
+    compute_visit_statistics,
+)
 from common.cache import CeliyoCache
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 
@@ -25,7 +31,7 @@ from drf_spectacular.utils import (
 )
 
 from .models import (
-    ClinicalNote, Visit, OPDBill, ProcedureMaster, ProcedurePackage,
+    ClinicalNote, Visit, OPDBill, ProcedureMaster, ProcedurePackage, Service,
     VisitFinding, VisitAttachment, OPDBillItem,
     ClinicalNoteTemplateGroup, ClinicalNoteTemplate,
     ClinicalNoteTemplateField, ClinicalNoteTemplateFieldOption,
@@ -37,6 +43,7 @@ from .serializers import (
     OPDBillListSerializer, OPDBillDetailSerializer, OPDBillCreateUpdateSerializer, OPDBillItemSerializer,
     ProcedureMasterListSerializer, ProcedureMasterDetailSerializer,
     ProcedureMasterCreateUpdateSerializer,
+    ServiceListSerializer, ServiceDetailSerializer, ServiceCreateUpdateSerializer,
     ProcedurePackageListSerializer, ProcedurePackageDetailSerializer,
     ProcedurePackageCreateUpdateSerializer,
 
@@ -161,6 +168,23 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         elif self.action in ['create', 'update', 'partial_update']:
             return VisitCreateUpdateSerializer
         return VisitDetailSerializer
+
+    def create(self, request, *args, **kwargs):
+        """Create a visit and return full detail (VisitCreateUpdateSerializer's own
+        Meta.fields is a narrow write-only list — it doesn't even include `id` —
+        so callers that need the new visit's id/visit_number/patient_name/etc.
+        right after create (e.g. to open a print preview) would get an
+        incomplete response. Mirrors ClinicalNoteTemplateResponseViewSet.create().
+        """
+        write_serializer = self.get_serializer(data=request.data)
+        write_serializer.is_valid(raise_exception=True)
+        self.perform_create(write_serializer)
+        read_serializer = VisitDetailSerializer(
+            write_serializer.instance,
+            context=self.get_serializer_context()
+        )
+        headers = self.get_success_headers(write_serializer.data)
+        return Response(read_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
     def get_queryset(self):
         """Filter queryset based on JWT roles"""
@@ -354,6 +378,9 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         visit.patient.total_visits = F('total_visits') + 1
         visit.patient.save()
 
+        # Status/revenue changed — bust the cached today statistics.
+        CeliyoCache().delete_pattern(f"opd:today:{request.tenant_id}")
+
         serializer = VisitDetailSerializer(visit)
         return Response({
             'success': True,
@@ -430,44 +457,14 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                 start_date = today
             end_date = today
 
-        visits = self.get_queryset().filter(
-            visit_date__gte=start_date,
-            visit_date__lte=end_date
-        )
-
-        # Single aggregation query for all monetary stats
-        agg = visits.aggregate(
-            total_visits=Count('id'),
-            waiting=Count('id', filter=Q(status='waiting')),
-            in_consultation=Count('id', filter=Q(status='in_consultation')),
-            completed=Count('id', filter=Q(status='completed')),
-            cancelled=Count('id', filter=Q(status='cancelled')),
-            total_revenue=Sum('total_amount'),
-            paid_revenue=Sum('paid_amount', filter=Q(payment_status='paid')),
-            pending_amount=Sum('balance_amount'),
-        )
-
-        # Breakdown queries (separate but lightweight)
-        by_type = list(visits.values('visit_type').annotate(count=Count('id')))
-
+        # Shared computation with the consolidated dashboard endpoint —
+        # see apps/opd/services/stats.py (tenant-scoped inside the service).
         result = {
             'success': True,
             'period': request.query_params.get('period', 'day'),
             'date_from': str(start_date),
             'date_to': str(end_date),
-            'data': {
-                'total_visits': agg['total_visits'] or 0,
-                'by_status': {
-                    'waiting': agg['waiting'] or 0,
-                    'in_consultation': agg['in_consultation'] or 0,
-                    'completed': agg['completed'] or 0,
-                    'cancelled': agg['cancelled'] or 0,
-                },
-                'by_type': by_type,
-                'total_revenue': agg['total_revenue'] or 0,
-                'paid_revenue': agg['paid_revenue'] or 0,
-                'pending_amount': agg['pending_amount'] or 0,
-            }
+            'data': compute_visit_statistics(request.tenant_id, start_date, end_date),
         }
 
         # Optional daily trend, e.g. ?group_by=day
@@ -477,34 +474,16 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             cache = CeliyoCache()
             daily_trend = cache.get(trend_cache_key)
             if daily_trend is None:
-                from django.db.models.functions import TruncDate
-
-                daily_trend = list(
-                    visits.annotate(day=TruncDate('visit_date'))
-                          .values('day')
-                          .annotate(
-                              visits=Count('id'),
-                              completed=Count('id', filter=Q(status='completed')),
-                              revenue=Sum('total_amount'),
-                          )
-                          .order_by('day')
+                daily_trend = compute_visit_daily_trend(
+                    request.tenant_id, start_date, end_date
                 )
-                daily_trend = [
-                    {
-                        'date': str(row['day']),
-                        'visits': row['visits'] or 0,
-                        'completed': row['completed'] or 0,
-                        'revenue': float(row['revenue'] or 0),
-                    }
-                    for row in daily_trend
-                ]
                 cache.set(trend_cache_key, daily_trend, ttl=300)
             result['data']['daily_trend'] = daily_trend
             # Trend responses are range-specific; skip the today-only cache below.
             _use_cache = False
 
         if _use_cache:
-            CeliyoCache().set(f"opd:today:{request.tenant_id}", result, ttl=120)
+            CeliyoCache().set(f"opd:today:{request.tenant_id}", result, ttl=60)
         return Response(result)
 
     @extend_schema(
@@ -538,7 +517,6 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
         If date_from/date_to are provided they take priority over date.
         """
-        from django.db.models import ExpressionWrapper, DurationField
         import datetime as dt
 
         from apps.doctors.models import DoctorProfile
@@ -571,14 +549,9 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
         is_single_day = date_from == date_to
 
-        # Base queryset for the date range
-        qs = self.get_queryset().filter(
-            visit_date__gte=date_from,
-            visit_date__lte=date_to,
-        )
-
         # ?doctor=me — resolve the caller's own tenant-scoped doctor profile
         # from the JWT user_id and restrict results to that doctor only.
+        own_doctor_id = None
         if request.query_params.get('doctor') == 'me':
             try:
                 own_doctor = DoctorProfile.objects.filter(
@@ -597,76 +570,13 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                     'is_single_day': is_single_day,
                     'data': [],
                 })
-            qs = qs.filter(doctor=own_doctor)
+            own_doctor_id = own_doctor.id
 
-        doctor_rows = list(
-            qs.values(
-                'doctor',
-                doctor_name=F('doctor__first_name'),
-                doctor_last_name=F('doctor__last_name'),
-            ).annotate(
-                visits_count=Count('id'),
-                waiting=Count('id', filter=Q(status='waiting')),
-                in_consultation=Count('id', filter=Q(status='in_consultation')),
-                completed=Count('id', filter=Q(status='completed')),
-                revenue=Sum('total_amount'),
-            ).order_by('-visits_count')
+        # Shared, single-pass aggregation (no per-doctor queries) — see
+        # apps/opd/services/stats.py; also used by the dashboard endpoint.
+        doctor_rows = compute_doctor_stats(
+            request.tenant_id, date_from, date_to, doctor_id=own_doctor_id
         )
-
-        # Compute avg consultation minutes from consultation_start/end
-        for row in doctor_rows:
-            doc_visits = qs.filter(
-                doctor=row['doctor'],
-                consultation_start_time__isnull=False,
-                consultation_end_time__isnull=False,
-            ).annotate(
-                duration=ExpressionWrapper(
-                    F('consultation_end_time') - F('consultation_start_time'),
-                    output_field=DurationField()
-                )
-            )
-            durations = [
-                v.duration.total_seconds() / 60
-                for v in doc_visits
-                if v.duration is not None and v.duration.total_seconds() > 0
-            ]
-            row['avg_consultation_mins'] = round(sum(durations) / len(durations), 1) if durations else None
-
-            # Compose full name
-            fn = row.pop('doctor_name', '') or ''
-            ln = row.pop('doctor_last_name', '') or ''
-            row['doctor_name'] = f"{fn} {ln}".strip() or f"Doctor #{row['doctor']}"
-
-            # Normalise revenue — keep both new and legacy field names
-            raw_rev = row.get('revenue')
-            row['revenue_today'] = str(raw_rev or '0.00')   # legacy
-            row['revenue']       = str(raw_rev or '0.00')
-
-            # Backward-compat alias
-            row['visits_today'] = row['visits_count']
-
-        # IPD active admissions per doctor (always current, independent of range)
-        try:
-            from apps.ipd.models import Admission
-            ipd_rows = (
-                Admission.objects
-                .filter(tenant_id=request.tenant_id, status='admitted')
-                .values('doctor_id')
-                .annotate(ipd_count=Count('id'))
-            )
-            ipd_map = {str(r['doctor_id']): r['ipd_count'] for r in ipd_rows}
-        except Exception:
-            ipd_map = {}
-
-        for row in doctor_rows:
-            from apps.doctors.models import DoctorProfile
-            try:
-                doc = DoctorProfile.objects.get(id=row['doctor'], tenant_id=request.tenant_id)
-                row['ipd_admissions'] = ipd_map.get(str(doc.user_id), 0)
-                row['doctor_specialty'] = ', '.join(s.name for s in doc.specialties.all()) or None
-            except DoctorProfile.DoesNotExist:
-                row['ipd_admissions'] = 0
-                row['doctor_specialty'] = None
 
         return Response({
             'success': True,
@@ -1187,49 +1097,11 @@ class OPDBillViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         else:
             start_date = today - timedelta(days=30)
 
-        # Tenant-scoped queryset — never query OPDBill.objects directly.
-        bills = self.get_queryset().filter(bill_date__date__gte=start_date)
-
-        # Calculate statistics
-        total_bills = bills.count()
-        bills_paid = bills.filter(payment_status='paid').count()
-        bills_partial = bills.filter(payment_status='partial').count()
-        bills_unpaid = bills.filter(payment_status='unpaid').count()
-
-        total_revenue = bills.aggregate(Sum('total_amount'))['total_amount__sum'] or Decimal('0.00')
-        paid_revenue = bills.aggregate(Sum('received_amount'))['received_amount__sum'] or Decimal('0.00')
-        pending_amount = bills.aggregate(Sum('balance_amount'))['balance_amount__sum'] or Decimal('0.00')
-        total_discount = bills.aggregate(Sum('discount_amount'))['discount_amount__sum'] or Decimal('0.00')
-        average_bill_amount = bills.aggregate(Avg('total_amount'))['total_amount__avg'] or Decimal('0.00')
-
-        # Breakdown by OPD type
-        by_opd_type = list(bills.values('opd_type').annotate(
-            count=Count('id'),
-            revenue=Sum('total_amount')
-        ))
-
-        # Breakdown by payment mode
-        by_payment_mode = list(bills.values('payment_mode').annotate(
-            count=Count('id'),
-            amount=Sum('received_amount')
-        ))
-
-        data = {
-            'total_bills': total_bills,
-            'total_revenue': total_revenue,
-            'paid_revenue': paid_revenue,
-            'pending_amount': pending_amount,
-            'total_discount': total_discount,
-            'bills_paid': bills_paid,
-            'bills_partial': bills_partial,
-            'bills_unpaid': bills_unpaid,
-            'by_opd_type': by_opd_type,
-            'by_payment_mode': by_payment_mode,
-            'average_bill_amount': round(average_bill_amount, 2)
-        }
-
-        serializer = OPDBillStatisticsSerializer(data)
-        return Response({'success': True, 'data': serializer.data})
+        # Shared computation with the consolidated dashboard endpoint —
+        # see apps/opd/services/stats.py (tenant-scoped inside the service,
+        # serialized through OPDBillStatisticsSerializer).
+        data = compute_bill_statistics(request.tenant_id, start_date)
+        return Response({'success': True, 'data': data})
 
 
 # ============================================================================
@@ -1380,6 +1252,89 @@ class ProcedureMasterViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         queryset = super().get_queryset()
 
         # Show only active procedures unless explicitly requested
+        show_inactive = self.request.query_params.get('show_inactive', 'false')
+        if show_inactive.lower() != 'true':
+            queryset = queryset.filter(is_active=True)
+
+        return queryset
+
+
+# ============================================================================
+# SERVICE VIEWSET
+# ============================================================================
+
+@extend_schema_view(
+    list=extend_schema(
+        summary="List Services",
+        description="Get list of billable hospital services (nursing, registration, administrative, equipment, misc, other).",
+        tags=['OPD - Services']
+    ),
+    retrieve=extend_schema(
+        summary="Get Service Details",
+        description="Retrieve service master details",
+        tags=['OPD - Services']
+    ),
+    create=extend_schema(
+        summary="Create Service",
+        description="Create a new billable service (Admin only)",
+        tags=['OPD - Services']
+    ),
+    update=extend_schema(
+        summary="Update Service",
+        description="Update a service (Admin only)",
+        tags=['OPD - Services']
+    ),
+    partial_update=extend_schema(
+        summary="Partially Update Service",
+        description="Partially update a service (Admin only)",
+        tags=['OPD - Services']
+    ),
+    destroy=extend_schema(
+        summary="Delete Service",
+        description="Delete a service (Admin only)",
+        tags=['OPD - Services']
+    ),
+)
+class ServiceViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
+    """
+    Service Catalog Management
+
+    Manages billable hospital service master data (nursing charges,
+    registration charges, RMO charges, consultation, BMW charges, ECG,
+    monitor, etc). Mirrors ProcedureMasterViewSet's conventions exactly.
+    Uses HMS permissions for access control.
+    """
+    queryset = Service.objects.all()
+    permission_classes = [HMSPermission]
+    hms_module = 'opd'
+
+    action_permission_map = {
+        'list': 'bill',
+        'retrieve': 'bill',
+        'create': 'settings',
+        'update': 'settings',
+        'partial_update': 'settings',
+        'destroy': 'settings',
+    }
+
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['category', 'is_active']
+    search_fields = ['name', 'code']
+    ordering_fields = ['name', 'category', 'default_charge']
+    ordering = ['name']
+
+    def get_serializer_class(self):
+        """Return appropriate serializer"""
+        if self.action == 'list':
+            return ServiceListSerializer
+        elif self.action in ['create', 'update', 'partial_update']:
+            return ServiceCreateUpdateSerializer
+        return ServiceDetailSerializer
+
+    def get_queryset(self):
+        """Filter active services by default"""
+        queryset = super().get_queryset()
+
         show_inactive = self.request.query_params.get('show_inactive', 'false')
         if show_inactive.lower() != 'true':
             queryset = queryset.filter(is_active=True)

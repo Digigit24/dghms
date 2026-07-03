@@ -27,7 +27,8 @@ from apps.clinical.models import (
 )
 from apps.clinical.serializers import ClinicalFormStructureSerializer
 from apps.hospital.models import Hospital
-from apps.ipd.models import Admission
+from apps.ipd.models import Admission, IPDBilling
+from apps.opd.models import OPDBill, Visit
 
 log = structlog.get_logger(__name__)
 
@@ -41,6 +42,9 @@ FORM_NURSING_PAPER = "nursing_paper"
 FORM_MONITORING_CHART = "monitoring_chart"
 FORM_PROGRESS_SHEET = "progress_sheet"
 FORM_CLINICAL_GENERIC = "clinical_form"
+FORM_OPD_VISIT = "opd_visit_form"
+FORM_IPD_BILL = "ipd_bill"
+FORM_OPD_BILL = "opd_bill"
 
 REGISTERED_FORM_CODES = {
     FORM_ADMISSION,
@@ -48,6 +52,9 @@ REGISTERED_FORM_CODES = {
     FORM_MONITORING_CHART,
     FORM_PROGRESS_SHEET,
     FORM_CLINICAL_GENERIC,
+    FORM_OPD_VISIT,
+    FORM_IPD_BILL,
+    FORM_OPD_BILL,
 }
 
 # Template used for each registered form code.
@@ -57,6 +64,9 @@ _TEMPLATE_BY_FORM_CODE = {
     FORM_MONITORING_CHART: "print/monitoring_chart.html",
     FORM_PROGRESS_SHEET: "print/progress_sheet.html",
     FORM_CLINICAL_GENERIC: "print/clinical_form_generic.html",
+    FORM_OPD_VISIT: "print/opd_visit_form.html",
+    FORM_IPD_BILL: "print/ipd_bill.html",
+    FORM_OPD_BILL: "print/opd_bill.html",
 }
 
 # Monitoring chart time slots: 2-hour intervals across a 24h cycle. No fixed
@@ -151,6 +161,18 @@ def _resolve_admission(tenant_id: uuid.UUID, record_id: int) -> Admission:
     return admission
 
 
+def _resolve_visit(tenant_id: uuid.UUID, record_id: int) -> Visit:
+    """Fetch a tenant-scoped Visit by id for the opd_visit_form print."""
+    visit = (
+        Visit.objects.filter(tenant_id=tenant_id, pk=record_id)
+        .select_related("patient", "doctor", "referred_by")
+        .first()
+    )
+    if visit is None:
+        raise PrintNotFoundError(f"Visit {record_id} not found for this tenant.")
+    return visit
+
+
 def _resolve_clinical_record(tenant_id: uuid.UUID, record_id: int) -> ClinicalRecord:
     """Fetch a tenant-scoped ClinicalRecord by id, with structure + values preloaded."""
     record = (
@@ -162,6 +184,32 @@ def _resolve_clinical_record(tenant_id: uuid.UUID, record_id: int) -> ClinicalRe
     if record is None:
         raise PrintNotFoundError(f"Clinical record {record_id} not found for this tenant.")
     return record
+
+
+def _resolve_ipd_bill(tenant_id: uuid.UUID, record_id: int) -> IPDBilling:
+    """Fetch a tenant-scoped IPDBilling by id for the ipd_bill print, 404 if not found/wrong tenant."""
+    bill = (
+        IPDBilling.objects.filter(tenant_id=tenant_id, pk=record_id)
+        .select_related("admission", "admission__patient", "admission__ward", "admission__bed")
+        .prefetch_related("items")
+        .first()
+    )
+    if bill is None:
+        raise PrintNotFoundError(f"IPD bill {record_id} not found for this tenant.")
+    return bill
+
+
+def _resolve_opd_bill(tenant_id: uuid.UUID, record_id: int) -> OPDBill:
+    """Fetch a tenant-scoped OPDBill by id for the opd_bill print, 404 if not found/wrong tenant."""
+    bill = (
+        OPDBill.objects.filter(tenant_id=tenant_id, pk=record_id)
+        .select_related("visit", "visit__patient", "visit__doctor", "doctor")
+        .prefetch_related("items")
+        .first()
+    )
+    if bill is None:
+        raise PrintNotFoundError(f"OPD bill {record_id} not found for this tenant.")
+    return bill
 
 
 # ---------------------------------------------------------------------------
@@ -205,6 +253,138 @@ def _admission_context(tenant_id: uuid.UUID, record_id: int) -> dict[str, Any]:
         "claim_status": admission.get_claim_status_display(),
         "bed_transfers": list(admission.bed_transfers.select_related("from_bed", "to_bed").order_by("transfer_date")),
         "is_mlc_case": "mlc" in (admission.reason or "").lower(),
+    }
+
+
+def _ipd_bill_context(tenant_id: uuid.UUID, record_id: int) -> dict[str, Any]:
+    """Build the template context for the IPD Bill print.
+
+    Mirrors how _admission_context pulls letterhead/patient/admission data —
+    the letterhead itself is added once in build_print_context() via
+    get_letterhead_context(), not here.
+    """
+    bill = _resolve_ipd_bill(tenant_id, record_id)
+    admission = bill.admission
+    patient = admission.patient
+    items = list(bill.items.all().order_by('source', 'id'))
+
+    return {
+        "bill": bill,
+        "items": items,
+        "admission": admission,
+        "patient": patient,
+        "uhid": patient.patient_id,
+        "ipd_no": admission.admission_id,
+        "patient_name": patient.full_name,
+        "age": patient.age,
+        "gender": patient.get_gender_display() if patient.gender else "",
+        "contact": patient.mobile_primary,
+        "address": patient.full_address,
+        "admission_date": admission.admission_date,
+        "discharge_date": admission.discharge_date,
+        "ward": admission.ward,
+        "bed": admission.bed,
+        "bill_number": bill.bill_number,
+        "bill_date": bill.bill_date,
+        "diagnosis": bill.diagnosis,
+        "remarks": bill.remarks,
+        "total_amount": bill.total_amount,
+        "discount_percent": bill.discount_percent,
+        "discount_amount": bill.discount_amount,
+        "payable_amount": bill.payable_amount,
+        "received_amount": bill.received_amount,
+        "balance_amount": bill.balance_amount,
+        "payment_status": bill.get_payment_status_display(),
+        "payment_mode": bill.get_payment_mode_display(),
+    }
+
+
+def _opd_bill_context(tenant_id: uuid.UUID, record_id: int) -> dict[str, Any]:
+    """Build the template context for the OPD Bill print.
+
+    Mirrors _ipd_bill_context field-for-field where the models overlap so the
+    opd_bill.html template can share the same structure/CSS classes as
+    ipd_bill.html — the letterhead itself is added once in
+    build_print_context() via get_letterhead_context(), not here.
+    """
+    bill = _resolve_opd_bill(tenant_id, record_id)
+    visit = bill.visit
+    patient = visit.patient
+    doctor = bill.doctor or visit.doctor
+    items = list(bill.items.all().order_by("source", "id"))
+
+    return {
+        "bill": bill,
+        "items": items,
+        "visit": visit,
+        "patient": patient,
+        "uhid": patient.patient_id,
+        "opd_no": visit.visit_number,
+        "patient_name": patient.full_name,
+        "age": patient.age,
+        "gender": patient.get_gender_display() if patient.gender else "",
+        "contact": patient.mobile_primary,
+        "address": patient.full_address,
+        "visit_date": visit.visit_date,
+        "visit_type": visit.get_visit_type_display(),
+        "doctor": doctor,
+        "doctor_name": doctor.full_name if doctor else "",
+        "bill_number": bill.bill_number,
+        "bill_date": bill.bill_date,
+        "opd_type": bill.get_opd_type_display(),
+        "charge_type": bill.get_charge_type_display(),
+        "diagnosis": bill.diagnosis,
+        "remarks": bill.remarks,
+        "total_amount": bill.total_amount,
+        "discount_percent": bill.discount_percent,
+        "discount_amount": bill.discount_amount,
+        "payable_amount": bill.payable_amount,
+        "received_amount": bill.received_amount,
+        "balance_amount": bill.balance_amount,
+        "payment_status": bill.get_payment_status_display(),
+        "payment_mode": bill.get_payment_mode_display(),
+    }
+
+
+def _opd_visit_context(tenant_id: uuid.UUID, record_id: int) -> dict[str, Any]:
+    """Build the template context for the OPD Visit Form print."""
+    visit = _resolve_visit(tenant_id, record_id)
+    patient = visit.patient
+
+    return {
+        "visit": visit,
+        "patient": patient,
+        "uhid": patient.patient_id,
+        "opd_no": visit.visit_number,
+        "patient_name": patient.full_name,
+        "age": patient.age,
+        "gender": patient.get_gender_display() if patient.gender else "",
+        "contact": patient.mobile_primary,
+        "address": patient.full_address,
+        "blood_group": patient.blood_group,
+        "guardian_name": " ".join(
+            part
+            for part in [patient.guardian_first_name, patient.guardian_last_name]
+            if part
+        ),
+        "guardian_relation": patient.guardian_relation,
+        "guardian_mobile": patient.guardian_mobile,
+        "visit_date": visit.visit_date,
+        "entry_time": visit.entry_time,
+        "visit_type": visit.get_visit_type_display(),
+        "priority": visit.get_priority_display(),
+        "status": visit.get_status_display(),
+        "doctor": visit.doctor,
+        "doctor_name": visit.doctor.full_name if visit.doctor else "",
+        "referred_by_name": visit.referred_by.full_name if visit.referred_by else "",
+        "notify_referring_doctor": visit.notify_referring_doctor,
+        "is_follow_up": visit.is_follow_up,
+        "follow_up_required": visit.follow_up_required,
+        "follow_up_date": visit.follow_up_date,
+        "follow_up_notes": visit.follow_up_notes,
+        "queue_position": visit.queue_position,
+        "consultation_start_time": visit.consultation_start_time,
+        "consultation_end_time": visit.consultation_end_time,
     }
 
 
@@ -320,6 +500,12 @@ def build_print_context(
 
     if form_code == FORM_ADMISSION:
         context.update(_admission_context(tenant_id, record_id))
+    elif form_code == FORM_OPD_VISIT:
+        context.update(_opd_visit_context(tenant_id, record_id))
+    elif form_code == FORM_IPD_BILL:
+        context.update(_ipd_bill_context(tenant_id, record_id))
+    elif form_code == FORM_OPD_BILL:
+        context.update(_opd_bill_context(tenant_id, record_id))
     elif form_code == FORM_MONITORING_CHART:
         context.update(_clinical_record_context(tenant_id, record_id, language))
         context["time_slots"] = MONITORING_CHART_TIME_SLOTS
