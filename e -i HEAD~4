@@ -1,0 +1,101 @@
+[33mb74fe4a[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mfeature/clinical[m[33m)[m ffew
+[33m440d546[m ffew
+[33mf2efed8[m ddsd
+[33meea33df[m fssef
+[33m74fc67c[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mmain[m[33m)[m rrfrw
+[33m06cdf9c[m efe
+[33m42cd4d8[m[33m ([m[1;31morigin/ecp/bec3d387-c0f4-4eec-b7f3-aab04092f6ff[m[33m, [m[1;32mecp/bec3d387-c0f4-4eec-b7f3-aab04092f6ff[m[33m)[m feffe
+[33m4dab145[m[33m ([m[1;32mecp/f6e378ec-6bf1-4c53-be09-772e31b9bd07-cycle-3[m[33m, [m[1;32mecp/f6e378ec-6bf1-4c53-be09-772e31b9bd07-cycle-2[m[33m, [m[1;32mecp/f6e378ec-6bf1-4c53-be09-772e31b9bd07-cycle-1[m[33m, [m[1;32mecp/c469803a-8cfe-4d1c-946e-0be8953c806d-cycle-3[m[33m, [m[1;32mecp/c469803a-8cfe-4d1c-946e-0be8953c806d-cycle-2[m[33m, [m[1;32mecp/c469803a-8cfe-4d1c-946e-0be8953c806d-cycle-1[m[33m, [m[1;32mecp/bec3d387-c0f4-4eec-b7f3-aab04092f6ff-cycle-3[m[33m, [m[1;32mecp/bec3d387-c0f4-4eec-b7f3-aab04092f6ff-cycle-2[m[33m, [m[1;32mecp/bec3d387-c0f4-4eec-b7f3-aab04092f6ff-cycle-1[m[33m)[m Fwrefwer
+[33m9892e53[m fqe
+[33m5842ba4[m ddd
+[33m9638984[m[33m ([m[1;31morigin/claude/fix-ipd-end-time-lg0Po[m[33m)[m Fix OPD visit_number generation race condition - improved robustness
+[33m14d8f4c[m Fix OPD visit_number ordering for past dates
+[33m7f21f3c[m Fix doctor profile partial update clearing user data
+[33mbf9ac11[m Improve doctor profile creation error messages
+[33m679806c[m Make IPD admission_id editable
+[33m860492b[m Fix OPD visit_number - add critical tenant_id filtering
+[33m3d7a4eb[m Fix OPD visit_number generation - use transaction-based approach
+[33me9d6fdd[m Fix OPD visit_number race condition duplicate key error
+[33md3ca107[m Add IPD end time frontend implementation guide
+[33mf653dad[m Fix IPD end time (discharge_date) handling
+[33m8d7ccfa[m Fix visit_date always saving as today's date instead of frontend value
+[33m540c934[m Merge pull request #19 from Digigit24/claude/fix-diagnostics-api-f6zvs
+[33mc4c5b08[m[33m ([m[1;31morigin/claude/fix-diagnostics-api-f6zvs[m[33m)[m Fix AttributeError: use bill_item_link instead of content_object in signals
+[33md1b0764[m Merge pull request #18 from Digigit24/claude/fix-diagnostics-api-f6zvs
+[33m53edeb6[m Add WhatsApp delivery tracking fields to LabReport
+[33m590282f[m Add whatsapp_sent boolean field to LabReport
+[33m93286b9[m Add patient ID and email to LabReportSerializer
+[33m8026e45[m Merge pull request #17 from Digigit24/claude/fix-diagnostics-api-f6zvs
+[33me3e8b46[m Add patient and investigation fields to LabReportSerializer
+[33m4adad85[m Merge pull request #16 from Digigit24/claude/fix-diagnostics-api-f6zvs
+[33mf8eb822[m Add patient name, mobile, and email to DiagnosticOrderSerializer
+[33me2213f8[m Merge pull request #15 from Digigit24/claude/fix-diagnostics-api-f6zvs
+[33mc644b42[m Add patient field to DiagnosticOrderSerializer
+[33mc7809f2[m Merge pull request #14 from Digigit24/claude/lab-report-order-status-0Ho8c
+[33m4440a50[m[33m ([m[1;31morigin/claude/lab-report-order-status-0Ho8c[m[33m)[m fix: make MEDIA_ROOT configurable via environment variable
+[33m3f010cb[m Merge pull request #13 from Digigit24/claude/lab-report-order-status-0Ho8c
+[33m6831e60[m[33m ([m[1;32mclaude/lab-report-order-status-0Ho8c[m[33m)[m fix: serve media files regardless of DEBUG mode
+[33m9b82b80[m feat(diagnostics): auto-complete order & requisition on lab report creation
+[33mdc26243[m Merge branch 'claude/custom-field-import-export-y7ITy'
+[33mda3a220[m[33m ([m[1;31morigin/claude/custom-field-import-export-y7ITy[m[33m)[m Fix export never completing: always set status='completed' when Celery is SUCCESS
+[33mbb4ab69[m Merge branch 'claude/custom-field-import-export-y7ITy'
+[33m73dcbda[m Rename export query param from 'format' to 'file_format'
+[33me03d807[m Merge branch 'claude/custom-field-import-export-y7ITy'
+[33mdb13c1e[m Fix 404 on custom actions (export, import, download) caused by missing permission mapping
+[33m89ff658[m Fix import status showing 0,0,0 on completed tasks
+[33mea39e1f[m Merge branch 'claude/custom-field-import-export-y7ITy'
+[33m5120638[m Increase global API page size from 20 to 100
+[33m10f4ccc[m Add stop/cancel + live row tracking to investigation import
+[33mee75833[m req
+[33m45c0f3f[m fix(diagnostics): revert serializer change – code stays required for manual creation
+[33m51fced2[m feat(diagnostics): async Investigation import/export with custom field mapping
+[33mc9290cc[m[33m ([m[1;31morigin/claude/add-followup-billing-THlK4[m[33m)[m Upgrade razorpay to 2.0.0, drop setuptools workaround
+[33m35ea0cf[m Add setuptools dependency for Python 3.13 compatibility
+[33mdf73775[m Update numpy and pandas for Python 3.13 compatibility
+[33mae22989[m Fix PaymentCategory unique constraint to be per-tenant
+[33ma9614bc[m Add follow_up charge type to OPD billing
+[33m6bd149e[m nakshatra
+[33m169034a[m dine
+[33m80f9e04[m donee
+[33m82c109a[m donee
+[33m07b08a9[m done
+[33md7fe1d1[m dodj
+[33mceeb6b1[m done
+[33m54476b0[m dd
+[33maac3849[m ddd
+[33m3536cbc[m config variable migrated to capital letter
+[33m65b45f3[m new app for nakshatra added
+[33m6f32dbb[m done
+[33m1cac6d4[m done
+[33meb87ae5[m prod
+[33m2100686[m done
+[33mae86fdf[m done
+[33m8b42284[m done
+[33md674def[m[33m ([m[1;31morigin/claude/filter-patient-by-tenant-xmBEn[m[33m)[m Fix patient API tenant filtering to match doctor API behavior
+[33m838e29a[m done
+[33m23e04b1[m nivii
+[33m77b6908[m Merge branch 'main' of github.com:Digigit24/dghms
+[33m1a67272[m nuvi
+[33m7842884[m Merge pull request #12 from Digigit24/claude/add-template-responses-route-012fh3Wz7RKBbHgLsk1v9pAu
+[33mea80143[m[33m ([m[1;31morigin/claude/add-template-responses-route-012fh3Wz7RKBbHgLsk1v9pAu[m[33m, [m[1;32mclaude/add-template-responses-route-012fh3Wz7RKBbHgLsk1v9pAu[m[33m)[m done
+[33md3a1592[m Merge pull request #11 from Digigit24/claude/add-template-responses-route-012fh3Wz7RKBbHgLsk1v9pAu
+[33m7f3b1ff[m Add template responses nested route and fix multiselect handling
+[33m2434d38[m Merge pull request #10 from Digigit24/claude/fix-appointment-tenant-id-01ES6E5RiCqEKsqD1h6cB7p9
+[33m9a02e0e[m Fix appointment creation to use middleware-extracted tenant_id
+[33m8ac9a8d[m[33m ([m[1;32mclaude/add-clinical-templates-01KQLtw9cEoWhhEg1HxXXiEe[m[33m)[m new
+[33m637009a[m Make appointment_type optional in Appointment model
+[33mbd13a54[m Add debug logging to diagnose admin authentication issues
+[33mf6abdb6[m Require authentication for admin access to ensure tenant_id is set
+[33m10d66fc[m Fix admin tenant_id handling for JWT authentication
+[33m412fc29[m Fix appointments validation: extract tenant_id from request headers
+[33m0d4cdc0[m Merge pull request #9 from Digigit24/claude/add-clinical-templates-01KQLtw9cEoWhhEg1HxXXiEe
+[33made4d44[m[33m ([m[1;31morigin/claude/add-clinical-templates-01KQLtw9cEoWhhEg1HxXXiEe[m[33m)[m Add comprehensive admin interfaces for clinical note templates
+[33m68a39c0[m Merge pull request #8 from Digigit24/claude/optional-medical-license-field-01LWJtoQxzMe6Qh2DHsQ7VJT
+[33meefec1e[m Merge branch 'claude/fix-django-filters-meta-018aJkYx1BoqJHqk3hVi3L1K'
+[33ma1085b4[m[33m ([m[1;32mclaude/fix-django-filters-meta-018aJkYx1BoqJHqk3hVi3L1K[m[33m)[m 500 error
+[33md5bbb9d[m[33m ([m[1;31morigin/claude/fix-django-filters-meta-018aJkYx1BoqJHqk3hVi3L1K[m[33m)[m Fix django-filters error by replacing is_completed with status field
+[33m5cec4af[m Fix ImproperlyConfigured error by removing non-existent code field from ClinicalNoteTemplateGroup
+[33m56a03e6[m Fix ImproperlyConfigured error by replacing validation_rules with actual validation fields
+[33m3b2119a[m Fix ImproperlyConfigured error by correcting label to field_label references
+[33mfbd1273[m Fix ImproperlyConfigured error by removing non-existent value_decimal field
+[33md14e99c[m[33m ([m[1;31morigin/claude/optional-medical-license-field-01LWJtoQxzMe6Qh2DHsQ7VJT[m[33m, [m[1;32mclaude/optional-medical-license-
