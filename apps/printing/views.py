@@ -36,18 +36,25 @@ from common.permissions import HMSPermissions, IsTenantAuthenticated, check_perm
 from common.responses import error_response
 
 from .rendering import (
+    DOCUMENT_ENCOUNTER_TYPES,
     FORM_ADMISSION,
     FORM_OPD_BILL,
     FORM_OPD_VISIT,
     FORM_IPD_BILL,
+    MAX_DOCUMENT_BATCH_SIZE,
     PrintFormCodeError,
     PrintNotFoundError,
     REGISTERED_FORM_CODES,
     render_batch_html,
+    render_document_batch_pdf,
     render_pdf_from_html,
     render_print_html,
 )
-from .serializers import PrintBatchRequestSerializer, PrintErrorResponseSerializer
+from .serializers import (
+    DocumentBatchPrintRequestSerializer,
+    PrintBatchRequestSerializer,
+    PrintErrorResponseSerializer,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -376,4 +383,119 @@ class PrintBatchView(APIView):
         )
         response = HttpResponse(pdf_bytes, content_type="application/pdf")
         response["Content-Disposition"] = f'inline; filename="{form_code}_batch.pdf"'
+        return response
+
+
+class CanPrintDocuments(BasePermission):
+    """Permission gate for consent/stationery/certificate batch printing.
+
+    The documents belong to an encounter, so the required permission mirrors
+    that encounter's source viewset: ``hms.ipd.view`` for ipd_admission and
+    ``hms.opd.view`` for opd_visit. Unknown encounter types are allowed through
+    to the view, which returns a clean 400 rather than a 403.
+    """
+
+    def has_permission(self, request, view) -> bool:
+        encounter_type = (request.data or {}).get("encounter_type")
+        if encounter_type == "ipd_admission":
+            return check_permission(request, "hms.ipd.view")
+        if encounter_type == "opd_visit":
+            return check_permission(request, HMSPermissions.OPD_VIEW)
+        return True
+
+
+class ClinicalDocumentBatchPrintView(APIView):
+    """Render selected consent/stationery documents and merge them into one PDF."""
+
+    permission_classes = [IsTenantAuthenticated, CanPrintDocuments]
+
+    @extend_schema(
+        summary="Batch-print consent/stationery documents into one merged PDF",
+        description=(
+            "Renders every ClinicalDocumentTemplate in `template_codes` for the "
+            "given encounter (each to its own PDF), then merges them page-for-"
+            "page into a single application/pdf response with the letterhead on "
+            "every page. When a document has no authored print template, a "
+            "generic letterhead-aware stationery page is used so the batch "
+            "never hard-fails. Capped at 100 documents per request."
+        ),
+        request=DocumentBatchPrintRequestSerializer,
+        responses={200: OpenApiTypes.BINARY, 400: PrintErrorResponseSerializer, 404: PrintErrorResponseSerializer},
+        tags=["Print"],
+    )
+    def post(self, request, *args, **kwargs) -> HttpResponse | Response:
+        """POST /api/print/documents/batch/ {template_codes, encounter_type, encounter_id, letterhead, language}"""
+        payload = DocumentBatchPrintRequestSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+
+        template_codes = data["template_codes"]
+        encounter_type = data["encounter_type"]
+        encounter_id = data["encounter_id"]
+        letterhead = data["letterhead"]
+        language = data["language"]
+
+        if encounter_type not in DOCUMENT_ENCOUNTER_TYPES:
+            return error_response(
+                code=error_codes.INVALID_PAYLOAD,
+                message=f"'encounter_type' must be one of {sorted(DOCUMENT_ENCOUNTER_TYPES)}.",
+                status=status.HTTP_400_BAD_REQUEST,
+                field="encounter_type",
+            )
+
+        if len(template_codes) > MAX_DOCUMENT_BATCH_SIZE:
+            return error_response(
+                code=error_codes.INVALID_PAYLOAD,
+                message=f"A maximum of {MAX_DOCUMENT_BATCH_SIZE} documents may be printed in one batch.",
+                status=status.HTTP_400_BAD_REQUEST,
+                field="template_codes",
+            )
+
+        tenant_id: uuid.UUID = request.tenant_id
+        start = time.monotonic()
+        try:
+            pdf_bytes = render_document_batch_pdf(
+                tenant_id, template_codes, encounter_type, encounter_id, letterhead, language
+            )
+        except PrintFormCodeError as exc:
+            return error_response(
+                code=error_codes.INVALID_PAYLOAD,
+                message=str(exc),
+                status=status.HTTP_400_BAD_REQUEST,
+                field="encounter_type",
+            )
+        except PrintNotFoundError as exc:
+            return error_response(
+                code=error_codes.RECORD_NOT_FOUND,
+                message=str(exc),
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except Exception as exc:
+            log.error(
+                "print_document_batch_render_failed",
+                tenant_id=str(tenant_id),
+                encounter_type=encounter_type,
+                encounter_id=encounter_id,
+                document_count=len(template_codes),
+                error=str(exc),
+            )
+            return error_response(
+                code=error_codes.INTERNAL_SERVER_ERROR,
+                message="Failed to render the merged documents PDF.",
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        duration_ms = int((time.monotonic() - start) * 1000)
+        log.info(
+            "print_pdf_rendered",
+            tenant_id=str(tenant_id),
+            user_id=str(request.user_id),
+            encounter_type=encounter_type,
+            encounter_id=encounter_id,
+            document_count=len(template_codes),
+            mode="document_batch_pdf",
+            duration_ms=duration_ms,
+        )
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = 'inline; filename="documents_batch.pdf"'
         return response

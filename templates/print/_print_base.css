@@ -47,6 +47,20 @@
         padding: 0;
     }
 
+    /* ── HTML preview parity ────────────────────────────────────────────────
+       The @page margins above only apply to paged (print) media — i.e. the
+       WeasyPrint PDF and the browser's own Ctrl+P. They do NOT apply when the
+       same HTML is shown on screen inside the in-app <iframe> preview, which
+       made the preview render edge-to-edge and look like it had "no margins".
+       Re-create the identical A4 margins on screen only, so the preview
+       matches the printed paper. WeasyPrint renders as print media, so this
+       screen-only rule never applies to the PDF (no double margin). */
+    @media screen {
+        body {
+            padding: 15mm 16mm 20mm 16mm;
+        }
+    }
+
     .print-page {
         width: 100%;
     }

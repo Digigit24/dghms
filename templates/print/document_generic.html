@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ document_title }}</title>
+{% include "print/_print_base.css" %}
+<style>
+    /* Ruled writing area for hand-completed consent / stationery documents. */
+    .doc-body {
+        margin-top: 10px;
+        min-height: 120mm;
+    }
+    .doc-lines {
+        margin-top: 6px;
+    }
+    .doc-line {
+        border-bottom: 1px solid #9ca3af;
+        height: 9mm;
+    }
+    .doc-declaration {
+        font-size: 9pt;
+        line-height: 1.6;
+        margin: 6px 0 10px;
+        color: #1f2937;
+    }
+</style>
+</head>
+<body>
+<div class="print-page{% if page_break_before %} page-break-before{% endif %}">
+    {% include "print/_print_footer.html" %}
+    {% include "print/_letterhead.html" %}
+
+    <div class="form-title">{{ document_title }}</div>
+
+    <div class="patient-info-bar">
+        <div><span class="field-label">UHID:</span> {{ uhid }}</div>
+        <div><span class="field-label">{{ encounter_label }} No:</span> {{ encounter_no }}</div>
+        <div><span class="field-label">Date:</span> {{ encounter_date|date:"d M Y" }}</div>
+        <div><span class="field-label">Patient Name:</span> {{ patient_name }}</div>
+        <div><span class="field-label">Age / Gender:</span> {{ age }} / {{ gender }}</div>
+        <div><span class="field-label">Contact:</span> {{ contact }}</div>
+        {% if ward %}
+        <div><span class="field-label">Ward / Bed:</span> {{ ward.name }}{% if bed %} / {{ bed.bed_number }}{% endif %}</div>
+        {% endif %}
+        <div><span class="field-label">Document:</span> {{ doc_type }}</div>
+    </div>
+
+    <div class="doc-body">
+        {% if document.config.declaration %}
+        <div class="doc-declaration">{{ document.config.declaration }}</div>
+        {% endif %}
+        <div class="doc-lines">
+            <div class="doc-line"></div>
+            <div class="doc-line"></div>
+            <div class="doc-line"></div>
+            <div class="doc-line"></div>
+            <div class="doc-line"></div>
+            <div class="doc-line"></div>
+            <div class="doc-line"></div>
+            <div class="doc-line"></div>
+        </div>
+    </div>
+
+    {% if requires_signature %}
+    <div class="signature-row">
+        <div class="signature-box">Patient / Guardian Signature</div>
+        <div class="signature-box">Witness Signature</div>
+        <div class="signature-box">Doctor Signature</div>
+    </div>
+    {% endif %}
+</div>
+</body>
+</html>

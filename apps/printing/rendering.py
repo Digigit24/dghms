@@ -20,9 +20,11 @@ import structlog
 from django.template.loader import render_to_string
 
 from apps.clinical.models import (
+    ClinicalDocumentTemplate,
     ClinicalFieldValue,
     ClinicalForm,
     ClinicalFormField,
+    ClinicalPrintTemplate,
     ClinicalRecord,
 )
 from apps.clinical.serializers import ClinicalFormStructureSerializer
@@ -561,3 +563,214 @@ def render_pdf_from_html(html: str) -> bytes:
     from weasyprint import HTML
 
     return HTML(string=html).write_pdf()
+
+
+# ---------------------------------------------------------------------------
+# Consent / stationery / certificate document batch print
+# ---------------------------------------------------------------------------
+#
+# Unlike the registered *form* codes above (which are backed by a specific
+# Django model + a dedicated print template), consent/stationery/certificate
+# documents are tenant-authored ``ClinicalDocumentTemplate`` rows. Their print
+# HTML - when the tenant has authored one - lives in a matching
+# ``ClinicalPrintTemplate`` (target_type='document', target_code=<doc code>).
+# When no authored HTML exists we fall back to a generic, letterhead-aware
+# stationery page so batch print is always robust and never hard-fails just
+# because a template body has not been designed yet.
+#
+# Each selected document is rendered to its OWN PDF and the PDFs are then
+# merged with pypdf into a single file (a "proper" page-accurate merge that
+# preserves each document's own @page rules), rather than concatenating raw
+# HTML.
+
+DOCUMENT_GENERIC_TEMPLATE = "print/document_generic.html"
+
+# encounter_type values (as sent by the frontend) the document batch supports.
+DOCUMENT_ENCOUNTER_TYPES = {"ipd_admission", "opd_visit"}
+
+MAX_DOCUMENT_BATCH_SIZE = 100
+
+
+def _document_encounter_context(
+    tenant_id: uuid.UUID, encounter_type: str, encounter_id: int
+) -> dict[str, Any]:
+    """Resolve the patient/encounter header context for a document print.
+
+    Tenant-scoped (never trusts client identifiers). Supports the two encounter
+    types the Consents & Stationery UI targets: IPD admissions and OPD visits.
+    """
+    if encounter_type == "ipd_admission":
+        admission = _resolve_admission(tenant_id, encounter_id)
+        patient = admission.patient
+        return {
+            "encounter_label": "IPD",
+            "encounter_no": admission.admission_id,
+            "patient": patient,
+            "uhid": patient.patient_id,
+            "patient_name": patient.full_name,
+            "age": patient.age,
+            "gender": patient.get_gender_display() if patient.gender else "",
+            "contact": patient.mobile_primary,
+            "address": patient.full_address,
+            "ward": admission.ward,
+            "bed": admission.bed,
+            "encounter_date": admission.admission_date,
+        }
+    if encounter_type == "opd_visit":
+        visit = _resolve_visit(tenant_id, encounter_id)
+        patient = visit.patient
+        return {
+            "encounter_label": "OPD",
+            "encounter_no": visit.visit_number,
+            "patient": patient,
+            "uhid": patient.patient_id,
+            "patient_name": patient.full_name,
+            "age": patient.age,
+            "gender": patient.get_gender_display() if patient.gender else "",
+            "contact": patient.mobile_primary,
+            "address": patient.full_address,
+            "ward": None,
+            "bed": None,
+            "encounter_date": visit.visit_date,
+        }
+    raise PrintFormCodeError(
+        f"Unsupported encounter_type for documents: {encounter_type!r}. "
+        f"Expected one of {sorted(DOCUMENT_ENCOUNTER_TYPES)}."
+    )
+
+
+def _resolve_document_template(tenant_id: uuid.UUID, code: str) -> ClinicalDocumentTemplate:
+    """Fetch a tenant-scoped, active document template by code (404 otherwise)."""
+    tpl = ClinicalDocumentTemplate.objects.filter(
+        tenant_id=tenant_id, code=code, is_active=True
+    ).first()
+    if tpl is None:
+        raise PrintNotFoundError(f"Document template {code!r} not found for this tenant.")
+    return tpl
+
+
+def _resolve_document_html(
+    tenant_id: uuid.UUID, code: str, layout: str, language: str
+) -> str | None:
+    """Return authored ClinicalPrintTemplate HTML for a document code, if any.
+
+    Prefers an exact language+layout match, then language, then layout, then
+    any active row. Returns ``None`` when no non-empty authored HTML exists so
+    the caller can fall back to the generic stationery template.
+    """
+    base = ClinicalPrintTemplate.objects.filter(
+        tenant_id=tenant_id,
+        target_type=ClinicalPrintTemplate.TargetType.DOCUMENT,
+        target_code=code,
+        is_active=True,
+    )
+    for extra_filter in (
+        {"language": language, "layout": layout},
+        {"language": language},
+        {"layout": layout},
+        {},
+    ):
+        tpl = base.filter(**extra_filter).order_by("id").first()
+        if tpl and (tpl.html or "").strip():
+            return tpl.html
+    return None
+
+
+def render_document_html(
+    tenant_id: uuid.UUID,
+    code: str,
+    encounter_type: str,
+    encounter_id: int,
+    letterhead: bool,
+    language: str,
+) -> str:
+    """Render one consent/stationery/certificate document to an HTML string."""
+    doc = _resolve_document_template(tenant_id, code)
+    layout = "letterhead" if letterhead else "blank"
+    context: dict[str, Any] = {
+        "letterhead": get_letterhead_context(tenant_id, letterhead),
+        "language": language,
+        "document": doc,
+        "document_title": doc.name,
+        "document_code": doc.code,
+        "doc_type": doc.get_doc_type_display(),
+        "requires_signature": doc.requires_signature,
+        "page_break_before": False,
+        **_document_encounter_context(tenant_id, encounter_type, encounter_id),
+    }
+
+    authored_html = _resolve_document_html(tenant_id, code, layout, language)
+    if authored_html is not None:
+        # Authored templates are rendered through Django's template engine so
+        # they can use the same {{ patient_name }} / {{ uhid }} placeholders.
+        from django.template import Context, Template
+
+        return Template(authored_html).render(Context(context))
+
+    return render_to_string(DOCUMENT_GENERIC_TEMPLATE, context)
+
+
+def render_document_pdf(
+    tenant_id: uuid.UUID,
+    code: str,
+    encounter_type: str,
+    encounter_id: int,
+    letterhead: bool,
+    language: str,
+) -> bytes:
+    """Render one document to PDF bytes."""
+    html = render_document_html(
+        tenant_id, code, encounter_type, encounter_id, letterhead, language
+    )
+    return render_pdf_from_html(html)
+
+
+def merge_pdfs(pdfs: list[bytes]) -> bytes:
+    """Merge multiple PDF byte-strings into one, preserving page order.
+
+    pypdf is imported lazily so this module stays importable in environments
+    where the native PDF stack isn't installed (mirrors render_pdf_from_html).
+    """
+    from io import BytesIO
+
+    from pypdf import PdfReader, PdfWriter
+
+    writer = PdfWriter()
+    for pdf in pdfs:
+        reader = PdfReader(BytesIO(pdf))
+        for page in reader.pages:
+            writer.add_page(page)
+
+    buffer = BytesIO()
+    writer.write(buffer)
+    return buffer.getvalue()
+
+
+def render_document_batch_pdf(
+    tenant_id: uuid.UUID,
+    template_codes: list[str],
+    encounter_type: str,
+    encounter_id: int,
+    letterhead: bool,
+    language: str,
+) -> bytes:
+    """Render each selected document to its own PDF, then merge into one.
+
+    Order is preserved (documents print in the order the codes are supplied).
+    A single-document batch skips the merge and returns that PDF directly.
+    """
+    if encounter_type not in DOCUMENT_ENCOUNTER_TYPES:
+        raise PrintFormCodeError(
+            f"Unsupported encounter_type for documents: {encounter_type!r}. "
+            f"Expected one of {sorted(DOCUMENT_ENCOUNTER_TYPES)}."
+        )
+
+    pdfs = [
+        render_document_pdf(
+            tenant_id, code, encounter_type, encounter_id, letterhead, language
+        )
+        for code in template_codes
+    ]
+    if len(pdfs) == 1:
+        return pdfs[0]
+    return merge_pdfs(pdfs)
