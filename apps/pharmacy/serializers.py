@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.contrib.contenttypes.models import ContentType
 from common.mixins import TenantMixin
 from .models import (
     ProductCategory,
@@ -212,7 +213,8 @@ class PrescriptionItemSerializer(TenantMixin, serializers.ModelSerializer):
         from apps.pharmacy.models import PrescriptionItem
         model = PrescriptionItem
         fields = [
-            "id", "prescription", "drug_name", "dosage", "frequency",
+            "id", "prescription", "inventory_item", "source_row_key",
+            "drug_name", "dosage", "frequency",
             "duration", "quantity", "inventory_item_name",
             "created_at", "updated_at",
         ]
@@ -232,13 +234,87 @@ class PrescriptionSerializer(TenantMixin, serializers.ModelSerializer):
     doctor_user_id = serializers.UUIDField(
         source="created_by_user_id", read_only=True
     )
+    visit_id = serializers.IntegerField(required=False, allow_null=True)
+    encounter_type = serializers.CharField(required=False, write_only=True)
+    encounter_id = serializers.IntegerField(required=False, write_only=True)
+    encounter_type_label = serializers.SerializerMethodField()
+    encounter_id_value = serializers.IntegerField(source="object_id", read_only=True)
+    patient_id = serializers.SerializerMethodField()
+    patient_name = serializers.SerializerMethodField()
     items = PrescriptionItemSerializer(many=True, read_only=True)
 
     class Meta:
         from apps.pharmacy.models import Prescription
         model = Prescription
         fields = [
-            "id", "tenant_id", "visit_id", "doctor_user_id", "status",
-            "notes", "items", "created_at", "updated_at",
+            "id", "tenant_id", "visit_id", "encounter_type", "encounter_id",
+            "encounter_type_label", "encounter_id_value", "doctor_user_id", "status",
+            "notes", "patient_id", "patient_name", "items", "created_at", "updated_at",
         ]
         read_only_fields = ["id", "tenant_id", "created_at", "updated_at"]
+
+    ENCOUNTER_TYPE_ALIASES = {
+        "opd.visit": ("opd", "visit"),
+        "opd_visit": ("opd", "visit"),
+        "visit": ("opd", "visit"),
+        "ipd.admission": ("ipd", "admission"),
+        "ipd_admission": ("ipd", "admission"),
+        "admission": ("ipd", "admission"),
+    }
+
+    @classmethod
+    def resolve_encounter_type(cls, value):
+        normalized = str(value or "").strip().lower()
+        if normalized not in cls.ENCOUNTER_TYPE_ALIASES:
+            raise serializers.ValidationError(
+                "Unsupported encounter_type. Use 'opd.visit' or 'ipd.admission'."
+            )
+        app_label, model = cls.ENCOUNTER_TYPE_ALIASES[normalized]
+        try:
+            return ContentType.objects.get(app_label=app_label, model=model)
+        except ContentType.DoesNotExist as exc:
+            raise serializers.ValidationError(
+                f"Encounter content type '{app_label}.{model}' is not registered."
+            ) from exc
+
+    def validate(self, attrs):
+        encounter_type = attrs.pop("encounter_type", None)
+        encounter_id = attrs.pop("encounter_id", None)
+        visit_id = attrs.get("visit_id")
+
+        if encounter_type:
+            if not encounter_id:
+                raise serializers.ValidationError(
+                    {"encounter_id": "This field is required when encounter_type is provided."}
+                )
+            content_type = self.resolve_encounter_type(encounter_type)
+            attrs["content_type"] = content_type
+            attrs["object_id"] = encounter_id
+            if content_type.app_label == "opd" and content_type.model == "visit":
+                attrs["visit_id"] = encounter_id
+            elif visit_id:
+                raise serializers.ValidationError(
+                    {"visit_id": "Do not send visit_id for non-OPD encounters."}
+                )
+        elif visit_id:
+            attrs["content_type"] = self.resolve_encounter_type("opd.visit")
+            attrs["object_id"] = visit_id
+
+        return attrs
+
+    def get_encounter_type_label(self, obj):
+        if not obj.content_type_id:
+            return "opd.visit" if obj.visit_id else None
+        return f"{obj.content_type.app_label}.{obj.content_type.model}"
+
+    def _encounter_patient(self, obj):
+        encounter = getattr(obj, "encounter", None) or getattr(obj, "visit", None)
+        return getattr(encounter, "patient", None)
+
+    def get_patient_id(self, obj):
+        patient = self._encounter_patient(obj)
+        return getattr(patient, "id", None)
+
+    def get_patient_name(self, obj):
+        patient = self._encounter_patient(obj)
+        return getattr(patient, "full_name", None)

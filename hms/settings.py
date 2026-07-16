@@ -95,6 +95,7 @@ INSTALLED_APPS = [
 
     # Common - MUST be before local apps for proper auth setup
     'common',
+    'apps.auth.apps.AuthConfig',
 
     # Local apps
     # Note: accounts app removed - using SuperAdmin for authentication only

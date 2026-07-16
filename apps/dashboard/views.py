@@ -96,7 +96,15 @@ class DashboardSummaryView(APIView):
             f":{date_from or 'today'}:{date_to or 'today'}"
         )
         cache = CeliyoCache()
-        cached = cache.get(cache_key)
+        try:
+            cached = cache.get(cache_key)
+        except Exception as exc:
+            log.warning(
+                "dashboard_summary_cache_read_failed",
+                tenant_id=str(tenant_id),
+                error=str(exc),
+            )
+            cached = None
         if cached is not None:
             return Response(cached)
 

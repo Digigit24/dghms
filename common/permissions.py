@@ -12,6 +12,7 @@ from rest_framework import permissions
 
 from .responses import error_response
 from . import error_codes
+from . import permission_evaluator
 
 
 class HMSPermissions:
@@ -66,61 +67,31 @@ class HMSPermissions:
     WEBHOOKS_DELETE = "hms.webhooks.delete"
 
 
+def flatten_permissions(permissions, prefix=""):
+    """Flatten nested role JSON into JWT/evaluator-style dotted permission keys."""
+    flattened = {}
+    for key, value in (permissions or {}).items():
+        dotted_key = f"{prefix}.{key}" if prefix else key
+        if isinstance(value, dict):
+            flattened.update(flatten_permissions(value, dotted_key))
+        else:
+            flattened[dotted_key] = value
+    return flattened
+
+
 def check_permission(request, permission_key, resource_owner_id=None, resource_team_id=None):
     """Check if the request has ``permission_key``.
 
     Supports boolean and scope-based values (``"all"``, ``"team"``, ``"own"``).
     Super-admins bypass all permission checks — they have implicit access to everything.
     """
-    # Super-admins have all permissions by default; skip explicit checks.
-    if getattr(request, "is_super_admin", False):
-        return True
-
-    if not hasattr(request, "permissions"):
-        return False
-
-    permissions_dict = request.permissions
-    permission_value = _resolve_permission(permissions_dict, permission_key)
-
-    if permission_value is None:
-        return False
-
-    if isinstance(permission_value, bool):
-        return permission_value
-
-    if isinstance(permission_value, str):
-        if permission_value == "all":
-            return True
-        if permission_value == "team":
-            # Placeholder: future team scoping.
-            return True
-        if permission_value == "own":
-            if resource_owner_id is None:
-                return True
-            return str(resource_owner_id) == str(request.user_id)
-
-    return False
+    return permission_evaluator.has_permission(request, permission_key, owner_id=resource_owner_id)
 
 
 def _resolve_permission(permissions_dict, permission_key):
-    """Resolve a permission value from flat or nested permission payloads."""
-    if not isinstance(permissions_dict, dict):
-        return None
-
-    if permission_key in permissions_dict:
-        return permissions_dict[permission_key]
-
-    # Support legacy nested structure: hms -> patients -> view
-    parts = permission_key.split(".")
-    if len(parts) == 3:
-        namespace, module, action = parts
-        nested = permissions_dict.get(namespace, {})
-        if isinstance(nested, dict):
-            module_perms = nested.get(module, {})
-            if isinstance(module_perms, dict):
-                return module_perms.get(action)
-
-    return None
+    """TEMPORARY compatibility reader; evaluator owns interpretation."""
+    subject = type("PermissionSubject", (), {"permissions": permissions_dict})()
+    return permission_evaluator.read_permission_value(subject, permission_key)
 
 
 def permission_required(permission_key):
@@ -147,6 +118,7 @@ def get_queryset_for_permission(queryset, request, view_permission_key, owner_fi
 
     Super-admins receive the full tenant-scoped queryset without scope filtering.
     """
+    return permission_evaluator.get_queryset_for_permission(request, view_permission_key, queryset)
     if not hasattr(request, "tenant_id"):
         return queryset.none()
 

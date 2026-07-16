@@ -4,6 +4,7 @@ import hashlib
 import json
 import structlog
 import uuid
+from django.contrib.contenttypes.models import ContentType
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import transaction
 from django.db.models import Q
@@ -78,6 +79,14 @@ from .serializers import (
 )
 from .tasks import create_clinical_audit_log_task
 
+
+CLINICAL_ENCOUNTER_CONTENT_TYPES = {
+    "opd_visit": ("opd", "visit"),
+    "opd.visit": ("opd", "visit"),
+    "ipd_admission": ("ipd", "admission"),
+    "ipd.admission": ("ipd", "admission"),
+}
+
 logger = structlog.get_logger(__name__)
 
 _SYSTEM_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000000")
@@ -122,6 +131,143 @@ def _field_value_to_plain(value_obj):
     if value_obj.picklist_item_id:
         return value_obj.picklist_item.label
     return value_obj.value_text
+
+
+def _prescription_row_key(row, index):
+    if not isinstance(row, dict):
+        return f"row:{index}"
+    return str(
+        row.get("row_id")
+        or row.get("id")
+        or row.get("client_id")
+        or f"{index}:{row.get('medicine_name') or row.get('medicine') or row.get('drug_name') or ''}"
+    )
+
+
+def _grid_quantity(value):
+    from decimal import Decimal, InvalidOperation
+
+    if value in (None, ""):
+        return Decimal("1.00")
+    try:
+        quantity = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return Decimal("1.00")
+    return quantity if quantity > 0 else Decimal("1.00")
+
+
+def _sync_prescription_grid_to_pharmacy(record, field, rows, user_id):
+    """Reconcile a prescription GRID field into pharmacy Prescription/PrescriptionItem."""
+    if field.field_type != ClinicalFormField.FieldType.GRID:
+        return None
+    if (field.section.config or {}).get("role") != "prescription":
+        return None
+    if rows is None:
+        rows = []
+    if not isinstance(rows, list):
+        rows = []
+
+    from apps.pharmacy.models import Prescription, PrescriptionItem
+    from apps.pharmacy.serializers import PrescriptionSerializer
+
+    encounter_type = record.encounter_type
+    if encounter_type not in CLINICAL_ENCOUNTER_CONTENT_TYPES:
+        return None
+
+    content_type = PrescriptionSerializer.resolve_encounter_type(encounter_type)
+    defaults = {
+        "tenant_id": record.tenant_id,
+        "content_type": content_type,
+        "object_id": record.encounter_id,
+        "created_by_user_id": user_id,
+    }
+    if content_type.app_label == "opd" and content_type.model == "visit":
+        defaults["visit_id"] = record.encounter_id
+
+    prescription = (
+        Prescription.objects.filter(
+            tenant_id=record.tenant_id,
+            content_type=content_type,
+            object_id=record.encounter_id,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    if prescription is None:
+        prescription = Prescription.objects.create(**defaults)
+    if prescription.visit_id is None and defaults.get("visit_id"):
+        prescription.visit_id = defaults["visit_id"]
+        prescription.save(update_fields=["visit", "updated_at"])
+
+    existing_items = list(
+        PrescriptionItem.objects.filter(
+            tenant_id=record.tenant_id,
+            prescription=prescription,
+        ).order_by("created_at", "id")
+    )
+    existing_by_key = {}
+    for index, item in enumerate(existing_items):
+        if item.source_row_key:
+            existing_by_key[item.source_row_key] = item
+        existing_by_key[f"{index}:{item.medicine_name or ''}"] = item
+
+    seen_item_ids = set()
+    for index, raw_row in enumerate(rows):
+        row = raw_row if isinstance(raw_row, dict) else {}
+        medicine_name = (
+            row.get("medicine_name")
+            or row.get("medicine")
+            or row.get("drug_name")
+            or row.get("name")
+            or ""
+        )
+        medicine_name = str(medicine_name).strip()
+        if not medicine_name:
+            continue
+
+        row_key = _prescription_row_key(row, index)
+        fallback_key = f"{index}:{medicine_name}"
+        item = existing_by_key.get(row_key) or existing_by_key.get(fallback_key)
+        defaults = {
+            "inventory_item": None,
+            "source_row_key": row_key,
+            "medicine_name": medicine_name,
+            "dosage": str(row.get("dosage") or row.get("dose") or ""),
+            "frequency": str(row.get("frequency") or ""),
+            "duration": str(row.get("duration") or ""),
+            "quantity": _grid_quantity(row.get("quantity")),
+        }
+        if item is None:
+            item = PrescriptionItem.objects.create(
+                tenant_id=record.tenant_id,
+                prescription=prescription,
+                **defaults,
+            )
+        elif not item.is_dispensed:
+            for attr, value in defaults.items():
+                setattr(item, attr, value)
+            item.save(
+                update_fields=[
+                    "inventory_item",
+                    "source_row_key",
+                    "medicine_name",
+                    "dosage",
+                    "frequency",
+                    "duration",
+                    "quantity",
+                    "updated_at",
+                ]
+            )
+        seen_item_ids.add(item.id)
+
+    PrescriptionItem.objects.filter(
+        tenant_id=record.tenant_id,
+        prescription=prescription,
+    ).exclude(id__in=seen_item_ids).filter(is_dispensed=False).delete()
+
+    prescription.recalculate_status()
+    prescription.save(update_fields=["status", "updated_at"])
+    return prescription
 
 
 # ---------------------------------------------------------------------------
@@ -1422,6 +1568,12 @@ class ClinicalRecordViewSet(
                         **coerced,
                     },
                 )
+                _sync_prescription_grid_to_pharmacy(
+                    record=record,
+                    field=field,
+                    rows=value_obj.value_json,
+                    user_id=user_id,
+                )
                 upserted.append(value_obj)
 
         _audit(
@@ -1435,6 +1587,141 @@ class ClinicalRecordViewSet(
         return action_response(
             message=f"{len(upserted)} field value(s) upserted.",
             data=ClinicalFieldValueSerializer(upserted, many=True).data,
+        )
+
+    @extend_schema(
+        summary="Create diagnostic orders from advised investigations",
+        description=(
+            "Idempotently creates one investigation Requisition for this clinical record's "
+            "encounter and DiagnosticOrder rows for the supplied investigation_ids."
+        ),
+        tags=["Clinical Records"],
+    )
+    @action(detail=True, methods=["post"], url_path="order-investigations")
+    def order_investigations(self, request, pk=None):
+        """Convert selected investigation IDs into actionable lab orders."""
+        if not check_permission(request, "hms.diagnostics.order"):
+            raise PermissionDenied("No permission to order diagnostics.")
+
+        record = self.get_object()
+        raw_ids = request.data.get("investigation_ids", [])
+        if not isinstance(raw_ids, list) or not raw_ids:
+            return error_response(
+                code=error_codes.INVALID_PAYLOAD,
+                message="investigation_ids must be a non-empty list.",
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            investigation_ids = sorted({int(value) for value in raw_ids})
+        except (TypeError, ValueError):
+            return error_response(
+                code=error_codes.INVALID_PAYLOAD,
+                message="investigation_ids must contain integer IDs.",
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        encounter_key = str(record.encounter_type or "").lower()
+        if encounter_key not in CLINICAL_ENCOUNTER_CONTENT_TYPES:
+            return error_response(
+                code=error_codes.INVALID_PAYLOAD,
+                message=f"Unsupported encounter_type '{record.encounter_type}'.",
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from apps.diagnostics.models import DiagnosticOrder, Investigation, Requisition
+        from apps.diagnostics.serializers import RequisitionSerializer
+
+        app_label, model_name = CLINICAL_ENCOUNTER_CONTENT_TYPES[encounter_key]
+        content_type = ContentType.objects.get(app_label=app_label, model=model_name)
+        try:
+            encounter = content_type.get_object_for_this_type(
+                id=record.encounter_id,
+                tenant_id=request.tenant_id,
+            )
+        except content_type.model_class().DoesNotExist:
+            return error_response(
+                code=error_codes.RECORD_NOT_FOUND,
+                message="Encounter not found.",
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        patient = getattr(encounter, "patient", None)
+        if patient is None:
+            return error_response(
+                code=error_codes.INVALID_PAYLOAD,
+                message="Encounter does not expose a patient.",
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        investigations = {
+            investigation.id: investigation
+            for investigation in Investigation.objects.filter(
+                tenant_id=request.tenant_id,
+                id__in=investigation_ids,
+                is_active=True,
+            )
+        }
+        missing = sorted(set(investigation_ids) - set(investigations.keys()))
+        if missing:
+            return error_response(
+                code=error_codes.RECORD_NOT_FOUND,
+                message=f"Investigation(s) not found: {missing}.",
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        with transaction.atomic():
+            requisition = (
+                Requisition.objects.filter(
+                    tenant_id=request.tenant_id,
+                    content_type=content_type,
+                    object_id=record.encounter_id,
+                    requisition_type="investigation",
+                )
+                .exclude(status="cancelled")
+                .order_by("-created_at")
+                .first()
+            )
+            if requisition is None:
+                requisition = Requisition.objects.create(
+                    tenant_id=request.tenant_id,
+                    content_type=content_type,
+                    object_id=record.encounter_id,
+                    requisition_type="investigation",
+                    patient=patient,
+                    requesting_doctor_id=request.user_id,
+                    clinical_notes=f"Created from clinical record {record.id}",
+                )
+
+            existing_ids = set(
+                DiagnosticOrder.objects.filter(
+                    tenant_id=request.tenant_id,
+                    requisition=requisition,
+                    investigation_id__in=investigation_ids,
+                ).values_list("investigation_id", flat=True)
+            )
+            created_orders = []
+            for investigation_id in investigation_ids:
+                if investigation_id in existing_ids:
+                    continue
+                investigation = investigations[investigation_id]
+                created_orders.append(
+                    DiagnosticOrder.objects.create(
+                        tenant_id=request.tenant_id,
+                        requisition=requisition,
+                        investigation=investigation,
+                        price=investigation.base_charge,
+                        status="pending",
+                    )
+                )
+
+        return action_response(
+            message=f"{len(created_orders)} investigation order(s) created.",
+            data={
+                "requisition": RequisitionSerializer(requisition).data,
+                "created_order_ids": [order.id for order in created_orders],
+                "existing_investigation_ids": sorted(existing_ids),
+            },
         )
 
     # Picklist codes shared between OPD and IPD forms for cross-encounter

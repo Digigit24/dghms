@@ -8,6 +8,7 @@ the JWT middleware to provide consistent authentication across all API endpoints
 from rest_framework import authentication, permissions
 from django.contrib.auth.models import AnonymousUser
 import logging
+from . import permission_evaluator
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +153,8 @@ class HMSPermission(permissions.BasePermission):
         if not hms_module or not permission_name:
             return False
 
+        return permission_evaluator.has_permission(request, f"hms.{hms_module}.{permission_name}", obj=obj)
+
         # Get permission value
         permission_value = self.get_permission_value(request, hms_module, permission_name)
 
@@ -217,6 +220,8 @@ class HMSPermission(permissions.BasePermission):
         Returns:
             bool: True if permission granted
         """
+        return permission_evaluator.has_permission(request, f"hms.{module}.{permission_name}")
+
         def _is_granted(value) -> bool:
             if isinstance(value, bool):
                 return value
@@ -243,26 +248,7 @@ class HMSPermission(permissions.BasePermission):
 
         Returns the permission value or None if not found.
         """
-        if not hasattr(request.user, 'permissions'):
-            return None
-
-        user_permissions = request.user.permissions
-
-        # SuperAdmin merges role permissions into flat JWT keys:
-        # {"hms.patients.view": "all"}. Older/session code may still carry
-        # nested JSON: {"hms": {"patients": {"view": "all"}}}. Support both.
-        flat_key = f"hms.{module}.{permission_name}"
-        if flat_key in user_permissions:
-            return user_permissions.get(flat_key)
-
-        legacy_admin_key = f"admin.{module}.{permission_name}"
-        if legacy_admin_key in user_permissions:
-            return user_permissions.get(legacy_admin_key)
-
-        hms_perms = user_permissions.get('hms', {})
-        module_perms = hms_perms.get(module, {})
-
-        return module_perms.get(permission_name)
+        return permission_evaluator.read_permission_value(request, f"hms.{module}.{permission_name}")
 
     def check_ownership(self, request, obj):
         """

@@ -1,5 +1,6 @@
 from celery.result import AsyncResult
 from django.http import HttpResponse
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
@@ -541,6 +542,44 @@ class DiagnosticOrderViewSet(viewsets.ModelViewSet):
         if hasattr(self.request, 'tenant_id'):
             return qs.filter(tenant_id=self.request.tenant_id)
         return qs
+
+    @action(detail=False, methods=['get'], url_path='lab-dashboard')
+    def lab_dashboard(self, request):
+        """Convenience list for lab work queues with patient/search/status filters."""
+        qs = self.get_queryset().select_related(
+            'investigation',
+            'requisition__patient',
+            'requisition__content_type',
+        )
+
+        status_param = request.query_params.get('status')
+        if status_param:
+            qs = qs.filter(status=status_param)
+        else:
+            qs = qs.exclude(status__in=['completed', 'cancelled'])
+
+        patient_id = request.query_params.get('patient')
+        if patient_id:
+            qs = qs.filter(requisition__patient_id=patient_id)
+
+        search = request.query_params.get('search')
+        if search:
+            qs = qs.filter(
+                Q(investigation__name__icontains=search)
+                | Q(investigation__code__icontains=search)
+                | Q(requisition__patient__patient_id__icontains=search)
+                | Q(requisition__patient__first_name__icontains=search)
+                | Q(requisition__patient__middle_name__icontains=search)
+                | Q(requisition__patient__last_name__icontains=search)
+                | Q(requisition__patient__mobile_primary__icontains=search)
+            )
+
+        qs = qs.order_by('-created_at')
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        return Response({'success': True, 'data': self.get_serializer(qs, many=True).data})
 
 
 class LabReportViewSet(viewsets.ModelViewSet):

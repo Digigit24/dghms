@@ -1,6 +1,8 @@
 from django.db import models
 from django.core.validators import MinValueValidator
 from decimal import Decimal
+from django.contrib.contenttypes.fields import GenericForeignKey
+from django.contrib.contenttypes.models import ContentType
 from django.contrib.postgres.search import SearchVector, SearchVectorField
 from django.contrib.postgres.indexes import GinIndex
 
@@ -248,7 +250,7 @@ class PharmacyOrderItem(models.Model):
 
 
 class Prescription(models.Model):
-    """Clinical prescription tied to an OPD visit."""
+    """Clinical prescription tied to an OPD/IPD encounter."""
 
     STATUS_CHOICES = [
         ('pending', 'Pending'),
@@ -262,8 +264,23 @@ class Prescription(models.Model):
         'opd.Visit',
         on_delete=models.CASCADE,
         related_name='prescriptions',
+        null=True,
+        blank=True,
         help_text="OPD visit this prescription belongs to",
     )
+    content_type = models.ForeignKey(
+        ContentType,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        help_text="Type of encounter (OPD Visit or IPD Admission)",
+    )
+    object_id = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="ID of the encounter record",
+    )
+    encounter = GenericForeignKey("content_type", "object_id")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     notes = models.TextField(blank=True, help_text="General prescription notes")
     created_by_user_id = models.UUIDField(null=True, blank=True)
@@ -276,11 +293,29 @@ class Prescription(models.Model):
         indexes = [
             models.Index(fields=['tenant_id'], name='pharmacy_pr_tenant__ca0aef_idx'),
             models.Index(fields=['tenant_id', 'visit'], name='pharmacy_pr_tenant__ee0c13_idx'),
+            models.Index(fields=['tenant_id', 'content_type', 'object_id'], name='pharmacy_pr_tenant__enc_idx'),
             models.Index(fields=['tenant_id', 'status'], name='pharmacy_pr_tenant__34ac52_idx'),
         ]
 
     def __str__(self):
-        return f"Prescription {self.id} for visit {self.visit_id}"
+        if self.visit_id:
+            return f"Prescription {self.id} for visit {self.visit_id}"
+        return f"Prescription {self.id} for encounter {self.content_type_id}:{self.object_id}"
+
+    def recalculate_status(self):
+        """Recalculate aggregate prescription status from line item dispense state."""
+        items = list(self.items.all())
+        if not items:
+            self.status = 'pending'
+            return self.status
+        dispensed_count = sum(1 for item in items if item.is_dispensed)
+        if dispensed_count == 0:
+            self.status = 'pending'
+        elif dispensed_count == len(items):
+            self.status = 'dispensed'
+        else:
+            self.status = 'partially_dispensed'
+        return self.status
 
 
 class PrescriptionItem(models.Model):
@@ -304,6 +339,11 @@ class PrescriptionItem(models.Model):
         max_length=255,
         blank=True,
         help_text="Snapshot of inventory item name at prescription time",
+    )
+    source_row_key = models.CharField(
+        max_length=128,
+        blank=True,
+        help_text="Stable clinical grid row key used to reconcile manual prescription rows",
     )
     dosage = models.CharField(max_length=100, blank=True)
     frequency = models.CharField(max_length=100, blank=True)
@@ -334,6 +374,7 @@ class PrescriptionItem(models.Model):
             models.Index(fields=['tenant_id'], name='pharmacy_pr_tenant__eafb3e_idx'),
             models.Index(fields=['tenant_id', 'prescription'], name='pharmacy_pr_tenant__8a3b6e_idx'),
             models.Index(fields=['tenant_id', 'inventory_item'], name='pharmacy_pr_tenant__58cd22_idx'),
+            models.Index(fields=['tenant_id', 'prescription', 'source_row_key'], name='pharmacy_pr_tenant__row_idx'),
         ]
 
     def __str__(self):

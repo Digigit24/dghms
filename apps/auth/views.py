@@ -23,7 +23,8 @@ from apps.auth.serializers import (
     UserListFilterSerializer, RoleAssignmentSerializer,
     RoleSerializer, RoleListFilterSerializer
 )
-from common.hms_permission_schema import HMS_PERMISSION_SCHEMA
+from common.generated_permissions import PERMISSION_SCHEMA as HMS_PERMISSION_SCHEMA, PERMISSION_CATALOG
+from .models import RolePermissionAudit
 
 import logging
 
@@ -746,6 +747,13 @@ class RoleViewSet(viewsets.ViewSet):
     """
     permission_classes = [IsAuthenticated]
 
+    def _audit(self, request, action, role_id=None, before=None, after=None):
+        RolePermissionAudit.objects.create(
+            tenant_id=request.tenant_id, role_id=role_id,
+            actor_user_id=getattr(request, 'user_id', None), action=action,
+            before=before or {}, after=after or {},
+        )
+
     def _has_admin_permission(self, request, action_name):
         if getattr(request.user, 'is_super_admin', False):
             return True
@@ -818,6 +826,7 @@ class RoleViewSet(viewsets.ViewSet):
                 role_data=serializer.to_superadmin_payload(),
                 tenant_id=request.tenant_id
             )
+            self._audit(request, 'create', result.get('id'), after=result.get('permissions', {}))
             return Response(result, status=status.HTTP_201_CREATED)
         except SuperAdminAPIException as e:
             return Response(
@@ -860,6 +869,7 @@ class RoleViewSet(viewsets.ViewSet):
                 role_data=serializer.to_superadmin_payload(),
                 partial=partial
             )
+            self._audit(request, 'update', pk, before=role.get('permissions', {}), after=result.get('permissions', {}))
             return Response(result, status=status.HTTP_200_OK)
         except SuperAdminAPIException as e:
             return Response(
@@ -875,6 +885,7 @@ class RoleViewSet(viewsets.ViewSet):
                 return Response({'error': 'Role not found in your tenant'}, status=status.HTTP_404_NOT_FOUND)
 
             client.delete_role(role_id=pk)
+            self._audit(request, 'delete', pk, before=role.get('permissions', {}))
             return Response(status=status.HTTP_204_NO_CONTENT)
         except SuperAdminAPIException as e:
             return Response(
@@ -885,6 +896,33 @@ class RoleViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['get'])
     def permissions_schema(self, request):
         return Response(HMS_PERMISSION_SCHEMA, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'])
+    def catalog(self, request):
+        """Tenant-role-admin inventory; generated directly from the catalog."""
+        if not self._has_admin_permission(request, 'view'):
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("You don't have permission to view the permission catalog")
+        return Response({"permissions": PERMISSION_CATALOG}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'])
+    def audit_log(self, request):
+        if not self._has_admin_permission(request, 'view'):
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("You don't have permission to view role audit history")
+        rows = RolePermissionAudit.objects.filter(tenant_id=request.tenant_id).values('role_id', 'actor_user_id', 'action', 'before', 'after', 'created_at')
+        return Response({"results": list(rows[:200])})
+
+    @action(detail=True, methods=['get'])
+    def simulate(self, request, pk=None):
+        if not self._has_admin_permission(request, 'view'):
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("You don't have permission to simulate role access")
+        role = get_superadmin_client(request).get_role(role_id=pk)
+        if not self._ensure_same_tenant(request, role):
+            return Response({'error': 'Role not found in your tenant'}, status=status.HTTP_404_NOT_FOUND)
+        from common.permissions import flatten_permissions
+        return Response({"role_id": pk, "permissions": flatten_permissions(role.get('permissions', {}))})
 
     @action(detail=True, methods=['get'])
     def members(self, request, pk=None):
