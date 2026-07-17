@@ -16,13 +16,15 @@ import datetime
 from typing import Any, Callable, Optional
 
 import structlog
+from django.db.models import Q
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
+from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from common.cache import CeliyoCache
-from common.permissions import IsTenantAuthenticated
+from common.permissions import IsTenantAuthenticated, check_permission
 
 log = structlog.get_logger(__name__)
 
@@ -227,3 +229,193 @@ class DashboardSummaryView(APIView):
                 error=str(exc),
             )
         return Response(result)
+
+
+def _positive_int(value: Optional[str], default: int, max_value: Optional[int] = None) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    parsed = max(parsed, 1)
+    if max_value is not None:
+        parsed = min(parsed, max_value)
+    return parsed
+
+
+def _patient_name(patient) -> str:
+    if patient is None:
+        return ""
+    full_name = getattr(patient, "full_name", "")
+    if full_name:
+        return full_name
+    parts = [
+        getattr(patient, "first_name", ""),
+        getattr(patient, "middle_name", ""),
+        getattr(patient, "last_name", ""),
+    ]
+    return " ".join(part for part in parts if part).strip()
+
+
+def _doctor_name(doctor) -> str:
+    if doctor is None:
+        return ""
+    first_last = " ".join(
+        part
+        for part in [
+            getattr(doctor, "first_name", ""),
+            getattr(doctor, "last_name", ""),
+        ]
+        if part
+    ).strip()
+    if first_last:
+        return first_last
+    return (
+        getattr(doctor, "full_name", "")
+        or getattr(doctor, "name", "")
+        or str(getattr(doctor, "user_id", "") or "")
+    )
+
+
+class RecentEncountersView(APIView):
+    """GET /api/dashboard/recent-encounters/ — combined OPD/IPD encounter list."""
+
+    permission_classes = [IsTenantAuthenticated]
+
+    @extend_schema(
+        summary="Recent OPD/IPD encounters",
+        description=(
+            "Tenant-scoped combined encounter feed for pharmacy/lab dashboards. "
+            "Rows include encounter_type, encounter_id, patient_id, patient_name, "
+            "number, doctor_name, date, and status."
+        ),
+        parameters=[
+            OpenApiParameter(name="search", type=str, required=False),
+            OpenApiParameter(name="date_from", type=str, required=False),
+            OpenApiParameter(name="date_to", type=str, required=False),
+            OpenApiParameter(name="page", type=int, required=False),
+            OpenApiParameter(name="page_size", type=int, required=False),
+        ],
+        responses={200: OpenApiResponse(description="Combined recent encounters")},
+        tags=["Dashboard"],
+    )
+    def get(self, request):
+        if not check_permission(request, "hms.patients.view"):
+            return Response(
+                {
+                    "success": False,
+                    "error": {
+                        "code": "PERMISSION_DENIED",
+                        "message": "No permission to view patients.",
+                    },
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        tenant_id = request.tenant_id
+        today = datetime.date.today()
+        date_from = _parse_date(request.query_params.get("date_from")) or (
+            today - datetime.timedelta(days=30)
+        )
+        date_to = _parse_date(request.query_params.get("date_to")) or today
+        if date_from > date_to:
+            date_from, date_to = date_to, date_from
+
+        search = (request.query_params.get("search") or "").strip()
+        page = _positive_int(request.query_params.get("page"), 1)
+        page_size = _positive_int(request.query_params.get("page_size"), 25, 100)
+
+        from apps.doctors.models import DoctorProfile
+        from apps.ipd.models import Admission
+        from apps.opd.models import Visit
+
+        opd_qs = Visit.objects.filter(
+            tenant_id=tenant_id,
+            visit_date__gte=date_from,
+            visit_date__lte=date_to,
+        ).select_related("patient", "doctor")
+        if search:
+            opd_qs = opd_qs.filter(
+                Q(visit_number__icontains=search)
+                | Q(patient__patient_id__icontains=search)
+                | Q(patient__first_name__icontains=search)
+                | Q(patient__middle_name__icontains=search)
+                | Q(patient__last_name__icontains=search)
+                | Q(patient__mobile_primary__icontains=search)
+            )
+
+        ipd_qs = Admission.objects.filter(
+            tenant_id=tenant_id,
+            admission_date__date__gte=date_from,
+            admission_date__date__lte=date_to,
+        ).select_related("patient")
+        if search:
+            ipd_qs = ipd_qs.filter(
+                Q(admission_id__icontains=search)
+                | Q(patient__patient_id__icontains=search)
+                | Q(patient__first_name__icontains=search)
+                | Q(patient__middle_name__icontains=search)
+                | Q(patient__last_name__icontains=search)
+                | Q(patient__mobile_primary__icontains=search)
+            )
+
+        doctor_ids = [admission.doctor_id for admission in ipd_qs if admission.doctor_id]
+        ipd_doctors = {
+            doctor.user_id: doctor
+            for doctor in DoctorProfile.objects.filter(
+                tenant_id=tenant_id,
+                user_id__in=doctor_ids,
+            )
+        }
+
+        rows = []
+        for visit in opd_qs:
+            visit_date = visit.visit_date
+            rows.append(
+                {
+                    "_sort_date": visit_date,
+                    "encounter_type": "opd",
+                    "encounter_id": visit.id,
+                    "patient_id": visit.patient_id,
+                    "patient_name": _patient_name(visit.patient),
+                    "number": visit.visit_number,
+                    "doctor_name": _doctor_name(visit.doctor),
+                    "date": visit_date.isoformat() if visit_date else None,
+                    "status": visit.status,
+                }
+            )
+
+        for admission in ipd_qs:
+            admission_dt = admission.admission_date
+            sort_date = admission_dt.date() if hasattr(admission_dt, "date") else admission_dt
+            rows.append(
+                {
+                    "_sort_date": sort_date,
+                    "encounter_type": "ipd",
+                    "encounter_id": admission.id,
+                    "patient_id": admission.patient_id,
+                    "patient_name": _patient_name(admission.patient),
+                    "number": admission.admission_id,
+                    "doctor_name": _doctor_name(ipd_doctors.get(admission.doctor_id)),
+                    "date": admission_dt.isoformat() if admission_dt else None,
+                    "status": admission.status,
+                }
+            )
+
+        rows.sort(key=lambda row: row["_sort_date"] or datetime.date.min, reverse=True)
+        count = len(rows)
+        start = (page - 1) * page_size
+        paged_rows = rows[start : start + page_size]
+        for row in paged_rows:
+            row.pop("_sort_date", None)
+
+        return Response(
+            {
+                "success": True,
+                "data": {
+                    "results": paged_rows,
+                    "count": count,
+                    "page": page,
+                    "page_size": page_size,
+                },
+            }
+        )

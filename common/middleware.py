@@ -7,6 +7,7 @@ admin.celiyo.com and attaches JWT claims to the request.
 endpoints for audit purposes.
 """
 
+import queue
 import threading
 
 import jwt
@@ -23,6 +24,60 @@ logger = structlog.get_logger(__name__)
 # Thread-local storage for tenant_id and request (used by auth backends and
 # any code that needs request context outside of a view).
 _thread_locals = threading.local()
+
+# Publishing a Celery task performs broker IO.  Keep that IO off the request
+# thread and bound the queue so an unavailable broker cannot grow memory
+# without limit.  The daemon worker is started lazily on the first audit event.
+_activity_log_queue = queue.Queue(maxsize=256)
+_activity_log_worker_started = False
+_activity_log_worker_lock = threading.Lock()
+
+
+def _publish_activity_log_entries():
+    while True:
+        payload = _activity_log_queue.get()
+        try:
+            from apps.activity.tasks import write_activity_log_entry
+
+            # A background worker may retry later; publishing itself should not
+            # run Celery's long broker-reconnect loop.
+            write_activity_log_entry.apply_async(kwargs=payload, retry=False)
+        except Exception as exc:
+            logger.error(
+                "activity_log_enqueue_failed",
+                path=payload.get("path"),
+                error=str(exc),
+            )
+        finally:
+            _activity_log_queue.task_done()
+
+
+def _ensure_activity_log_worker():
+    global _activity_log_worker_started
+    if _activity_log_worker_started:
+        return
+    with _activity_log_worker_lock:
+        if _activity_log_worker_started:
+            return
+        worker = threading.Thread(
+            target=_publish_activity_log_entries,
+            name="activity-log-publisher",
+            daemon=True,
+        )
+        worker.start()
+        _activity_log_worker_started = True
+
+
+def _enqueue_activity_log(payload):
+    _ensure_activity_log_worker()
+    try:
+        _activity_log_queue.put_nowait(payload)
+    except queue.Full:
+        logger.warning(
+            "activity_log_queue_full",
+            path=payload.get("path"),
+            maxsize=_activity_log_queue.maxsize,
+        )
 
 
 def get_current_tenant_id():
@@ -350,25 +405,17 @@ class ActivityLogMiddleware(MiddlewareMixin):
         user_id = getattr(request, "user_id", None)
         tenant_id = getattr(request, "tenant_id", None)
 
-        # Lazy import to avoid circular dependencies at startup.
-        try:
-            from apps.activity.tasks import write_activity_log_entry
-
-            write_activity_log_entry.delay(
-                tenant_id=str(tenant_id) if tenant_id else None,
-                user_id=str(user_id) if user_id else None,
-                method=request.method,
-                path=path,
-                status_code=response.status_code,
-                ip_address=request.META.get("REMOTE_ADDR"),
-                user_agent=request.META.get("HTTP_USER_AGENT", ""),
-            )
-        except Exception as exc:
-            logger.error(
-                "activity_log_enqueue_failed",
-                path=path,
-                error=str(exc),
-            )
+        _enqueue_activity_log(
+            {
+                "tenant_id": str(tenant_id) if tenant_id else None,
+                "user_id": str(user_id) if user_id else None,
+                "method": request.method,
+                "path": path,
+                "status_code": response.status_code,
+                "ip_address": request.META.get("REMOTE_ADDR"),
+                "user_agent": request.META.get("HTTP_USER_AGENT", ""),
+            }
+        )
 
         return response
 

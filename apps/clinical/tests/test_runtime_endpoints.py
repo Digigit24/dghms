@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 import jwt
 from django.conf import settings
+from django.test import SimpleTestCase
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -18,6 +19,33 @@ from apps.clinical.models import (
     ClinicalRecord,
     FormSectionPlacement,
 )
+from apps.clinical.serializers import FieldValueBulkUpsertSerializer
+
+
+class ClinicalJsonValueShapeTests(SimpleTestCase):
+    def test_bulk_upsert_accepts_option_notes_and_body_diagram_json(self):
+        serializer = FieldValueBulkUpsertSerializer(data={
+            "values": [
+                {
+                    "field_id": 1,
+                    "value_json": {
+                        "selected": ["slr"],
+                        "notes": {"slr": "positive at 45 degrees"},
+                    },
+                },
+                {
+                    "field_id": 2,
+                    "value_json": [
+                        {"x": 42.5, "y": 18.0, "view": "front", "note": "tender"}
+                    ],
+                },
+            ]
+        })
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        values = serializer.validated_data["values"]
+        self.assertEqual(values[0]["value_json"]["selected"], ["slr"])
+        self.assertEqual(values[1]["value_json"][0]["view"], "front")
 
 
 def make_token(tenant_id, user_id):

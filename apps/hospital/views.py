@@ -14,6 +14,7 @@ from .serializers import (
     HospitalUpdateSerializer,
     HospitalNavStyleSerializer,
     HospitalLetterheadSerializer,
+    with_letterhead_defaults,
 )
 
 log = structlog.get_logger(__name__)
@@ -298,52 +299,163 @@ def _validate_letterhead_config(payload: dict):
     if not isinstance(text_lines, list):
         return None, {"message": "'text_lines' must be a list.", "field": "text_lines"}
 
-    line_required_keys = {"id", "text", "style", "enabled", "order"}
-    for idx, line in enumerate(text_lines):
+    def validate_styled_lines(lines, field_name):
+        if not isinstance(lines, list):
+            return {
+                "message": f"'{field_name}' must be a list.",
+                "field": field_name,
+            }
+
+        line_required_keys = {"id", "text", "style", "enabled", "order"}
+        for idx, line in enumerate(lines):
+            if not isinstance(line, dict):
+                return {
+                    "message": f"'{field_name}[{idx}]' must be an object.",
+                    "field": f"{field_name}[{idx}]",
+                }
+            missing_line_keys = line_required_keys - set(line.keys())
+            if missing_line_keys:
+                return {
+                    "message": (
+                        f"'{field_name}[{idx}]' is missing required keys: "
+                        f"{sorted(missing_line_keys)}."
+                    ),
+                    "field": f"{field_name}[{idx}]",
+                }
+            if not isinstance(line["id"], str) or not line["id"].strip():
+                return {
+                    "message": f"'{field_name}[{idx}].id' must be a non-empty string.",
+                    "field": f"{field_name}[{idx}].id",
+                }
+            if not isinstance(line["text"], str):
+                return {
+                    "message": f"'{field_name}[{idx}].text' must be a string.",
+                    "field": f"{field_name}[{idx}].text",
+                }
+            if line["style"] not in Hospital.LETTERHEAD_TEXT_STYLES:
+                return {
+                    "message": (
+                        f"'{field_name}[{idx}].style' must be one of "
+                        f"{list(Hospital.LETTERHEAD_TEXT_STYLES)}."
+                    ),
+                    "field": f"{field_name}[{idx}].style",
+                }
+            if not isinstance(line["enabled"], bool):
+                return {
+                    "message": f"'{field_name}[{idx}].enabled' must be a boolean.",
+                    "field": f"{field_name}[{idx}].enabled",
+                }
+            if not isinstance(line["order"], int) or isinstance(line["order"], bool):
+                return {
+                    "message": f"'{field_name}[{idx}].order' must be an integer.",
+                    "field": f"{field_name}[{idx}].order",
+                }
+        return None
+
+    line_error = validate_styled_lines(text_lines, "text_lines")
+    if line_error:
+        return None, line_error
+
+    layout_mode = payload.get("layout_mode", "simple")
+    if layout_mode not in Hospital.LETTERHEAD_LAYOUT_MODES:
+        return None, {
+            "message": f"'layout_mode' must be one of {list(Hospital.LETTERHEAD_LAYOUT_MODES)}.",
+            "field": "layout_mode",
+        }
+
+    right_column_lines = payload.get("right_column_lines", [])
+    line_error = validate_styled_lines(right_column_lines, "right_column_lines")
+    if line_error:
+        return None, line_error
+
+    background_pattern_url = payload.get("background_pattern_url")
+    if background_pattern_url is not None and not isinstance(background_pattern_url, str):
+        return None, {
+            "message": "'background_pattern_url' must be a string or null.",
+            "field": "background_pattern_url",
+        }
+
+    info_bar = payload.get(
+        "info_bar",
+        {
+            "enabled": False,
+            "background_color": "#1e3a5f",
+            "text_color": "#ffffff",
+            "lines": [],
+        },
+    )
+    if not isinstance(info_bar, dict):
+        return None, {"message": "'info_bar' must be an object.", "field": "info_bar"}
+    info_required = {"enabled", "background_color", "text_color", "lines"}
+    missing_info = info_required - set(info_bar)
+    if missing_info:
+        return None, {
+            "message": f"'info_bar' is missing required keys: {sorted(missing_info)}.",
+            "field": "info_bar",
+        }
+    if not isinstance(info_bar["enabled"], bool):
+        return None, {
+            "message": "'info_bar.enabled' must be a boolean.",
+            "field": "info_bar.enabled",
+        }
+
+    import re
+    for color_key in ("background_color", "text_color"):
+        color = info_bar[color_key]
+        if not isinstance(color, str) or re.fullmatch(r"#[0-9a-fA-F]{6}", color) is None:
+            return None, {
+                "message": f"'info_bar.{color_key}' must be a six-digit hex colour.",
+                "field": f"info_bar.{color_key}",
+            }
+    if not isinstance(info_bar["lines"], list):
+        return None, {
+            "message": "'info_bar.lines' must be a list.",
+            "field": "info_bar.lines",
+        }
+    for idx, line in enumerate(info_bar["lines"]):
         if not isinstance(line, dict):
             return None, {
-                "message": f"'text_lines[{idx}]' must be an object.",
-                "field": f"text_lines[{idx}]",
+                "message": f"'info_bar.lines[{idx}]' must be an object.",
+                "field": f"info_bar.lines[{idx}]",
             }
-        missing_line_keys = line_required_keys - set(line.keys())
+        missing_line_keys = {"id", "text", "align"} - set(line)
         if missing_line_keys:
             return None, {
                 "message": (
-                    f"'text_lines[{idx}]' is missing required keys: "
+                    f"'info_bar.lines[{idx}]' is missing required keys: "
                     f"{sorted(missing_line_keys)}."
                 ),
-                "field": f"text_lines[{idx}]",
+                "field": f"info_bar.lines[{idx}]",
             }
         if not isinstance(line["id"], str) or not line["id"].strip():
             return None, {
-                "message": f"'text_lines[{idx}].id' must be a non-empty string.",
-                "field": f"text_lines[{idx}].id",
+                "message": f"'info_bar.lines[{idx}].id' must be a non-empty string.",
+                "field": f"info_bar.lines[{idx}].id",
             }
         if not isinstance(line["text"], str):
             return None, {
-                "message": f"'text_lines[{idx}].text' must be a string.",
-                "field": f"text_lines[{idx}].text",
+                "message": f"'info_bar.lines[{idx}].text' must be a string.",
+                "field": f"info_bar.lines[{idx}].text",
             }
-        if line["style"] not in Hospital.LETTERHEAD_TEXT_STYLES:
+        if line["align"] not in Hospital.LETTERHEAD_INFO_ALIGNMENTS:
             return None, {
                 "message": (
-                    f"'text_lines[{idx}].style' must be one of "
-                    f"{list(Hospital.LETTERHEAD_TEXT_STYLES)}."
+                    f"'info_bar.lines[{idx}].align' must be one of "
+                    f"{list(Hospital.LETTERHEAD_INFO_ALIGNMENTS)}."
                 ),
-                "field": f"text_lines[{idx}].style",
-            }
-        if not isinstance(line["enabled"], bool):
-            return None, {
-                "message": f"'text_lines[{idx}].enabled' must be a boolean.",
-                "field": f"text_lines[{idx}].enabled",
-            }
-        if not isinstance(line["order"], int) or isinstance(line["order"], bool):
-            return None, {
-                "message": f"'text_lines[{idx}].order' must be an integer.",
-                "field": f"text_lines[{idx}].order",
+                "field": f"info_bar.lines[{idx}].align",
             }
 
-    return payload, None
+    cleaned = dict(payload)
+    cleaned.update(
+        {
+            "layout_mode": layout_mode,
+            "right_column_lines": right_column_lines,
+            "background_pattern_url": background_pattern_url,
+            "info_bar": info_bar,
+        }
+    )
+    return cleaned, None
 
 
 class HospitalLetterheadView(APIView):
@@ -408,7 +520,9 @@ class HospitalLetterheadView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-        config = instance.letterhead_config or instance.get_default_letterhead_config()
+        config = with_letterhead_defaults(
+            instance.letterhead_config or instance.get_default_letterhead_config()
+        )
         serializer = HospitalLetterheadSerializer(config)
         return success_response(data={"letterhead": serializer.data})
 

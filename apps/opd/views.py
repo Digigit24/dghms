@@ -5,6 +5,8 @@ from django.db import transaction
 from datetime import date, timedelta
 from decimal import Decimal
 
+import structlog
+
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -40,6 +42,7 @@ from .models import (
 )
 from .serializers import (
     VisitListSerializer, VisitDetailSerializer, VisitCreateUpdateSerializer,
+    VisitSetFollowUpSerializer,
     OPDBillListSerializer, OPDBillDetailSerializer, OPDBillCreateUpdateSerializer, OPDBillItemSerializer,
     ProcedureMasterListSerializer, ProcedureMasterDetailSerializer,
     ProcedureMasterCreateUpdateSerializer,
@@ -69,6 +72,21 @@ from .serializers import (
 )
 
 
+log = structlog.get_logger(__name__)
+
+
+def _invalidate_today_cache(tenant_id):
+    """Best-effort invalidation; Redis outages must not fail OPD writes."""
+    try:
+        CeliyoCache().delete_pattern(f"opd:today:{tenant_id}")
+    except Exception as exc:
+        log.warning(
+            "opd_today_cache_bust_failed",
+            tenant_id=str(tenant_id),
+            error=str(exc),
+        )
+
+
 # ============================================================================
 # HMS PERMISSION CONFIGURATION FOR OPD MODULE
 # Uses JWT-based permissions from auth backend
@@ -90,6 +108,9 @@ from .serializers import (
             OpenApiParameter(name='payment_status', type=str, description='Filter by payment status'),
             OpenApiParameter(name='visit_type', type=str, description='Filter by visit type'),
             OpenApiParameter(name='visit_date', type=str, description='Filter by visit date (YYYY-MM-DD)'),
+            OpenApiParameter(name='follow_up_required', type=bool, description='Filter visits requiring follow-up'),
+            OpenApiParameter(name='follow_up_date_from', type=str, description='Follow-up date on or after (YYYY-MM-DD)'),
+            OpenApiParameter(name='follow_up_date_to', type=str, description='Follow-up date on or before (YYYY-MM-DD)'),
             OpenApiParameter(name='search', type=str, description='Search by visit number or patient name'),
         ],
         tags=['OPD - Visits']
@@ -139,6 +160,7 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         'create': 'create',
         'update': 'edit',
         'partial_update': 'edit',
+        'set_follow_up': 'edit',
         'destroy': 'delete',
         'today': 'view',
         'queue': 'view',
@@ -188,6 +210,19 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Filter queryset based on JWT roles"""
+        if self.action == 'set_follow_up':
+            # This action deliberately avoids the normal patient/doctor joins
+            # and findings/attachments prefetches; it needs only four Visit
+            # columns and get_object() still performs object permission checks.
+            return Visit.objects.filter(
+                tenant_id=self.request.tenant_id,
+            ).only(
+                'id',
+                'tenant_id',
+                'follow_up_required',
+                'follow_up_date',
+                'follow_up_notes',
+            )
         queryset = super().get_queryset()
         # JWT auth: use request.roles, never request.user.groups
         # TenantViewSetMixin already scopes by tenant_id.
@@ -196,11 +231,62 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         super().perform_create(serializer)
-        CeliyoCache().delete_pattern(f"opd:today:{self.request.tenant_id}")
+        _invalidate_today_cache(self.request.tenant_id)
 
     def perform_update(self, serializer):
         super().perform_update(serializer)
-        CeliyoCache().delete_pattern(f"opd:today:{self.request.tenant_id}")
+        _invalidate_today_cache(self.request.tenant_id)
+
+    @extend_schema(
+        summary="Set or clear a visit follow-up",
+        description=(
+            "Lightweight tenant-scoped update of only follow_up_required, "
+            "follow_up_date, and optional follow_up_notes."
+        ),
+        request=VisitSetFollowUpSerializer,
+        tags=['OPD - Visits'],
+    )
+    @action(detail=True, methods=['post'], url_path='set_follow_up')
+    def set_follow_up(self, request, pk=None):
+        """Update only follow-up fields without the full Visit serializer path."""
+        visit = self.get_object()
+        payload = VisitSetFollowUpSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+
+        values = payload.validated_data
+        update_values = {
+            'follow_up_required': values['follow_up_required'],
+            'follow_up_date': values['follow_up_date'],
+            'updated_at': timezone.now(),
+        }
+        if 'follow_up_notes' in values:
+            update_values['follow_up_notes'] = values['follow_up_notes']
+
+        Visit.objects.filter(
+            pk=visit.pk,
+            tenant_id=request.tenant_id,
+        ).update(**update_values)
+
+        visit.follow_up_required = update_values['follow_up_required']
+        visit.follow_up_date = update_values['follow_up_date']
+        visit.updated_at = update_values['updated_at']
+        if 'follow_up_notes' in update_values:
+            visit.follow_up_notes = update_values['follow_up_notes']
+
+        return Response({
+            'success': True,
+            'message': 'Follow-up updated.',
+            'data': {
+                'id': visit.id,
+                'follow_up_required': visit.follow_up_required,
+                'follow_up_date': (
+                    visit.follow_up_date.isoformat()
+                    if visit.follow_up_date is not None
+                    else None
+                ),
+                'follow_up_notes': visit.follow_up_notes or '',
+            },
+        })
 
     @extend_schema(
         summary="Get Today's Visits",
@@ -379,7 +465,7 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         visit.patient.save()
 
         # Status/revenue changed — bust the cached today statistics.
-        CeliyoCache().delete_pattern(f"opd:today:{request.tenant_id}")
+        _invalidate_today_cache(request.tenant_id)
 
         serializer = VisitDetailSerializer(visit)
         return Response({

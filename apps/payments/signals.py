@@ -3,7 +3,7 @@ Signal handlers for the payments app.
 
 Automatically creates transaction records when bills are marked as paid.
 """
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 from django.contrib.contenttypes.models import ContentType
 from django.db.models import Sum
@@ -78,6 +78,52 @@ def log_transaction_creation(sender, instance, created, **kwargs):
     if created:
         # Future: Add audit logging or notification logic
         pass
+
+
+def _sync_bill_from_bill_payments(instance, *, allow_decrease=False):
+    """
+    Keep cumulative bill payment fields in sync when the unified BillPayment
+    ledger is used as the write path.
+    """
+    from apps.payments.models import BillPayment
+
+    if instance.bill_type == 'opd' and instance.opd_bill_id:
+        bill = instance.opd_bill
+        total = BillPayment.objects.filter(
+            tenant_id=instance.tenant_id,
+            opd_bill=bill,
+        ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+        if not allow_decrease and bill.received_amount > total:
+            return
+        bill.received_amount = total
+        bill.payment_mode = instance.payment_mode or bill.payment_mode
+        bill.save()
+    elif instance.bill_type == 'ipd' and instance.ipd_bill_id:
+        billing = instance.ipd_bill
+        total = BillPayment.objects.filter(
+            tenant_id=instance.tenant_id,
+            ipd_bill=billing,
+        ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+        if not allow_decrease and billing.received_amount > total:
+            return
+        billing.received_amount = total
+        billing.payment_mode = instance.payment_mode or billing.payment_mode
+        billing.save()
+
+
+@receiver(post_save, sender='payments.BillPayment')
+def sync_bill_payment_to_source_bill(sender, instance, created, **kwargs):
+    """
+    BillPayment is a user-facing payment write path. Recompute the linked bill's
+    cumulative received_amount so OPD/IPD bill signals update encounter status.
+    """
+    _sync_bill_from_bill_payments(instance, allow_decrease=not created)
+
+
+@receiver(post_delete, sender='payments.BillPayment')
+def sync_bill_payment_delete_to_source_bill(sender, instance, **kwargs):
+    """Recompute linked bill totals after ledger payment deletion."""
+    _sync_bill_from_bill_payments(instance, allow_decrease=True)
 
 
 # Optional: Handle partial payments

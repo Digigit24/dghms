@@ -24,6 +24,9 @@ class VisitListSerializer(serializers.ModelSerializer):
     patient_name = serializers.CharField(source='patient.full_name', read_only=True)
     patient_id = serializers.CharField(source='patient.patient_id', read_only=True)
     patient_photo = serializers.CharField(source='patient.photo_data', read_only=True, allow_blank=True)
+    patient_mobile = serializers.CharField(source='patient.mobile_primary', read_only=True)
+    patient_age = serializers.IntegerField(source='patient.age', read_only=True, allow_null=True)
+    patient_gender = serializers.CharField(source='patient.gender', read_only=True)
     doctor_name = serializers.CharField(source='doctor.full_name', read_only=True)
     waiting_time = serializers.SerializerMethodField()
 
@@ -31,8 +34,9 @@ class VisitListSerializer(serializers.ModelSerializer):
         model = Visit
         fields = [
             'id', 'visit_number', 'patient', 'patient_name', 'patient_id', 'patient_photo',
+            'patient_mobile', 'patient_age', 'patient_gender',
             'doctor', 'doctor_name', 'visit_date', 'visit_type', 'priority', 'status',
-            'queue_position', 'payment_status', 'total_amount', 'balance_amount',
+            'queue_position', 'payment_status', 'total_amount', 'paid_amount', 'balance_amount',
             'waiting_time', 'entry_time', 'is_follow_up',
             'follow_up_required', 'follow_up_date', 'follow_up_notes',
         ]
@@ -146,6 +150,23 @@ class VisitCreateUpdateSerializer(serializers.ModelSerializer):
             validated_data['created_by_id'] = request.user_id
 
         return super().create(validated_data)
+
+
+class VisitSetFollowUpSerializer(serializers.Serializer):
+    """Strict payload for the lightweight Visit follow-up action."""
+
+    follow_up_required = serializers.BooleanField()
+    follow_up_date = serializers.DateField(allow_null=True)
+    follow_up_notes = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    def to_internal_value(self, data):
+        allowed = {"follow_up_required", "follow_up_date", "follow_up_notes"}
+        unknown = set(data) - allowed
+        if unknown:
+            raise serializers.ValidationError(
+                {key: "This field is not accepted by this endpoint." for key in sorted(unknown)}
+            )
+        return super().to_internal_value(data)
 
 
 # ============================================================================

@@ -9,12 +9,32 @@ contract:
   "show_badge": bool, "badge_url": str,
   "alignment": "left"|"center",
   "show_hairline": bool,
-  "text_lines": [{"id": str, "text": str, "style": "title"|"normal", "enabled": bool, "order": int}]
+  "text_lines": [...],
+  "layout_mode": "simple"|"two_column",
+  "right_column_lines": [...],
+  "background_pattern_url": str|null,
+  "info_bar": {"enabled": bool, "background_color": str, "text_color": str,
+               "lines": [{"id": str, "text": str, "align": "left"|"center"}]}
 }
 {% endcomment %}
 {% if letterhead.enabled %}
-<div style="display: flex; align-items: flex-start; justify-content: space-between; padding-bottom: 6px;">
-    <div style="display: flex; align-items: flex-start; gap: 10px; {% if letterhead.alignment == 'center' %}margin: 0 auto; text-align: center; flex-direction: column; align-items: center;{% endif %}">
+<style>
+    @page {
+        margin-top: 42mm;
+        @top-center {
+            content: element(print-letterhead);
+            vertical-align: bottom;
+        }
+    }
+    .print-letterhead-running {
+        position: running(print-letterhead);
+        width: 100%;
+    }
+</style>
+<div class="print-letterhead-running">
+<div style="background: {% if letterhead.background_pattern_url %}url('{{ letterhead.background_pattern_url }}') center/cover no-repeat{% else %}transparent{% endif %};">
+<div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding-bottom: 6px;">
+    <div style="display: flex; flex: 1; align-items: flex-start; gap: 10px; {% if letterhead.alignment == 'center' and letterhead.layout_mode != 'two_column' %}margin: 0 auto; text-align: center; flex-direction: column; align-items: center;{% endif %}">
         {% if letterhead.show_logo and letterhead.logo_url %}
         <img src="{{ letterhead.logo_url }}" alt="Logo" style="height: 42px; width: 42px; object-fit: contain; flex-shrink: 0;" />
         {% endif %}
@@ -28,6 +48,17 @@ contract:
             {% endfor %}
         </div>
     </div>
+    {% if letterhead.layout_mode == "two_column" %}
+    <div style="flex: 1; text-align: right;">
+        {% for line in letterhead.right_column_lines %}
+            {% if line.style == "title" %}
+            <div style="font-size: 10pt; font-weight: 700; line-height: 1.25;">{{ line.text }}</div>
+            {% else %}
+            <div style="font-size: 7.5pt; line-height: 1.4; color: #374151;">{{ line.text }}</div>
+            {% endif %}
+        {% endfor %}
+    </div>
+    {% endif %}
     {% if letterhead.show_badge and letterhead.badge_url %}
     <img src="{{ letterhead.badge_url }}" alt="Badge" style="height: 46px; width: 46px; object-fit: contain; flex-shrink: 0;" />
     {% endif %}
@@ -35,4 +66,13 @@ contract:
 {% if letterhead.show_hairline %}
 <hr style="border: none; border-top: 1.5px solid #1f2937; margin: 0 0 8px;" />
 {% endif %}
+{% if letterhead.info_bar.enabled %}
+<div style="background: {{ letterhead.info_bar.background_color }}; color: {{ letterhead.info_bar.text_color }}; padding: 3px 8px; margin-bottom: 6px; font-size: 7pt; line-height: 1.35;">
+    {% for line in letterhead.info_bar.lines %}
+    <div style="text-align: {{ line.align }};">{{ line.text }}</div>
+    {% endfor %}
+</div>
+{% endif %}
+</div>
+</div>
 {% endif %}

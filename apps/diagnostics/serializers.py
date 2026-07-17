@@ -175,3 +175,33 @@ class LabReportSerializer(TenantMixin, serializers.ModelSerializer):
         if request:
             return request.build_absolute_uri(obj.attachment.url)
         return obj.attachment.url
+
+
+class DiagnosticOrderEncounterSerializer(TenantMixin, serializers.ModelSerializer):
+    investigation_id = serializers.IntegerField(source='investigation.id', read_only=True)
+    investigation_name = serializers.CharField(source='investigation.name', read_only=True)
+    investigation_category = serializers.CharField(source='investigation.category', read_only=True)
+    lab_report = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DiagnosticOrder
+        fields = [
+            'id',
+            'requisition',
+            'investigation_id',
+            'investigation_name',
+            'investigation_category',
+            'status',
+            'sample_id',
+            'price',
+            'created_at',
+            'updated_at',
+            'lab_report',
+        ]
+        read_only_fields = fields
+
+    def get_lab_report(self, obj):
+        report = getattr(obj, 'report', None)
+        if report is None:
+            return None
+        return LabReportSerializer(report, context=self.context).data

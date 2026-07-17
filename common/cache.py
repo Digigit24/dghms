@@ -43,9 +43,20 @@ class CeliyoCache:
 
     def _get_client(self):
         if self._client is None:
+            # Cache is an optional acceleration layer.  Keep outages from
+            # adding multi-second connection waits to guarded DB fallbacks.
+            connect_timeout = float(
+                getattr(settings, "REDIS_CACHE_CONNECT_TIMEOUT", 0.5)
+            )
+            socket_timeout = float(
+                getattr(settings, "REDIS_CACHE_SOCKET_TIMEOUT", 0.5)
+            )
             self._client = redis.from_url(
                 self.url,
                 decode_responses=self.decode_responses,
+                socket_connect_timeout=connect_timeout,
+                socket_timeout=socket_timeout,
+                retry_on_timeout=False,
             )
         return self._client
 

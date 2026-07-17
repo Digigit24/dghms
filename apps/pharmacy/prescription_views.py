@@ -272,7 +272,11 @@ class PrescriptionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             context={"request": request},
         )
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        item = serializer.save()
+        if item.inventory_item_id and not request.data.get("drug_name"):
+            item.medicine_name = item.inventory_item.name
+            item.save(update_fields=["medicine_name", "updated_at"])
+            serializer = PrescriptionItemSerializer(item, context={"request": request})
 
         prescription.recalculate_status()
         prescription.save(update_fields=["status", "updated_at"])

@@ -16,6 +16,8 @@ class Hospital(models.Model):
     # validation in apps/hospital/views.py::HospitalLetterheadView) ----------
     LETTERHEAD_TEXT_STYLES = ('title', 'normal')
     LETTERHEAD_ALIGNMENTS = ('left', 'center')
+    LETTERHEAD_LAYOUT_MODES = ('simple', 'two_column')
+    LETTERHEAD_INFO_ALIGNMENTS = ('left', 'center')
 
     # Tenant
     tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
@@ -127,6 +129,7 @@ class Hospital(models.Model):
     #   "badge_url": str,                # no source field yet -> defaults ""
     #   "alignment": "left" | "center",
     #   "show_hairline": bool,
+    #   "layout_mode": "simple" | "two_column",
     #   "text_lines": [
     #       {
     #           "id": str,               # stable per-line slug (React key / DnD identity)
@@ -137,6 +140,17 @@ class Hospital(models.Model):
     #       },
     #       ...
     #   ],
+    #   "right_column_lines": [
+    #       {"id": str, "text": str, "style": "title" | "normal",
+    #        "enabled": bool, "order": int},
+    #   ],
+    #   "background_pattern_url": str | null,
+    #   "info_bar": {
+    #       "enabled": bool,
+    #       "background_color": str,
+    #       "text_color": str,
+    #       "lines": [{"id": str, "text": str, "align": "left" | "center"}],
+    #   },
     # }
     letterhead_config = models.JSONField(
         default=dict,
@@ -278,5 +292,14 @@ class Hospital(models.Model):
             "alignment": "left",
             "show_hairline": True,
             "text_lines": text_lines,
+            "layout_mode": "simple",
+            "right_column_lines": [],
+            "background_pattern_url": None,
+            "info_bar": {
+                "enabled": False,
+                "background_color": "#1e3a5f",
+                "text_color": "#ffffff",
+                "lines": [],
+            },
         }
 

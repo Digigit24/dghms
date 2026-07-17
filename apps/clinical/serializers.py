@@ -3,7 +3,7 @@
 import uuid as _uuid
 from decimal import Decimal, InvalidOperation
 
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from rest_framework import serializers
 
 from common.mixins import TenantMixin
@@ -172,21 +172,42 @@ class ClinicalFormStructureSerializer(serializers.ModelSerializer):
         ]
 
     def get_sections(self, form):
+        active_items = ClinicalPicklistItem.objects.filter(is_active=True).order_by(
+            "display_order", "id"
+        )
+        active_fields = (
+            ClinicalFormField.objects.filter(is_active=True)
+            .select_related("picklist")
+            .prefetch_related(
+                Prefetch(
+                    "picklist__items",
+                    queryset=active_items,
+                    to_attr="active_items",
+                )
+            )
+            .order_by("display_order", "id")
+        )
         placements = (
             form.section_placements.filter(is_active=True, section__is_active=True)
             .select_related("section")
-            .prefetch_related("section__fields__picklist__items")
+            .prefetch_related(
+                Prefetch(
+                    "section__fields",
+                    queryset=active_fields,
+                    to_attr="active_fields",
+                )
+            )
             .order_by("display_order", "id")
         )
         result = []
         for placement in placements:
             section = placement.section
             fields = []
-            for field in section.fields.filter(is_active=True).order_by("display_order", "id"):
+            for field in section.active_fields:
                 field_data = ClinicalFormFieldSerializer(field, context=self.context).data
                 if field.picklist_id:
                     field_data["picklist_items"] = ClinicalPicklistItemSerializer(
-                        field.picklist.items.filter(is_active=True).order_by("display_order", "id"),
+                        field.picklist.active_items,
                         many=True,
                     ).data
                 fields.append(field_data)

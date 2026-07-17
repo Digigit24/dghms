@@ -1,4 +1,5 @@
 from celery.result import AsyncResult
+from django.contrib.contenttypes.models import ContentType
 from django.http import HttpResponse
 from django.db.models import Q
 from django.utils import timezone
@@ -21,7 +22,7 @@ from .models import (
     LabReport, MedicineOrder, PackageOrder, ProcedureOrder, Requisition,
 )
 from .serializers import (
-    DiagnosticOrderSerializer, InvestigationRangeSerializer,
+    DiagnosticOrderEncounterSerializer, DiagnosticOrderSerializer, InvestigationRangeSerializer,
     InvestigationSerializer, LabReportSerializer,
     MedicineOrderSerializer, PackageOrderSerializer,
     ProcedureOrderSerializer, RequisitionSerializer,
@@ -542,6 +543,63 @@ class DiagnosticOrderViewSet(viewsets.ModelViewSet):
         if hasattr(self.request, 'tenant_id'):
             return qs.filter(tenant_id=self.request.tenant_id)
         return qs
+
+    @staticmethod
+    def _resolve_encounter_content_type(encounter_type):
+        aliases = {
+            'opd': ('opd', 'visit'),
+            'opd_visit': ('opd', 'visit'),
+            'opd.visit': ('opd', 'visit'),
+            'ipd': ('ipd', 'admission'),
+            'ipd_admission': ('ipd', 'admission'),
+            'ipd.admission': ('ipd', 'admission'),
+        }
+        key = str(encounter_type or '').lower()
+        if key not in aliases:
+            raise ValueError("encounter_type must be one of: opd, opd.visit, ipd, ipd.admission")
+        app_label, model = aliases[key]
+        return ContentType.objects.get(app_label=app_label, model=model)
+
+    @action(detail=False, methods=['get'], url_path='by-encounter')
+    def by_encounter(self, request):
+        """Return DiagnosticOrder rows for one OPD/IPD encounter."""
+        encounter_type = request.query_params.get('encounter_type')
+        encounter_id = request.query_params.get('encounter_id')
+        if not encounter_type or not encounter_id:
+            return Response(
+                {
+                    'success': False,
+                    'error': 'encounter_type and encounter_id query params are required.',
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            content_type = self._resolve_encounter_content_type(encounter_type)
+            encounter_object_id = int(encounter_id)
+        except (ValueError, ContentType.DoesNotExist):
+            return Response(
+                {'success': False, 'error': 'Invalid encounter_type or encounter_id.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        requisitions = Requisition.objects.filter(
+            tenant_id=request.tenant_id,
+            content_type=content_type,
+            object_id=encounter_object_id,
+            requisition_type='investigation',
+        )
+        qs = (
+            self.get_queryset()
+            .filter(requisition__in=requisitions)
+            .select_related('investigation', 'requisition__patient', 'report')
+            .order_by('-created_at')
+        )
+        serializer = DiagnosticOrderEncounterSerializer(
+            qs,
+            many=True,
+            context={'request': request},
+        )
+        return Response({'success': True, 'data': serializer.data})
 
     @action(detail=False, methods=['get'], url_path='lab-dashboard')
     def lab_dashboard(self, request):

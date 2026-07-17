@@ -150,6 +150,7 @@ class ClinicalFormField(models.Model):
         RICH_TEXT = "rich_text", "Rich Text"
         API_SELECT = "api_select", "API Select"  # options from a live app API (e.g. doctors), not a picklist
         PAIN_FACES = "pain_faces", "Pain Faces Scale"  # Wong-Baker style 0-10 face selector
+        BODY_DIAGRAM = "body_diagram", "Body Diagram"
 
     id = models.BigAutoField(primary_key=True)
     tenant_id = models.UUIDField(db_index=True)

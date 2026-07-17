@@ -134,6 +134,16 @@ def get_letterhead_context(tenant_id: uuid.UUID, show_letterhead: bool) -> dict[
         [line for line in (config.get("text_lines") or []) if line.get("enabled")],
         key=lambda line: line.get("order", 0),
     )
+    right_column_lines = sorted(
+        [line for line in (config.get("right_column_lines") or []) if line.get("enabled")],
+        key=lambda line: line.get("order", 0),
+    )
+    info_bar = config.get("info_bar") or {
+        "enabled": False,
+        "background_color": "#1e3a5f",
+        "text_color": "#ffffff",
+        "lines": [],
+    }
     return {
         "enabled": True,
         "show_logo": bool(config.get("show_logo")),
@@ -143,6 +153,10 @@ def get_letterhead_context(tenant_id: uuid.UUID, show_letterhead: bool) -> dict[
         "alignment": config.get("alignment") or "left",
         "show_hairline": bool(config.get("show_hairline")),
         "text_lines": text_lines,
+        "layout_mode": config.get("layout_mode") or "simple",
+        "right_column_lines": right_column_lines,
+        "background_pattern_url": config.get("background_pattern_url"),
+        "info_bar": info_bar,
     }
 
 

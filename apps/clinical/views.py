@@ -12,7 +12,7 @@ from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema, extend_schema_view
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 
 from common import error_codes
@@ -77,7 +77,6 @@ from .serializers import (
     UserFormPreferenceSerializer,
     coerce_field_value,
 )
-from .tasks import create_clinical_audit_log_task
 
 
 CLINICAL_ENCOUNTER_CONTENT_TYPES = {
@@ -99,14 +98,26 @@ def _audit(
     user_id,
     metadata=None,
 ):
-    """Queue an async audit log entry."""
-    create_clinical_audit_log_task.delay(
-        tenant_id=str(tenant_id),
-        record_id=record_id,
-        action=action,
-        user_id=str(user_id),
-        metadata=metadata or {},
-    )
+    """Persist an audit entry without making the clinical write broker-dependent."""
+    try:
+        ClinicalRecordAuditLog.objects.create(
+            tenant_id=tenant_id,
+            record_id=record_id,
+            action=action,
+            user_id=user_id,
+            metadata=metadata or {},
+            created_by_user_id=user_id,
+        )
+    except Exception as exc:
+        # The primary clinical write has already succeeded.  Audit storage is
+        # best-effort here and must never turn a Redis/DB outage into a 500.
+        logger.error(
+            "clinical_audit_log_create_failed",
+            tenant_id=str(tenant_id),
+            record_id=record_id,
+            action=action,
+            error=str(exc),
+        )
 
 
 def _field_value_to_plain(value_obj):
@@ -268,6 +279,162 @@ def _sync_prescription_grid_to_pharmacy(record, field, rows, user_id):
     prescription.recalculate_status()
     prescription.save(update_fields=["status", "updated_at"])
     return prescription
+
+
+def _investigation_ids_from_grid_rows(rows):
+    if rows is None:
+        return []
+    if not isinstance(rows, list):
+        return []
+    ids = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        value = row.get("investigation_id")
+        if value in (None, ""):
+            continue
+        ids.append(value)
+    return ids
+
+
+def _order_investigations_for_record(record, investigation_ids, tenant_id, user_id):
+    """Idempotently create DiagnosticOrders for a clinical record encounter."""
+    if not isinstance(investigation_ids, list) or not investigation_ids:
+        return {
+            "error": error_codes.INVALID_PAYLOAD,
+            "message": "investigation_ids must be a non-empty list.",
+            "status": status.HTTP_400_BAD_REQUEST,
+        }
+
+    try:
+        normalized_ids = sorted({int(value) for value in investigation_ids})
+    except (TypeError, ValueError):
+        return {
+            "error": error_codes.INVALID_PAYLOAD,
+            "message": "investigation_ids must contain integer IDs.",
+            "status": status.HTTP_400_BAD_REQUEST,
+        }
+
+    encounter_key = str(record.encounter_type or "").lower()
+    if encounter_key not in CLINICAL_ENCOUNTER_CONTENT_TYPES:
+        return {
+            "error": error_codes.INVALID_PAYLOAD,
+            "message": f"Unsupported encounter_type '{record.encounter_type}'.",
+            "status": status.HTTP_400_BAD_REQUEST,
+        }
+
+    from apps.diagnostics.models import DiagnosticOrder, Investigation, Requisition
+    from apps.diagnostics.serializers import RequisitionSerializer
+
+    app_label, model_name = CLINICAL_ENCOUNTER_CONTENT_TYPES[encounter_key]
+    content_type = ContentType.objects.get(app_label=app_label, model=model_name)
+    try:
+        encounter = content_type.get_object_for_this_type(
+            id=record.encounter_id,
+            tenant_id=tenant_id,
+        )
+    except content_type.model_class().DoesNotExist:
+        return {
+            "error": error_codes.RECORD_NOT_FOUND,
+            "message": "Encounter not found.",
+            "status": status.HTTP_404_NOT_FOUND,
+        }
+
+    patient = getattr(encounter, "patient", None)
+    if patient is None:
+        return {
+            "error": error_codes.INVALID_PAYLOAD,
+            "message": "Encounter does not expose a patient.",
+            "status": status.HTTP_400_BAD_REQUEST,
+        }
+
+    investigations = {
+        investigation.id: investigation
+        for investigation in Investigation.objects.filter(
+            tenant_id=tenant_id,
+            id__in=normalized_ids,
+            is_active=True,
+        )
+    }
+    missing = sorted(set(normalized_ids) - set(investigations.keys()))
+    if missing:
+        return {
+            "error": error_codes.RECORD_NOT_FOUND,
+            "message": f"Investigation(s) not found: {missing}.",
+            "status": status.HTTP_404_NOT_FOUND,
+        }
+
+    with transaction.atomic():
+        requisition = (
+            Requisition.objects.filter(
+                tenant_id=tenant_id,
+                content_type=content_type,
+                object_id=record.encounter_id,
+                requisition_type="investigation",
+            )
+            .exclude(status="cancelled")
+            .order_by("-created_at")
+            .first()
+        )
+        if requisition is None:
+            requisition = Requisition.objects.create(
+                tenant_id=tenant_id,
+                content_type=content_type,
+                object_id=record.encounter_id,
+                requisition_type="investigation",
+                patient=patient,
+                requesting_doctor_id=user_id,
+                clinical_notes=f"Created from clinical record {record.id}",
+            )
+
+        existing_ids = set(
+            DiagnosticOrder.objects.filter(
+                tenant_id=tenant_id,
+                requisition=requisition,
+                investigation_id__in=normalized_ids,
+            ).values_list("investigation_id", flat=True)
+        )
+        created_orders = []
+        for investigation_id in normalized_ids:
+            if investigation_id in existing_ids:
+                continue
+            investigation = investigations[investigation_id]
+            created_orders.append(
+                DiagnosticOrder.objects.create(
+                    tenant_id=tenant_id,
+                    requisition=requisition,
+                    investigation=investigation,
+                    price=investigation.base_charge,
+                    status="pending",
+                )
+            )
+
+    return {
+        "requisition": requisition,
+        "requisition_data": RequisitionSerializer(requisition).data,
+        "created_order_ids": [order.id for order in created_orders],
+        "existing_investigation_ids": sorted(existing_ids),
+    }
+
+
+def _sync_investigation_grid_to_diagnostics(record, field, rows, user_id):
+    """Convert an investigation GRID field into DiagnosticOrder rows."""
+    if field.field_type != ClinicalFormField.FieldType.GRID:
+        return None
+    if (field.section.config or {}).get("role") != "investigation":
+        return None
+    investigation_ids = _investigation_ids_from_grid_rows(rows)
+    if not investigation_ids:
+        return None
+    result = _order_investigations_for_record(
+        record=record,
+        investigation_ids=investigation_ids,
+        tenant_id=record.tenant_id,
+        user_id=user_id,
+    )
+    if result and "error" in result:
+        raise ValidationError({"investigations": result["message"]})
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -657,15 +824,30 @@ class ClinicalFormViewSet(
         cache_key = f"clinical:form:{form.id}:v{form.version}"
         cache = CeliyoCache()
 
-        cached = cache.get(cache_key)
+        try:
+            cached = cache.get(cache_key)
+        except Exception as exc:
+            logger.warning(
+                "clinical_form_structure_cache_read_failed",
+                form_id=form.id,
+                error=str(exc),
+            )
+            cached = None
         if cached is not None:
             logger.info("clinical_form_structure_cache_hit", form_id=form.id)
             return action_response(message="Form structure.", data=cached)
 
         serializer = ClinicalFormStructureSerializer(form)
         data = serializer.data
-        cache.set(cache_key, data, ttl=3600)
-        logger.info("clinical_form_structure_cache_set", form_id=form.id)
+        try:
+            cache.set(cache_key, data, ttl=3600)
+            logger.info("clinical_form_structure_cache_set", form_id=form.id)
+        except Exception as exc:
+            logger.warning(
+                "clinical_form_structure_cache_write_failed",
+                form_id=form.id,
+                error=str(exc),
+            )
         return action_response(message="Form structure.", data=data)
 
 
@@ -1574,6 +1756,12 @@ class ClinicalRecordViewSet(
                     rows=value_obj.value_json,
                     user_id=user_id,
                 )
+                _sync_investigation_grid_to_diagnostics(
+                    record=record,
+                    field=field,
+                    rows=value_obj.value_json,
+                    user_id=user_id,
+                )
                 upserted.append(value_obj)
 
         _audit(
@@ -1604,123 +1792,25 @@ class ClinicalRecordViewSet(
             raise PermissionDenied("No permission to order diagnostics.")
 
         record = self.get_object()
-        raw_ids = request.data.get("investigation_ids", [])
-        if not isinstance(raw_ids, list) or not raw_ids:
+        result = _order_investigations_for_record(
+            record=record,
+            investigation_ids=request.data.get("investigation_ids", []),
+            tenant_id=request.tenant_id,
+            user_id=request.user_id,
+        )
+        if "error" in result:
             return error_response(
-                code=error_codes.INVALID_PAYLOAD,
-                message="investigation_ids must be a non-empty list.",
-                status=status.HTTP_400_BAD_REQUEST,
+                code=result["error"],
+                message=result["message"],
+                status=result["status"],
             )
-
-        try:
-            investigation_ids = sorted({int(value) for value in raw_ids})
-        except (TypeError, ValueError):
-            return error_response(
-                code=error_codes.INVALID_PAYLOAD,
-                message="investigation_ids must contain integer IDs.",
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        encounter_key = str(record.encounter_type or "").lower()
-        if encounter_key not in CLINICAL_ENCOUNTER_CONTENT_TYPES:
-            return error_response(
-                code=error_codes.INVALID_PAYLOAD,
-                message=f"Unsupported encounter_type '{record.encounter_type}'.",
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        from apps.diagnostics.models import DiagnosticOrder, Investigation, Requisition
-        from apps.diagnostics.serializers import RequisitionSerializer
-
-        app_label, model_name = CLINICAL_ENCOUNTER_CONTENT_TYPES[encounter_key]
-        content_type = ContentType.objects.get(app_label=app_label, model=model_name)
-        try:
-            encounter = content_type.get_object_for_this_type(
-                id=record.encounter_id,
-                tenant_id=request.tenant_id,
-            )
-        except content_type.model_class().DoesNotExist:
-            return error_response(
-                code=error_codes.RECORD_NOT_FOUND,
-                message="Encounter not found.",
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        patient = getattr(encounter, "patient", None)
-        if patient is None:
-            return error_response(
-                code=error_codes.INVALID_PAYLOAD,
-                message="Encounter does not expose a patient.",
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        investigations = {
-            investigation.id: investigation
-            for investigation in Investigation.objects.filter(
-                tenant_id=request.tenant_id,
-                id__in=investigation_ids,
-                is_active=True,
-            )
-        }
-        missing = sorted(set(investigation_ids) - set(investigations.keys()))
-        if missing:
-            return error_response(
-                code=error_codes.RECORD_NOT_FOUND,
-                message=f"Investigation(s) not found: {missing}.",
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        with transaction.atomic():
-            requisition = (
-                Requisition.objects.filter(
-                    tenant_id=request.tenant_id,
-                    content_type=content_type,
-                    object_id=record.encounter_id,
-                    requisition_type="investigation",
-                )
-                .exclude(status="cancelled")
-                .order_by("-created_at")
-                .first()
-            )
-            if requisition is None:
-                requisition = Requisition.objects.create(
-                    tenant_id=request.tenant_id,
-                    content_type=content_type,
-                    object_id=record.encounter_id,
-                    requisition_type="investigation",
-                    patient=patient,
-                    requesting_doctor_id=request.user_id,
-                    clinical_notes=f"Created from clinical record {record.id}",
-                )
-
-            existing_ids = set(
-                DiagnosticOrder.objects.filter(
-                    tenant_id=request.tenant_id,
-                    requisition=requisition,
-                    investigation_id__in=investigation_ids,
-                ).values_list("investigation_id", flat=True)
-            )
-            created_orders = []
-            for investigation_id in investigation_ids:
-                if investigation_id in existing_ids:
-                    continue
-                investigation = investigations[investigation_id]
-                created_orders.append(
-                    DiagnosticOrder.objects.create(
-                        tenant_id=request.tenant_id,
-                        requisition=requisition,
-                        investigation=investigation,
-                        price=investigation.base_charge,
-                        status="pending",
-                    )
-                )
 
         return action_response(
-            message=f"{len(created_orders)} investigation order(s) created.",
+            message=f"{len(result['created_order_ids'])} investigation order(s) created.",
             data={
-                "requisition": RequisitionSerializer(requisition).data,
-                "created_order_ids": [order.id for order in created_orders],
-                "existing_investigation_ids": sorted(existing_ids),
+                "requisition": result["requisition_data"],
+                "created_order_ids": result["created_order_ids"],
+                "existing_investigation_ids": result["existing_investigation_ids"],
             },
         )
 

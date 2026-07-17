@@ -3,6 +3,24 @@ from rest_framework import serializers
 from .models import Hospital
 
 
+def with_letterhead_defaults(config: dict) -> dict:
+    """Return the additive letterhead schema without mutating stored JSON."""
+    normalized = dict(config)
+    normalized.setdefault("layout_mode", "simple")
+    normalized.setdefault("right_column_lines", [])
+    normalized.setdefault("background_pattern_url", None)
+    normalized.setdefault(
+        "info_bar",
+        {
+            "enabled": False,
+            "background_color": "#1e3a5f",
+            "text_color": "#ffffff",
+            "lines": [],
+        },
+    )
+    return normalized
+
+
 class HospitalSerializer(serializers.ModelSerializer):
     """Hospital configuration serializer"""
     type_display = serializers.CharField(
@@ -42,9 +60,8 @@ class HospitalSerializer(serializers.ModelSerializer):
         ``HospitalLetterheadView`` for the dedicated endpoint used by the
         Letterhead Designer, which follows the same fallback rule.
         """
-        if obj.letterhead_config:
-            return obj.letterhead_config
-        return obj.get_default_letterhead_config()
+        config = obj.letterhead_config or obj.get_default_letterhead_config()
+        return with_letterhead_defaults(config)
 
 
 class HospitalUpdateSerializer(serializers.ModelSerializer):
@@ -96,11 +113,20 @@ class HospitalLetterheadSerializer(serializers.Serializer):
           "badge_url": str,
           "alignment": "left" | "center",
           "show_hairline": bool,
+          "layout_mode": "simple" | "two_column",
           "text_lines": [
               {"id": str, "text": str, "style": "title"|"normal",
                "enabled": bool, "order": int},
               ...
-          ]
+          ],
+          "right_column_lines": [<same line shape as text_lines>],
+          "background_pattern_url": str | null,
+          "info_bar": {
+              "enabled": bool,
+              "background_color": "#rrggbb",
+              "text_color": "#rrggbb",
+              "lines": [{"id": str, "text": str, "align": "left"|"center"}]
+          }
         }
     """
     show_logo = serializers.BooleanField()
@@ -110,3 +136,24 @@ class HospitalLetterheadSerializer(serializers.Serializer):
     alignment = serializers.ChoiceField(choices=list(Hospital.LETTERHEAD_ALIGNMENTS))
     show_hairline = serializers.BooleanField()
     text_lines = serializers.ListField(child=serializers.DictField())
+    layout_mode = serializers.ChoiceField(
+        choices=list(Hospital.LETTERHEAD_LAYOUT_MODES),
+        default="simple",
+    )
+    right_column_lines = serializers.ListField(
+        child=serializers.DictField(),
+        default=list,
+    )
+    background_pattern_url = serializers.CharField(
+        allow_blank=True,
+        allow_null=True,
+        default=None,
+    )
+    info_bar = serializers.DictField(
+        default=lambda: {
+            "enabled": False,
+            "background_color": "#1e3a5f",
+            "text_color": "#ffffff",
+            "lines": [],
+        },
+    )

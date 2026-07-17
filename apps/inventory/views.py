@@ -855,7 +855,17 @@ class StockAlertViewSet(TenantViewSetMixin, viewsets.ReadOnlyModelViewSet):
 
         cache = CeliyoCache()
         cache_key = f"inventory:alerts:{request.tenant_id}"
-        cached = cache.get(cache_key)
+        cache_available = True
+        try:
+            cached = cache.get(cache_key)
+        except Exception as exc:
+            log.warning(
+                "inventory_alert_summary_cache_read_failed",
+                tenant_id=str(request.tenant_id),
+                error=str(exc),
+            )
+            cached = None
+            cache_available = False
         if cached is not None:
             return Response(cached)
         # Shared computation with the consolidated dashboard endpoint —
@@ -864,7 +874,15 @@ class StockAlertViewSet(TenantViewSetMixin, viewsets.ReadOnlyModelViewSet):
             "success": True,
             "data": compute_alerts_summary(request.tenant_id),
         }
-        cache.set(cache_key, data, ttl=180)
+        if cache_available:
+            try:
+                cache.set(cache_key, data, ttl=180)
+            except Exception as exc:
+                log.warning(
+                    "inventory_alert_summary_cache_write_failed",
+                    tenant_id=str(request.tenant_id),
+                    error=str(exc),
+                )
         return Response(data)
 
     @extend_schema(

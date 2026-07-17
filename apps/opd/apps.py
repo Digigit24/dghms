@@ -6,4 +6,6 @@ class OpdConfig(AppConfig):
     name = 'apps.opd'
 
     def ready(self):
-        pass
+        # Register bill/item synchronization receivers.  Without this import,
+        # OPDBillItem writes do not recalculate their parent OPDBill.
+        import apps.opd.signals  # noqa: F401

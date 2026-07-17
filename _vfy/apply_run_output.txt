@@ -1,0 +1,453 @@
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-04-11 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-04-12 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-04-13 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-04-23 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-04-24 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-04-25 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-04-17 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-04-16 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-04-18 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-05-01 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-04-20 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-04-19 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-05-02 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-05-19 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-05-12 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-05-15 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-05-16 00:00:00) while time zone support is active.
+  warnings.warn(
+visit_id=1145 visit_number=OPD/20260411/018 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1166 visit_number=OPD/20260412/018 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1175 visit_number=OPD/20260413/005 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1176 visit_number=OPD/20260414/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1180 visit_number=OPD/20260413/008 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1193 visit_number=OPD/20260413/020 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1203 visit_number=OPD/20260414/010 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1206 visit_number=OPD/20260414/012 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1216 visit_number=OPD/20260415/004 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1217 visit_number=OPD/20260415/005 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1222 visit_number=OPD/20260424/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1226 visit_number=OPD/20260424/003 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1227 visit_number=OPD/20260424/004 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1238 visit_number=OPD/20260425/007 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1248 visit_number=OPD/20260423/009 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1250 visit_number=OPD/20260423/011 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1251 visit_number=OPD/20260423/012 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1252 visit_number=OPD/20260423/013 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1259 visit_number=OPD/20260415/014 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1265 visit_number=OPD/20260416/003 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1266 visit_number=OPD/20260416/004 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1274 visit_number=OPD/20260416/012 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1275 visit_number=OPD/20260416/013 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1289 visit_number=OPD/20260417/006 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1291 visit_number=OPD/20260417/007 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1294 visit_number=OPD/20260417/010 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1303 visit_number=OPD/20260418/004 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1307 visit_number=OPD/20260418/005 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1309 visit_number=OPD/20260418/007 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1321 visit_number=OPD/20260501/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1334 visit_number=OPD/20260419/012 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1337 visit_number=OPD/20260501/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1345 visit_number=OPD/20260420/007 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1346 visit_number=OPD/20260502/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1350 visit_number=OPD/20260503/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1365 visit_number=OPD/20260504/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1472 visit_number=OPD/20260507/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1564 visit_number=OPD/20260511/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1637 visit_number=OPD/20260512/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1638 visit_number=OPD/20260512/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1661 visit_number=OPD/20260501/003 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1672 visit_number=OPD/20260512/005 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1673 visit_number=OPD/20260512/006 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1675 visit_number=OPD/20260512/008 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1705 visit_number=OPD/20260502/011 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1726 visit_number=OPD/20260515/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1734 visit_number=OPD/20260515/004 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1736 visit_number=OPD/20260515/006 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1762 visit_number=OPD/20260516/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1763 visit_number=OPD/20260516/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1765 visit_number=OPD/20260516/003 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-05-21 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-05-22 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-05-24 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-05-25 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-05-26 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-04-26 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-05-27 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-05-28 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-05-29 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-05-30 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-05-31 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-06-01 00:00:00) while time zone support is active.
+  warnings.warn(
+visit_id=1766 visit_number=OPD/20260516/004 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1767 visit_number=OPD/20260516/005 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1768 visit_number=OPD/20260516/006 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1769 visit_number=OPD/20260516/007 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1770 visit_number=OPD/20260516/008 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1771 visit_number=OPD/20260516/009 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1807 visit_number=OPD/20260515/012 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1809 visit_number=OPD/20260515/013 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1853 visit_number=OPD/20260521/005 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1856 visit_number=OPD/20260521/008 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1929 visit_number=OPD/20260521/011 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=1965 visit_number=OPD/20260522/006 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2008 visit_number=OPD/20260518/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2012 visit_number=OPD/20260525/007 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2033 visit_number=OPD/20260526/006 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2046 visit_number=OPD/20260426/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2048 visit_number=OPD/20260526/009 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2054 visit_number=OPD/20260526/015 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2071 visit_number=OPD/20260527/011 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2072 visit_number=OPD/20260527/012 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2073 visit_number=OPD/20260527/013 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2077 visit_number=OPD/20260527/017 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2078 visit_number=OPD/20260527/018 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2095 visit_number=OPD/20260528/014 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2096 visit_number=OPD/20260528/015 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2097 visit_number=OPD/20260528/016 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2101 visit_number=OPD/20260528/020 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2102 visit_number=OPD/20260528/021 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2103 visit_number=OPD/20260528/022 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2104 visit_number=OPD/20260528/023 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2105 visit_number=OPD/20260529/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2106 visit_number=OPD/20260529/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2108 visit_number=OPD/20260529/004 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2116 visit_number=OPD/20260530/006 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2117 visit_number=OPD/20260530/007 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2118 visit_number=OPD/20260530/008 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2119 visit_number=OPD/20260530/009 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2120 visit_number=OPD/20260530/010 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2121 visit_number=OPD/20260530/011 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2122 visit_number=OPD/20260530/012 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2123 visit_number=OPD/20260530/013 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2124 visit_number=OPD/20260530/014 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2125 visit_number=OPD/20260530/015 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2126 visit_number=OPD/20260530/016 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2127 visit_number=OPD/20260530/017 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2128 visit_number=OPD/20260531/003 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2129 visit_number=OPD/20260531/004 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2130 visit_number=OPD/20260531/005 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2131 visit_number=OPD/20260531/006 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2132 visit_number=OPD/20260601/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2133 visit_number=OPD/20260531/007 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-06-02 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-05-04 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-05-11 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-05-14 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-05-18 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-05-17 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-06-03 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-06-04 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-06-05 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-06-06 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-06-07 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-06-08 00:00:00) while time zone support is active.
+  warnings.warn(
+visit_id=2134 visit_number=OPD/20260531/008 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2135 visit_number=OPD/20260531/009 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2137 visit_number=OPD/20260601/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2139 visit_number=OPD/20260601/004 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2148 visit_number=OPD/20260601/013 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2167 visit_number=OPD/20260602/004 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2169 visit_number=OPD/20260602/006 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2172 visit_number=OPD/20260502/004 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2173 visit_number=OPD/20260502/005 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2174 visit_number=OPD/20260502/006 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2175 visit_number=OPD/20260502/007 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2176 visit_number=OPD/20260504/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2177 visit_number=OPD/20260504/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2178 visit_number=OPD/20260505/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2179 visit_number=OPD/20260511/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2180 visit_number=OPD/20260512/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2181 visit_number=OPD/20260512/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2182 visit_number=OPD/20260514/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2184 visit_number=OPD/20260516/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2185 visit_number=OPD/20260516/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2186 visit_number=OPD/20260604/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2187 visit_number=OPD/20260516/003 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2188 visit_number=OPD/20260518/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2189 visit_number=OPD/20260517/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2210 visit_number=OPD/20260603/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2213 visit_number=OPD/20260604/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2214 visit_number=OPD/20260604/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2215 visit_number=OPD/20260604/003 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2216 visit_number=OPD/20260604/004 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2219 visit_number=OPD/20260604/005 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2220 visit_number=OPD/20260604/006 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2221 visit_number=OPD/20260604/007 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2222 visit_number=OPD/20260604/008 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2224 visit_number=OPD/20260604/009 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2225 visit_number=OPD/20260605/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2226 visit_number=OPD/20260606/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2227 visit_number=OPD/20260606/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2228 visit_number=OPD/20260606/003 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2229 visit_number=OPD/20260606/004 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2230 visit_number=OPD/20260606/005 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2231 visit_number=OPD/20260607/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2232 visit_number=OPD/20260607/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2233 visit_number=OPD/20260607/003 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2234 visit_number=OPD/20260607/004 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2237 visit_number=OPD/20260608/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2238 visit_number=OPD/20260608/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2239 visit_number=OPD/20260608/003 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2240 visit_number=OPD/20260608/004 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2241 visit_number=OPD/20260608/005 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2242 visit_number=OPD/20260608/006 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2248 visit_number=OPD/20260609/005 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-06-09 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-06-13 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-06-15 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-06-14 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-06-18 00:00:00) while time zone support is active.
+  warnings.warn(
+visit_id=2253 visit_number=OPD/20260613/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2254 visit_number=OPD/20260613/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2256 visit_number=OPD/20260607/005 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2257 visit_number=OPD/20260607/006 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2258 visit_number=OPD/20260607/007 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2259 visit_number=OPD/20260607/008 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2260 visit_number=OPD/20260607/009 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2261 visit_number=OPD/20260607/010 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2262 visit_number=OPD/20260607/011 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2263 visit_number=OPD/20260607/012 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2264 visit_number=OPD/20260607/013 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2272 visit_number=OPD/20260615/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2273 visit_number=OPD/20260615/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2274 visit_number=OPD/20260615/003 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2275 visit_number=OPD/20260615/004 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2276 visit_number=OPD/20260615/005 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2277 visit_number=OPD/20260614/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2278 visit_number=OPD/20260614/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2279 visit_number=OPD/20260614/003 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2280 visit_number=OPD/20260614/004 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2281 visit_number=OPD/20260614/005 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2283 visit_number=OPD/20260615/006 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2284 visit_number=OPD/20260618/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2285 visit_number=OPD/20260615/007 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2286 visit_number=OPD/20260615/008 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2287 visit_number=OPD/20260615/009 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2288 visit_number=OPD/20260615/010 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2289 visit_number=OPD/20260615/011 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2290 visit_number=OPD/20260615/012 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2291 visit_number=OPD/20260615/013 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2292 visit_number=OPD/20260615/014 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2293 visit_number=OPD/20260615/015 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2294 visit_number=OPD/20260618/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2295 visit_number=OPD/20260615/016 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2296 visit_number=OPD/20260615/017 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2297 visit_number=OPD/20260615/018 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2298 visit_number=OPD/20260618/003 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2299 visit_number=OPD/20260615/019 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2300 visit_number=OPD/20260615/020 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2301 visit_number=OPD/20260615/021 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2302 visit_number=OPD/20260615/022 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2303 visit_number=OPD/20260618/004 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2304 visit_number=OPD/20260615/023 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2305 visit_number=OPD/20260615/024 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2306 visit_number=OPD/20260618/005 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2307 visit_number=OPD/20260615/025 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2308 visit_number=OPD/20260615/026 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2309 visit_number=OPD/20260615/027 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2310 visit_number=OPD/20260615/028 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2311 visit_number=OPD/20260615/029 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2312 visit_number=OPD/20260615/030 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-06-21 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-06-16 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-06-19 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-06-23 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-06-22 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-06-10 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-06-17 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-06-29 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-07-02 00:00:00) while time zone support is active.
+  warnings.warn(
+visit_id=2313 visit_number=OPD/20260618/006 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2314 visit_number=OPD/20260615/031 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2315 visit_number=OPD/20260615/032 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2316 visit_number=OPD/20260615/033 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2317 visit_number=OPD/20260618/007 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2318 visit_number=OPD/20260618/008 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2319 visit_number=OPD/20260616/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2320 visit_number=OPD/20260616/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2321 visit_number=OPD/20260616/003 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2322 visit_number=OPD/20260616/004 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2323 visit_number=OPD/20260616/005 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2324 visit_number=OPD/20260618/009 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2325 visit_number=OPD/20260616/006 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2326 visit_number=OPD/20260616/007 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2327 visit_number=OPD/20260616/008 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2328 visit_number=OPD/20260616/009 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2330 visit_number=OPD/20260619/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2331 visit_number=OPD/20260619/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2332 visit_number=OPD/20260619/003 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2333 visit_number=OPD/20260619/004 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2334 visit_number=OPD/20260619/005 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2335 visit_number=OPD/20260619/006 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2336 visit_number=OPD/20260619/007 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2337 visit_number=OPD/20260619/008 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2339 visit_number=OPD/20260619/010 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2365 visit_number=OPD/20260621/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2366 visit_number=OPD/20260621/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2367 visit_number=OPD/20260621/003 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2368 visit_number=OPD/20260621/004 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2369 visit_number=OPD/20260621/005 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2370 visit_number=OPD/20260621/006 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2371 visit_number=OPD/20260621/007 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2373 visit_number=OPD/20260623/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2374 visit_number=OPD/20260623/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2375 visit_number=OPD/20260622/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2376 visit_number=OPD/20260622/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2377 visit_number=OPD/20260622/003 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2378 visit_number=OPD/20260622/004 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2379 visit_number=OPD/20260622/005 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2380 visit_number=OPD/20260622/006 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2381 visit_number=OPD/20260622/007 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2383 visit_number=OPD/20260610/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2384 visit_number=OPD/20260617/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2385 visit_number=OPD/20260629/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2386 visit_number=OPD/20260629/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2387 visit_number=OPD/20260629/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2388 visit_number=OPD/20260629/003 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2389 visit_number=OPD/20260629/004 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2390 visit_number=OPD/20260629/005 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=800.00, paid=500.00, balance=300.00, status=partial)
+visit_id=2391 visit_number=OPD/20260623/003 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2392 visit_number=OPD/20260623/004 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-07-05 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-07-04 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-07-08 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-07-09 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-07-13 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-07-14 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-07-15 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-07-16 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-07-06 00:00:00) while time zone support is active.
+  warnings.warn(
+C:\Users\hrith\ritik\Digitech\softwares\dghms\.venv\Lib\site-packages\django\db\models\fields\__init__.py:1671: RuntimeWarning: DateTimeField PatientProfile.last_visit_date received a naive datetime (2026-07-07 00:00:00) while time zone support is active.
+  warnings.warn(
+visit_id=2394 visit_number=OPD/20260630/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=100.00, paid=100.00, balance=0.00, status=paid)
+visit_id=2395 visit_number=OPD/20260702/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=200.00, paid=200.00, balance=0.00, status=paid)
+visit_id=2401 visit_number=OPD/20260702/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2402 visit_number=OPD/20260705/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2403 visit_number=OPD/20260705/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2404 visit_number=OPD/20260705/003 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2405 visit_number=OPD/20260705/004 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2406 visit_number=OPD/20260705/005 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2407 visit_number=OPD/20260705/006 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2408 visit_number=OPD/20260705/007 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2409 visit_number=OPD/20260705/008 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2410 visit_number=OPD/20260704/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2411 visit_number=OPD/20260704/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2412 visit_number=OPD/20260704/003 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2413 visit_number=OPD/20260704/004 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2414 visit_number=OPD/20260704/005 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2415 visit_number=OPD/20260705/009 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2416 visit_number=OPD/20260705/010 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2417 visit_number=OPD/20260708/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2418 visit_number=OPD/20260709/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2419 visit_number=OPD/20260404/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2420 visit_number=OPD/20260504/003 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2421 visit_number=OPD/20260713/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2423 visit_number=OPD/20260714/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2424 visit_number=OPD/20260715/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=2500.00, paid=2500.00, balance=0.00, status=paid)
+visit_id=2425 visit_number=OPD/20260715/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=1000.00, paid=1000.00, balance=0.00, status=paid)
+visit_id=2426 visit_number=OPD/20260716/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=1000.00, paid=1000.00, balance=0.00, status=paid)
+visit_id=2427 visit_number=OPD/20260716/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2428 visit_number=OPD/20260706/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=2300.00, paid=0.00, balance=2300.00, status=unpaid)
+visit_id=2429 visit_number=OPD/20260707/001 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2430 visit_number=OPD/20260706/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2431 visit_number=OPD/20260706/003 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2432 visit_number=OPD/20260706/004 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2433 visit_number=OPD/20260706/005 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2434 visit_number=OPD/20260706/006 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2435 visit_number=OPD/20260706/007 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2436 visit_number=OPD/20260706/008 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2437 visit_number=OPD/20260706/009 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2438 visit_number=OPD/20260706/010 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2439 visit_number=OPD/20260706/011 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2440 visit_number=OPD/20260706/012 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2441 visit_number=OPD/20260706/013 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2442 visit_number=OPD/20260706/014 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2443 visit_number=OPD/20260706/015 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2444 visit_number=OPD/20260706/016 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2445 visit_number=OPD/20260706/017 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2446 visit_number=OPD/20260707/002 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2447 visit_number=OPD/20260707/003 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2448 visit_number=OPD/20260707/004 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2449 visit_number=OPD/20260707/005 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2450 visit_number=OPD/20260707/006 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2451 visit_number=OPD/20260707/007 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2452 visit_number=OPD/20260707/008 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2453 visit_number=OPD/20260707/009 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2454 visit_number=OPD/20260707/010 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2455 visit_number=OPD/20260707/011 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2456 visit_number=OPD/20260707/012 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2457 visit_number=OPD/20260707/013 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2458 visit_number=OPD/20260707/014 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+visit_id=2459 visit_number=OPD/20260707/015 stored(total=0.00, paid=0.00, balance=0.00, status=unpaid) expected(total=0.00, paid=0.00, balance=0.00, status=paid)
+
+Checked visits: 1738
+Mismatched visits: 315
+Transitions:
+  unpaid->paid: 313
+  unpaid->partial: 1
+  unpaid->unpaid: 1
+Updated visits: 315

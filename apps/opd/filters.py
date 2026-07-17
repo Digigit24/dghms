@@ -13,6 +13,7 @@ class VisitFilter(django_filters.FilterSet):
     visit_type = django_filters.CharFilter(field_name='visit_type', lookup_expr='exact')
     payment_status = django_filters.CharFilter(field_name='payment_status', lookup_expr='exact')
     is_follow_up = django_filters.BooleanFilter(field_name='is_follow_up')
+    follow_up_required = django_filters.BooleanFilter(field_name='follow_up_required')
     patient = django_filters.NumberFilter(field_name='patient', lookup_expr='exact')
     doctor = django_filters.NumberFilter(field_name='doctor', lookup_expr='exact')
 
@@ -34,6 +35,21 @@ class VisitFilter(django_filters.FilterSet):
         label='Visit date on or before (YYYY-MM-DD)',
     )
 
+    follow_up_date_from = django_filters.DateFilter(
+        field_name='follow_up_date',
+        lookup_expr='gte',
+        label='Follow-up date on or after (YYYY-MM-DD)',
+    )
+    follow_up_date_to = django_filters.DateFilter(
+        field_name='follow_up_date',
+        lookup_expr='lte',
+        label='Follow-up date on or before (YYYY-MM-DD)',
+    )
+
     class Meta:
         model = Visit
-        fields = ['status', 'visit_type', 'payment_status', 'is_follow_up', 'patient', 'doctor', 'visit_date']
+        fields = [
+            'status', 'visit_type', 'payment_status', 'is_follow_up',
+            'follow_up_required', 'patient', 'doctor', 'visit_date',
+            'follow_up_date',
+        ]
