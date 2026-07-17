@@ -746,12 +746,17 @@ class RazorpayWebhookView(APIView):
 
             order = Order.objects.get(razorpay_order_id=razorpay_order_id)
 
-            # 5. Verify signature
+            # 5. Scope to the order's stored tenant (webhook is unauthenticated;
+            #    never trust request headers for tenant here).
+            if not order.tenant_id:
+                return HttpResponse('Order has no tenant', status=400)
+
+            # 6. Verify signature using the tenant's Razorpay credentials
             razorpay_client = RazorpayClient(order.tenant_id)
             if not razorpay_client.verify_webhook_signature(payload, signature):
                 return HttpResponse('Invalid signature', status=400)
 
-            # 6. Handle event types
+            # 7. Handle event types
             if event_type == 'payment.authorized':
                 self._handle_payment_authorized(order, event_data)
             elif event_type == 'payment.failed':
@@ -772,7 +777,8 @@ class RazorpayWebhookView(APIView):
         """Handle payment.authorized event"""
         payment = event_data['payload']['payment']['entity']
 
-        # Update order (payment will be auto-captured if auto_capture=True)
+        # Update order (payment will be auto-captured if auto_capture=True).
+        # All operations stay scoped to order.tenant_id because we only mutate this order.
         order.razorpay_payment_id = payment['id']
         order.payment_verified = True
         order.save(update_fields=['razorpay_payment_id', 'payment_verified'])
@@ -780,7 +786,7 @@ class RazorpayWebhookView(APIView):
     def _handle_payment_captured(self, order, event_data):
         """Handle payment.captured event"""
 
-        # Mark order as paid
+        # Mark order as paid. Scoped to order.tenant_id by using the loaded order only.
         if not order.is_paid:
             order.is_paid = True
             order.status = 'completed'

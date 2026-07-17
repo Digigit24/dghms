@@ -4,7 +4,7 @@ from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from common.drf_auth import HMSPermission, AllowAny
+from common.drf_auth import HMSPermission, IsAuthenticated
 from common.responses import error_response, success_response
 from common import error_codes
 
@@ -83,7 +83,7 @@ class HospitalConfigView(generics.RetrieveUpdateAPIView):
 
     def get_permissions(self):
         if self.request.method == 'GET':
-            return [AllowAny()]
+            return [IsAuthenticated()]
         hms_perm = HMSPermission()
         hms_perm.hms_module = 'hospital'
         hms_perm.action_permission_map = {
@@ -156,7 +156,7 @@ class HospitalNavStyleView(APIView):
         # inference when view.action is unset (plain APIView, no router):
         # PATCH -> 'partial_update' -> action_permission_map -> 'edit_config'.
         if self.request.method == 'GET':
-            return [AllowAny()]
+            return [IsAuthenticated()]
         hms_perm = HMSPermission()
         hms_perm.hms_module = 'hospital'
         hms_perm.action_permission_map = {'partial_update': 'edit_config'}
@@ -374,7 +374,7 @@ class HospitalLetterheadView(APIView):
         # method-based action inference when view.action is unset (plain
         # APIView, no router): PATCH -> 'partial_update' -> 'edit_config'.
         if self.request.method == 'GET':
-            return [AllowAny()]
+            return [IsAuthenticated()]
         hms_perm = HMSPermission()
         hms_perm.hms_module = 'hospital'
         hms_perm.action_permission_map = {'partial_update': 'edit_config'}
