@@ -1,17 +1,45 @@
 
 from decimal import Decimal
+import datetime
+import uuid
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import jwt
+from django.conf import settings
 from django.db.models.signals import post_save
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
+from rest_framework.test import APIClient
 
+from apps.doctors.models import DoctorProfile
 from apps.opd.management.commands.recompute_opd_bill_totals import Command
 from apps.opd.filters import VisitFilter
-from apps.opd.models import OPDBillItem
+from apps.opd.models import OPDBillItem, Visit
+from apps.patients.models import PatientProfile
 from apps.opd.serializers import VisitListSerializer, VisitSetFollowUpSerializer
 from apps.opd.signals import update_opd_bill_totals
 from apps.opd.views import VisitViewSet, _invalidate_today_cache
+
+
+def _jwt_for(*, tenant_id, user_id, email, permissions):
+    now = datetime.datetime.now(datetime.timezone.utc)
+    return jwt.encode(
+        {
+            "user_id": str(user_id),
+            "email": email,
+            "tenant_id": str(tenant_id),
+            "tenant_slug": "test-tenant",
+            "is_super_admin": False,
+            "permissions": permissions,
+            "enabled_modules": ["hms"],
+            "roles": [],
+            "user_type": "staff",
+            "iat": int(now.timestamp()),
+            "exp": int((now + datetime.timedelta(minutes=10)).timestamp()),
+        },
+        settings.JWT_SECRET_KEY,
+        algorithm=settings.JWT_ALGORITHM,
+    )
 
 
 class OPDBillSynchronizationTests(SimpleTestCase):
@@ -83,3 +111,63 @@ class VisitCacheFailureTests(SimpleTestCase):
         )
 
         _invalidate_today_cache("tenant-1")
+
+
+class VisitOwnScopeTests(TestCase):
+    def setUp(self):
+        self.tenant_id = uuid.uuid4()
+        self.doctor_user_id = uuid.uuid4()
+        self.other_user_id = uuid.uuid4()
+        self.doctor = DoctorProfile.objects.create(
+            tenant_id=self.tenant_id,
+            user_id=self.doctor_user_id,
+            first_name="Own",
+            last_name="Doctor",
+            status="active",
+        )
+        self.other_doctor = DoctorProfile.objects.create(
+            tenant_id=self.tenant_id,
+            user_id=self.other_user_id,
+            first_name="Other",
+            last_name="Doctor",
+            status="active",
+        )
+        self.patient = PatientProfile.objects.create(
+            tenant_id=self.tenant_id,
+            first_name="Test",
+            last_name="Patient",
+            gender="male",
+            mobile_primary="9999999999",
+        )
+        self.own_visit = Visit.objects.create(
+            tenant_id=self.tenant_id,
+            visit_number="OPD/OWN/001",
+            patient=self.patient,
+            doctor=self.doctor,
+            status="waiting",
+            visit_date=datetime.date.today(),
+        )
+        Visit.objects.create(
+            tenant_id=self.tenant_id,
+            visit_number="OPD/OTHER/001",
+            patient=self.patient,
+            doctor=self.other_doctor,
+            status="waiting",
+            visit_date=datetime.date.today(),
+        )
+
+    def test_queue_doctor_me_resolves_profile_with_own_view_scope(self):
+        client = APIClient()
+        token = _jwt_for(
+            tenant_id=self.tenant_id,
+            user_id=self.doctor_user_id,
+            email="doctor@example.com",
+            permissions={"hms.opd.view": "own"},
+        )
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        response = client.get("/api/opd/visits/queue/?doctor=me")
+
+        self.assertEqual(response.status_code, 200)
+        waiting_ids = [row["id"] for row in response.data["data"]["waiting"]]
+        self.assertEqual(waiting_ids, [self.own_visit.id])

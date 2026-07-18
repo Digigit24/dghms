@@ -14,7 +14,8 @@ from django.db.models.expressions import RawSQL
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse, OpenApiExample
 from common.mixins import TenantViewSetMixin
 from common.cache import CeliyoCache
-from common.drf_auth import HMSPermission
+from common.drf_auth import HMSPermission, HMSPermissionAllowOwnView
+from common import permission_evaluator
 from common.responses import error_response, action_response, success_response
 from common import error_codes
 from .models import (
@@ -51,6 +52,19 @@ def _bust_ward_cache(tenant_id) -> None:
             tenant_id=str(tenant_id),
             error=str(exc),
         )
+
+
+def _own_doctor_profile(request):
+    """Resolve the caller's tenant-scoped DoctorProfile, if one exists."""
+    from apps.doctors.models import DoctorProfile
+
+    try:
+        return DoctorProfile.objects.filter(
+            tenant_id=request.tenant_id,
+            user_id=request.user_id,
+        ).first()
+    except ValueError:
+        return None
 
 
 class WardViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
@@ -215,7 +229,7 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
     queryset = Admission.objects.select_related('patient', 'ward', 'bed')
     hms_module = 'ipd'
-    permission_classes = [HMSPermission]
+    permission_classes = [HMSPermissionAllowOwnView]
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     search_fields = [
@@ -245,7 +259,7 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         the only action whose serializer (AdmissionListSerializer) exposes it.
         """
         today = timezone.now().date()
-        return Admission.objects.filter(
+        queryset = Admission.objects.filter(
             tenant_id=self.request.tenant_id
         ).select_related('patient', 'ward', 'bed').annotate(
             # Use RawSQL so the PostgreSQL cast is unambiguous:
@@ -257,6 +271,17 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                 output_field=IntegerField(),
             )
         )
+        if (
+            self.action in {'list', 'active', 'statistics'}
+            and permission_evaluator.normalize_grant(self.request, 'hms.ipd.view') == 'own'
+            and not permission_evaluator.normalize_grant(self.request, 'admin.full_access.enabled') == 'all'
+            and not getattr(self.request, 'is_super_admin', False)
+        ):
+            queryset = queryset.filter(
+                Q(doctor_id=self.request.user_id) |
+                Q(created_by_user_id=self.request.user_id)
+            )
+        return queryset
 
     def list(self, request, *args, **kwargs):
         """
@@ -265,7 +290,14 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         the annotation is added here rather than in get_queryset() — see that
         method's docstring for why it can't live there.
         """
-        queryset = self.filter_queryset(self.get_queryset()).annotate(
+        queryset = self.get_queryset()
+        if request.query_params.get('doctor') == 'me':
+            own_doctor = _own_doctor_profile(request)
+            if own_doctor is None:
+                queryset = queryset.none()
+            else:
+                queryset = queryset.filter(doctor_id=own_doctor.user_id)
+        queryset = self.filter_queryset(queryset).annotate(
             bill_total=Sum('ipd_bills__payable_amount'),
             bill_paid=Sum('ipd_bills__received_amount'),
         )

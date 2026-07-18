@@ -13,8 +13,9 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 import django_filters
 
-from common.drf_auth import HMSPermission, IsAuthenticated
+from common.drf_auth import HMSPermission, HMSPermissionAllowOwnView, IsAuthenticated
 from common.mixins import TenantViewSetMixin
+from common import permission_evaluator
 from .filters import VisitFilter
 from .services.stats import (
     compute_bill_statistics,
@@ -73,6 +74,19 @@ from .serializers import (
 
 
 log = structlog.get_logger(__name__)
+
+
+def _own_doctor_profile(request):
+    """Resolve the caller's tenant-scoped DoctorProfile, if one exists."""
+    from apps.doctors.models import DoctorProfile
+
+    try:
+        return DoctorProfile.objects.filter(
+            tenant_id=request.tenant_id,
+            user_id=request.user_id,
+        ).first()
+    except ValueError:
+        return None
 
 
 def _invalidate_today_cache(tenant_id):
@@ -148,7 +162,7 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     ).prefetch_related(
          'findings', 'attachments'
     )
-    permission_classes = [HMSPermission]
+    permission_classes = [HMSPermissionAllowOwnView]
     hms_module = 'opd'  # Maps to permissions.hms.opd in JWT
 
     # Action → HMS permission name mapping.
@@ -226,7 +240,20 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         queryset = super().get_queryset()
         # JWT auth: use request.roles, never request.user.groups
         # TenantViewSetMixin already scopes by tenant_id.
-        # HMSPermission gates action access — no queryset-level role filter needed.
+        # HMSPermission gates action access. For "own" read scope, apply the
+        # ownership constraint here because DRF's list-level permission check
+        # has no object/owner context.
+        if (
+            self.action in {'list', 'today', 'queue', 'stats', 'statistics'}
+            and permission_evaluator.normalize_grant(self.request, 'hms.opd.view') == 'own'
+            and not permission_evaluator.normalize_grant(self.request, 'admin.full_access.enabled') == 'all'
+            and not getattr(self.request, 'is_super_admin', False)
+        ):
+            own_doctor = _own_doctor_profile(self.request)
+            own_filter = Q(created_by_id=self.request.user_id)
+            if own_doctor is not None:
+                own_filter |= Q(doctor_id=own_doctor.id)
+            queryset = queryset.filter(own_filter)
         return queryset
 
     def perform_create(self, serializer):
@@ -319,6 +346,12 @@ class VisitViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
         # Get all today's active visits
         queryset = self.get_queryset().filter(visit_date=today)
+        if request.query_params.get('doctor') == 'me':
+            own_doctor = _own_doctor_profile(request)
+            if own_doctor is None:
+                queryset = queryset.none()
+            else:
+                queryset = queryset.filter(doctor_id=own_doctor.id)
 
         # Group by status
         waiting = queryset.filter(status='waiting').order_by('entry_time')

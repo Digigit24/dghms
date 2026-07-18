@@ -270,6 +270,23 @@ class HMSPermission(permissions.BasePermission):
         return True
 
 
+class HMSPermissionAllowOwnView(HMSPermission):
+    """HMS permission variant for views that explicitly filter ``own`` lists.
+
+    DRF runs has_permission() before a queryset/object exists, so a scoped
+    ``own`` view grant otherwise fails closed. Only use this class on viewsets
+    whose get_queryset/list actions apply the corresponding owner filter.
+    """
+
+    def check_hms_permission(self, request, module, permission_name):
+        permission_key = f"hms.{module}.{permission_name}"
+        if permission_evaluator.has_permission(request, permission_key):
+            return True
+        if permission_name == "view":
+            return permission_evaluator.normalize_grant(request, permission_key) == "own"
+        return False
+
+
 class IsAuthenticated(permissions.BasePermission):
     """
     Simple permission class that only checks if user is authenticated via JWT.

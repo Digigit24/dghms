@@ -32,6 +32,11 @@ class InventoryCategory(models.Model):
     code       = models.CharField(max_length=30, blank=True,
                     help_text="Short code, e.g. MED, SURG, EQP")
     description = models.TextField(blank=True)
+    expiry_alert_days = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Optional expiry-alert lead time for items in this category.",
+    )
     parent     = models.ForeignKey(
         "self", null=True, blank=True,
         on_delete=models.SET_NULL,
@@ -159,6 +164,11 @@ class InventoryItem(models.Model):
     max_stock_level = models.DecimalField(
         max_digits=10, decimal_places=2, default=Decimal("0.00"),
         help_text="Alert fires when current_stock exceeds this level (0 = disabled)",
+    )
+    expiry_alert_days = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Optional item-specific expiry-alert lead time in days.",
     )
 
     # Denormalized running stock – maintained by StockTransaction.save()

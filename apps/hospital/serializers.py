@@ -47,6 +47,7 @@ class HospitalSerializer(serializers.ModelSerializer):
             'nav_style', 'nav_style_label',
             'letterhead_config',
             'theme_config',
+            'inventory_config',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
@@ -70,6 +71,16 @@ class HospitalUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Hospital
         exclude = ['id', 'tenant_id', 'created_at', 'updated_at']
+
+    def validate_inventory_config(self, value):
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("Must be an object.")
+        days = value.get("default_expiry_alert_days")
+        if days is not None and (isinstance(days, bool) or not isinstance(days, int) or days < 0):
+            raise serializers.ValidationError(
+                {"default_expiry_alert_days": "Must be a non-negative integer or null."}
+            )
+        return value
 
 
 class HospitalNavStyleSerializer(serializers.ModelSerializer):

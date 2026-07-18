@@ -1,24 +1,23 @@
-
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
-from apps.pharmacy.serializers import PrescriptionSerializer
+from apps.diagnostics.views import DiagnosticOrderViewSet
 
 
-class PrescriptionEncounterAliasTest(SimpleTestCase):
+class DiagnosticEncounterAliasTest(SimpleTestCase):
     def test_short_and_dotted_aliases_resolve_identically(self):
         def fake_get(*, app_label, model):
             return SimpleNamespace(app_label=app_label, model=model)
 
         with patch(
-            "apps.pharmacy.serializers.ContentType.objects.get",
+            "apps.diagnostics.views.ContentType.objects.get",
             side_effect=fake_get,
         ):
             for value in ("opd", "opd.visit"):
-                resolved = PrescriptionSerializer.resolve_encounter_type(value)
+                resolved = DiagnosticOrderViewSet._resolve_encounter_content_type(value)
                 self.assertEqual((resolved.app_label, resolved.model), ("opd", "visit"))
             for value in ("ipd", "ipd.admission"):
-                resolved = PrescriptionSerializer.resolve_encounter_type(value)
+                resolved = DiagnosticOrderViewSet._resolve_encounter_content_type(value)
                 self.assertEqual((resolved.app_label, resolved.model), ("ipd", "admission"))

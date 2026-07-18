@@ -8,11 +8,11 @@ from django.core.cache import cache
 from django.http import HttpResponse
 
 from common.drf_auth import HMSPermission
+from common.celery_utils import enqueue_task, get_task_snapshot
 from common.mixins import TenantViewSetMixin
 from django.db.models import Sum, F
 from django.utils import timezone
 from datetime import timedelta
-from celery.result import AsyncResult
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 
 from .models import (
@@ -354,12 +354,19 @@ class PharmacyProductViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         # Start async import task
-        task = import_products_task.delay(
+        task = enqueue_task(
+            import_products_task,
+            log_event="pharmacy_import_publish_failed",
             file_content=file_content,
             file_format=file_format,
             tenant_id=str(request.tenant_id),
             skip_duplicates=skip_duplicates
         )
+        if task is None:
+            return Response({
+                'success': False,
+                'error': 'Background processing is temporarily unavailable.'
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         return Response({
             'success': True,
@@ -400,11 +407,18 @@ class PharmacyProductViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             filters['search'] = request.query_params.get('search')
 
         # Start async export task
-        task = export_products_task.delay(
+        task = enqueue_task(
+            export_products_task,
+            log_event="pharmacy_export_publish_failed",
             tenant_id=str(request.tenant_id),
             file_format=file_format,
             filters=filters
         )
+        if task is None:
+            return Response({
+                'success': False,
+                'error': 'Background processing is temporarily unavailable.'
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         return Response({
             'success': True,
@@ -431,26 +445,27 @@ class PharmacyProductViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         # Check task status
-        task_result = AsyncResult(task_id)
+        task_snapshot = get_task_snapshot(task_id)
 
         # Get cached status and result
         cached_status = cache.get(f'import_task_{task_id}_status') or cache.get(f'export_task_{task_id}_status')
         cached_progress = cache.get(f'import_task_{task_id}_progress') or cache.get(f'export_task_{task_id}_progress')
         cached_result = cache.get(f'import_task_{task_id}_result') or cache.get(f'export_task_{task_id}_result')
 
+        task_state = task_snapshot['state'] if task_snapshot else 'UNAVAILABLE'
         response_data = {
             'success': True,
             'task_id': task_id,
-            'state': task_result.state,
-            'status': cached_status or task_result.state.lower(),
+            'state': task_state,
+            'status': cached_status or task_state.lower(),
             'progress': cached_progress or 0,
         }
 
-        if task_result.ready():
-            if task_result.successful():
-                response_data['result'] = cached_result or task_result.result
+        if task_snapshot and task_snapshot['ready']:
+            if task_snapshot['successful']:
+                response_data['result'] = cached_result or task_snapshot['result']
             else:
-                response_data['error'] = str(task_result.info)
+                response_data['error'] = str(task_snapshot['info'])
         elif cached_result:
             response_data['result'] = cached_result
 

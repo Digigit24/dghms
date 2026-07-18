@@ -25,7 +25,7 @@ from decimal import Decimal
 
 import structlog
 from django.db import transaction as db_transaction
-from django.db.models import Count, F, Sum
+from django.db.models import Count, F, Prefetch, Sum
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import (
@@ -61,28 +61,61 @@ from .serializers import (
     StockAlertSerializer,
     StockTransactionSerializer,
 )
+from .services.expiry import (
+    DEFAULT_EXPIRY_ALERT_DAYS,
+    get_tenant_default_expiry_alert_days,
+    resolve_expiry_alert_days,
+)
 
 log = structlog.get_logger(__name__)
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
-EXPIRY_WARNING_DAYS = 90   # alert when batch expires within this many days
+EXPIRY_WARNING_DAYS = DEFAULT_EXPIRY_ALERT_DAYS
 
 
-def _check_and_update_alerts(item: InventoryItem, tenant_id, batch: InventoryBatch = None):
+def _requested_tags(request):
+    return sorted({
+        tag.strip()
+        for tag in (request.query_params.get("tags") or "").split(",")
+        if tag.strip()
+    })
+
+
+def _filter_by_tags(queryset, tags, field_prefix=""):
+    """Apply the same AND tag semantics used by the item-list endpoint."""
+    for tag in tags:
+        queryset = queryset.filter(**{f"{field_prefix}tags__contains": tag})
+    return queryset
+
+
+def _invalidate_inventory_cache(tenant_id):
+    cache = CeliyoCache()
+    cache.delete_pattern(f"inventory:dashboard:*:{tenant_id}:*")
+    cache.delete_pattern(f"inventory:alerts:{tenant_id}:*")
+
+
+def _check_and_update_alerts(
+    item: InventoryItem,
+    tenant_id,
+    batch: InventoryBatch = None,
+    tenant_default=None,
+):
     """
     Evaluate stock thresholds and expiry for *item* and create / resolve alerts.
     Called after every StockTransaction and every batch save.  Never raises —
     alert failure must never block a stock transaction.
     """
     try:
+        if tenant_default is None:
+            tenant_default = get_tenant_default_expiry_alert_days(tenant_id)
         _eval_stock_alerts(item, tenant_id)
         if batch:
-            _eval_expiry_alert(item, batch, tenant_id)
+            _eval_expiry_alert(item, batch, tenant_id, tenant_default)
         # Also re-evaluate ALL batches for this item (e.g. after purchase resolves a shortage)
         for b in item.batches.filter(is_active=True):
-            _eval_expiry_alert(item, b, tenant_id)
+            _eval_expiry_alert(item, b, tenant_id, tenant_default)
     except Exception as exc:
         log.warning("alert_check_failed", item_id=item.id, error=str(exc))
 
@@ -117,7 +150,12 @@ def _eval_stock_alerts(item: InventoryItem, tenant_id):
             ).update(is_active=False)
 
 
-def _eval_expiry_alert(item: InventoryItem, batch: InventoryBatch, tenant_id):
+def _eval_expiry_alert(
+    item: InventoryItem,
+    batch: InventoryBatch,
+    tenant_id,
+    tenant_default=None,
+):
     if not batch.expiry_date or batch.remaining_quantity <= 0:
         # Resolve any existing expiry alerts for this batch
         StockAlert.objects.filter(
@@ -127,13 +165,14 @@ def _eval_expiry_alert(item: InventoryItem, batch: InventoryBatch, tenant_id):
 
     today = timezone.now().date()
     days  = (batch.expiry_date - today).days
+    warning_days = resolve_expiry_alert_days(item, tenant_default)
 
     if days < 0:
         alert_type = "expired"
         msg = (f"Batch {batch.batch_number} of {item.name} expired on "
                f"{batch.expiry_date} ({abs(days)} days ago). "
                f"Remaining: {batch.remaining_quantity} {item.unit_of_measure}.")
-    elif days <= EXPIRY_WARNING_DAYS:
+    elif days <= warning_days:
         alert_type = "expiry_approaching"
         msg = (f"Batch {batch.batch_number} of {item.name} expires on "
                f"{batch.expiry_date} ({days} days). "
@@ -150,7 +189,7 @@ def _eval_expiry_alert(item: InventoryItem, batch: InventoryBatch, tenant_id):
         defaults=dict(
             message=msg,
             current_value=Decimal(str(days)),
-            threshold=Decimal(str(EXPIRY_WARNING_DAYS)),
+            threshold=Decimal(str(warning_days)),
             is_active=True,
             is_acknowledged=False,
         ),
@@ -228,6 +267,7 @@ def _apply_transaction(
     # don't risk rolling back the transaction on failure
     item.refresh_from_db(fields=["current_stock", "reorder_level", "max_stock_level"])
     _check_and_update_alerts(item, tenant_id, batch)
+    _invalidate_inventory_cache(tenant_id)
 
     log.info(
         "stock_transaction_applied",
@@ -267,8 +307,8 @@ class InventoryCategoryViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
     action_permission_map = {
-        "list":           "view_inventory",
-        "retrieve":       "view_inventory",
+        "list":           "view",
+        "retrieve":       "view",
         "create":         "manage_inventory",
         "partial_update": "manage_inventory",
         "destroy":        "manage_inventory",
@@ -279,6 +319,26 @@ class InventoryCategoryViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     search_fields    = ["name", "code"]
     ordering_fields  = ["name", "created_at"]
     ordering         = ["name"]
+
+    def perform_create(self, serializer):
+        serializer.save(tenant_id=self.request.tenant_id)
+        _invalidate_inventory_cache(self.request.tenant_id)
+
+    def perform_update(self, serializer):
+        super().perform_update(serializer)
+        tenant_default = get_tenant_default_expiry_alert_days(self.request.tenant_id)
+        for item in serializer.instance.items.select_related("category").filter(is_active=True):
+            _check_and_update_alerts(
+                item,
+                self.request.tenant_id,
+                tenant_default=tenant_default,
+            )
+        _invalidate_inventory_cache(self.request.tenant_id)
+
+    def perform_destroy(self, instance):
+        tenant_id = self.request.tenant_id
+        super().perform_destroy(instance)
+        _invalidate_inventory_cache(tenant_id)
 
 
 # ─── 2. Supplier ViewSet ─────────────────────────────────────────────────────
@@ -305,8 +365,8 @@ class InventorySupplierViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
     action_permission_map = {
-        "list":           "view_inventory",
-        "retrieve":       "view_inventory",
+        "list":           "view",
+        "retrieve":       "view",
         "create":         "manage_inventory",
         "partial_update": "manage_inventory",
         "destroy":        "manage_inventory",
@@ -343,14 +403,14 @@ class InventoryItemViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
     action_permission_map = {
-        "list":           "view_inventory",
-        "retrieve":       "view_inventory",
+        "list":           "view",
+        "retrieve":       "view",
         "create":         "manage_inventory",
         "partial_update": "manage_inventory",
         "destroy":        "manage_inventory",
-        "low_stock":      "view_inventory",
-        "expiring_soon":  "view_inventory",
-        "stock_history":  "view_inventory",
+        "low_stock":      "view",
+        "expiring_soon":  "view",
+        "stock_history":  "view",
     }
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -366,34 +426,24 @@ class InventoryItemViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
-        tags_param = self.request.query_params.get("tags")
-        if tags_param:
-            tags = [t.strip() for t in tags_param.split(",") if t.strip()]
-            for tag in tags:
-                qs = qs.filter(tags__contains=tag)
-        return qs
+        return _filter_by_tags(qs, _requested_tags(self.request))
 
     def perform_create(self, serializer):
         serializer.save(
             tenant_id=self.request.tenant_id,
             created_by_user_id=self.request.user_id,
         )
-        cache = CeliyoCache()
-        cache.delete_pattern(f"inventory:dashboard:{self.request.tenant_id}")
-        cache.delete_pattern(f"inventory:alerts:{self.request.tenant_id}")
+        _invalidate_inventory_cache(self.request.tenant_id)
 
     def perform_update(self, serializer):
         super().perform_update(serializer)
-        cache = CeliyoCache()
-        cache.delete_pattern(f"inventory:dashboard:{self.request.tenant_id}")
-        cache.delete_pattern(f"inventory:alerts:{self.request.tenant_id}")
+        _check_and_update_alerts(serializer.instance, self.request.tenant_id)
+        _invalidate_inventory_cache(self.request.tenant_id)
 
     def perform_destroy(self, instance):
         tenant_id = self.request.tenant_id
         super().perform_destroy(instance)
-        cache = CeliyoCache()
-        cache.delete_pattern(f"inventory:dashboard:{tenant_id}")
-        cache.delete_pattern(f"inventory:alerts:{tenant_id}")
+        _invalidate_inventory_cache(tenant_id)
 
     # ── Custom actions ────────────────────────────────────────────────────────
 
@@ -417,21 +467,53 @@ class InventoryItemViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     @extend_schema(
         summary="Items with batches expiring soon",
         parameters=[
-            OpenApiParameter("days", int, description=f"Look-ahead days (default {EXPIRY_WARNING_DAYS})"),
+            OpenApiParameter(
+                "days",
+                int,
+                description="Optional explicit look-ahead; otherwise each item's configured threshold is used.",
+            ),
         ],
         tags=["Inventory — Items"],
     )
     @action(detail=False, methods=["get"], url_path="expiring-soon")
     def expiring_soon(self, request):
-        days   = int(request.query_params.get("days", EXPIRY_WARNING_DAYS))
-        cutoff = timezone.now().date() + datetime.timedelta(days=days)
-        qs = self.get_queryset().filter(
-            is_active=True,
-            batches__is_active=True,
-            batches__expiry_date__lte=cutoff,
-            batches__expiry_date__isnull=False,
-            batches__remaining_quantity__gt=0,
-        ).distinct().order_by("name")
+        today = timezone.now().date()
+        days_param = request.query_params.get("days")
+        if days_param is not None:
+            try:
+                days = int(days_param)
+            except (TypeError, ValueError):
+                days = EXPIRY_WARNING_DAYS
+            cutoff = today + datetime.timedelta(days=days)
+            qs = self.get_queryset().filter(
+                is_active=True,
+                batches__is_active=True,
+                batches__expiry_date__lte=cutoff,
+                batches__expiry_date__gte=today,
+                batches__remaining_quantity__gt=0,
+            ).distinct().order_by("name")
+        else:
+            batch_qs = InventoryBatch.objects.filter(
+                is_active=True,
+                expiry_date__gte=today,
+                remaining_quantity__gt=0,
+            )
+            candidates = self.get_queryset().filter(is_active=True).select_related(
+                "category"
+            ).prefetch_related(
+                Prefetch("batches", queryset=batch_qs, to_attr="active_expiry_batches")
+            )
+            tenant_default = get_tenant_default_expiry_alert_days(request.tenant_id)
+            item_ids = [
+                item.id
+                for item in candidates
+                if any(
+                    (batch.expiry_date - today).days
+                    <= resolve_expiry_alert_days(item, tenant_default)
+                    for batch in item.active_expiry_batches
+                )
+            ]
+            qs = self.get_queryset().filter(id__in=item_ids).order_by("name")
         page = self.paginate_queryset(qs)
         serializer = InventoryItemListSerializer(page or qs, many=True)
         if page is not None:
@@ -481,6 +563,7 @@ class InventoryItemViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             OpenApiParameter("is_active", bool),
             OpenApiParameter("expiring_within_days", int,
                              description="Batches expiring within N days"),
+            OpenApiParameter("tags", str, description="Comma-separated item tags (AND semantics)"),
         ],
         tags=["Inventory — Batches"],
     ),
@@ -490,15 +573,15 @@ class InventoryItemViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     destroy=extend_schema(summary="Delete batch", tags=["Inventory — Batches"]),
 )
 class InventoryBatchViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
-    queryset = InventoryBatch.objects.select_related("item", "supplier").all()
+    queryset = InventoryBatch.objects.select_related("item", "item__category", "supplier").all()
     serializer_class = InventoryBatchSerializer
     permission_classes = [HMSPermission]
     hms_module = "inventory"
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
     action_permission_map = {
-        "list":           "view_inventory",
-        "retrieve":       "view_inventory",
+        "list":           "view",
+        "retrieve":       "view",
         "create":         "manage_inventory",
         "partial_update": "manage_inventory",
         "destroy":        "manage_inventory",
@@ -512,6 +595,7 @@ class InventoryBatchViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        qs = _filter_by_tags(qs, _requested_tags(self.request), "item__")
         days_param = self.request.query_params.get("expiring_within_days")
         if days_param:
             try:
@@ -580,8 +664,8 @@ class StockTransactionViewSet(TenantViewSetMixin, viewsets.ReadOnlyModelViewSet)
     hms_module = "inventory"
 
     action_permission_map = {
-        "list":     "view_inventory",
-        "retrieve": "view_inventory",
+        "list":     "view",
+        "retrieve": "view",
         "receive":  "manage_inventory",
         "issue":    "manage_inventory",
         "adjust":   "manage_inventory",
@@ -803,6 +887,7 @@ class StockTransactionViewSet(TenantViewSetMixin, viewsets.ReadOnlyModelViewSet)
             OpenApiParameter("alert_type",      str,
                 description="low_stock | out_of_stock | expiry_approaching | expired | overstock"),
             OpenApiParameter("item",            int),
+            OpenApiParameter("tags",            str, description="Comma-separated item tags (AND semantics)"),
         ],
         tags=["Inventory — Alerts"],
     ),
@@ -815,10 +900,10 @@ class StockAlertViewSet(TenantViewSetMixin, viewsets.ReadOnlyModelViewSet):
     hms_module = "inventory"
 
     action_permission_map = {
-        "list":        "view_inventory",
-        "retrieve":    "view_inventory",
+        "list":        "view",
+        "retrieve":    "view",
         "acknowledge": "manage_inventory",
-        "summary":     "view_inventory",
+        "summary":     "view",
         "refresh":     "manage_inventory",
     }
 
@@ -826,6 +911,13 @@ class StockAlertViewSet(TenantViewSetMixin, viewsets.ReadOnlyModelViewSet):
     filterset_fields = ["is_active", "is_acknowledged", "alert_type", "item"]
     ordering_fields  = ["created_at", "updated_at"]
     ordering         = ["-created_at"]
+
+    def get_queryset(self):
+        return _filter_by_tags(
+            super().get_queryset(),
+            _requested_tags(self.request),
+            "item__",
+        )
 
     @extend_schema(
         summary="Acknowledge an alert",
@@ -847,6 +939,7 @@ class StockAlertViewSet(TenantViewSetMixin, viewsets.ReadOnlyModelViewSet):
     @extend_schema(
         summary="Alert summary counts",
         description="Returns count of active alerts by type for the badge/notification display.",
+        parameters=[OpenApiParameter("tags", str, description="Comma-separated item tags (AND semantics)")],
         tags=["Inventory — Alerts"],
     )
     @action(detail=False, methods=["get"])
@@ -854,7 +947,9 @@ class StockAlertViewSet(TenantViewSetMixin, viewsets.ReadOnlyModelViewSet):
         from .services.stats import compute_alerts_summary
 
         cache = CeliyoCache()
-        cache_key = f"inventory:alerts:{request.tenant_id}"
+        tags = _requested_tags(request)
+        tag_key = ",".join(tags) or "all"
+        cache_key = f"inventory:alerts:{request.tenant_id}:{tag_key}"
         cache_available = True
         try:
             cached = cache.get(cache_key)
@@ -872,7 +967,7 @@ class StockAlertViewSet(TenantViewSetMixin, viewsets.ReadOnlyModelViewSet):
         # see apps/inventory/services/stats.py.
         data = {
             "success": True,
-            "data": compute_alerts_summary(request.tenant_id),
+            "data": compute_alerts_summary(request.tenant_id, tags=tags),
         }
         if cache_available:
             try:
@@ -895,7 +990,7 @@ class StockAlertViewSet(TenantViewSetMixin, viewsets.ReadOnlyModelViewSet):
     )
     @action(detail=False, methods=["post"])
     def refresh(self, request):
-        items = InventoryItem.objects.filter(
+        items = InventoryItem.objects.select_related("category").filter(
             tenant_id=request.tenant_id, is_active=True
         )
         count = 0
@@ -915,7 +1010,7 @@ class InventoryDashboardViewSet(TenantViewSetMixin, viewsets.ViewSet):
     queryset = InventoryItem.objects.none()
 
     action_permission_map = {
-        "stats": "view_inventory",
+        "stats": "view",
     }
 
     def get_queryset(self):
@@ -924,6 +1019,7 @@ class InventoryDashboardViewSet(TenantViewSetMixin, viewsets.ViewSet):
     @extend_schema(
         summary="Inventory dashboard statistics",
         responses={200: InventoryDashboardSerializer},
+        parameters=[OpenApiParameter("tags", str, description="Comma-separated item tags (AND semantics)")],
         tags=["Inventory — Dashboard"],
     )
     @action(detail=False, methods=["get"])
@@ -931,8 +1027,18 @@ class InventoryDashboardViewSet(TenantViewSetMixin, viewsets.ViewSet):
         from .services.stats import compute_dashboard_stats
 
         cache = CeliyoCache()
-        cache_key = f"inventory:dashboard:{request.tenant_id}"
-        cached = cache.get(cache_key)
+        tags = _requested_tags(request)
+        tag_key = ",".join(tags) or "all"
+        cache_key = f"inventory:dashboard:v2:{request.tenant_id}:{tag_key}"
+        try:
+            cached = cache.get(cache_key)
+        except Exception as exc:
+            log.warning(
+                "inventory_dashboard_cache_read_failed",
+                tenant_id=str(request.tenant_id),
+                error=str(exc),
+            )
+            cached = None
         if cached is not None:
             return Response(cached)
 
@@ -940,7 +1046,14 @@ class InventoryDashboardViewSet(TenantViewSetMixin, viewsets.ViewSet):
         # see apps/inventory/services/stats.py.
         result = {
             "success": True,
-            "data": compute_dashboard_stats(request.tenant_id),
+            "data": compute_dashboard_stats(request.tenant_id, tags=tags),
         }
-        cache.set(cache_key, result, ttl=300)
+        try:
+            cache.set(cache_key, result, ttl=300)
+        except Exception as exc:
+            log.warning(
+                "inventory_dashboard_cache_write_failed",
+                tenant_id=str(request.tenant_id),
+                error=str(exc),
+            )
         return Response(result)

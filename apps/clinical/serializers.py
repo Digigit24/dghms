@@ -17,6 +17,19 @@ def _tenant_id_from_context(context) -> _uuid.UUID | None:
     request = context.get("request") if context else None
     return getattr(request, "tenant_id", None) if request else None
 
+
+def _accessible_section_q(tenant_id) -> Q:
+    """Section access rule shared by serializers.
+
+    Sections are reusable and can become globally shared by being placed on a
+    system form even if the section's own duplicated ``is_system`` flag is
+    stale. Keep validation aligned with ClinicalFormSectionViewSet.
+    """
+    return Q(tenant_id=tenant_id) | (
+        Q(tenant_id=_SYSTEM_TENANT_ID)
+        & (Q(is_system=True) | Q(form_placements__form__is_system=True))
+    )
+
 from .models import (  # noqa: E402
     ClinicalDocumentInstance,
     ClinicalDocumentTemplate,
@@ -60,7 +73,7 @@ class ClinicalFormFieldSerializer(TenantMixin, serializers.ModelSerializer):
         if tid is None:
             return value
         if not ClinicalFormSection.objects.filter(
-            Q(tenant_id=tid) | Q(is_system=True, tenant_id=_SYSTEM_TENANT_ID),
+            _accessible_section_q(tid),
             pk=value.pk,
         ).exists():
             raise serializers.ValidationError("Section not found or access denied.")
@@ -95,10 +108,97 @@ class ClinicalFormSectionSerializer(TenantMixin, serializers.ModelSerializer):
 class ClinicalFormSectionWriteSerializer(TenantMixin, serializers.ModelSerializer):
     """Serializer for reusable section definition writes."""
 
+    sync_pharmacy = serializers.BooleanField(required=False, write_only=True)
+    sync_lab = serializers.BooleanField(required=False, write_only=True)
+
     class Meta:
         model = ClinicalFormSection
         fields = "__all__"
         read_only_fields = ["tenant_id"]
+
+    @staticmethod
+    def _sync_roles(config):
+        roles = {
+            role for role in (config.get("roles") or [])
+            if role in {"prescription", "investigation"}
+        }
+        if config.get("role") in {"prescription", "investigation"}:
+            roles.add(config["role"])
+        return roles
+
+    @classmethod
+    def _resolved_toggle(cls, instance, destination):
+        config = instance.config or {}
+        role = "prescription" if destination == "pharmacy" else "investigation"
+        visible = "visible_to_pharmacy" if destination == "pharmacy" else "visible_to_lab"
+        return role in cls._sync_roles(config) or config.get(visible) is True
+
+    @classmethod
+    def _apply_toggles(cls, instance, validated_data):
+        pharmacy = validated_data.pop("sync_pharmacy", None)
+        lab = validated_data.pop("sync_lab", None)
+        if pharmacy is None and lab is None:
+            return validated_data
+
+        config = dict(validated_data.get("config", instance.config or {}))
+        roles = cls._sync_roles(config)
+        has_grid = instance.fields.filter(
+            field_type=ClinicalFormField.FieldType.GRID,
+            is_active=True,
+        ).exists()
+
+        for enabled, role, visible_key in (
+            (pharmacy, "prescription", "visible_to_pharmacy"),
+            (lab, "investigation", "visible_to_lab"),
+        ):
+            if enabled is None:
+                continue
+            if enabled and has_grid:
+                roles.add(role)
+                config.pop(visible_key, None)
+            elif enabled:
+                roles.discard(role)
+                config[visible_key] = True
+            else:
+                roles.discard(role)
+                config.pop(visible_key, None)
+
+        config.pop("role", None)
+        config.pop("roles", None)
+        if len(roles) == 1:
+            config["role"] = next(iter(roles))
+        elif roles:
+            # Keep a singular role for legacy readers and the complete list for
+            # the new independent two-toggle contract.
+            ordered = [r for r in ("prescription", "investigation") if r in roles]
+            config["role"] = ordered[0]
+            config["roles"] = ordered
+        validated_data["config"] = config
+        return validated_data
+
+    def update(self, instance, validated_data):
+        validated_data = self._apply_toggles(instance, validated_data)
+        return super().update(instance, validated_data)
+
+    def create(self, validated_data):
+        # A new section has no fields yet, so enabled toggles resolve to
+        # read-only visibility. Re-toggling after a GRID field is added upgrades
+        # it to structured sync.
+        sync_pharmacy = validated_data.pop("sync_pharmacy", None)
+        sync_lab = validated_data.pop("sync_lab", None)
+        config = dict(validated_data.get("config") or {})
+        if sync_pharmacy:
+            config["visible_to_pharmacy"] = True
+        if sync_lab:
+            config["visible_to_lab"] = True
+        validated_data["config"] = config
+        return super().create(validated_data)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["sync_pharmacy"] = self._resolved_toggle(instance, "pharmacy")
+        data["sync_lab"] = self._resolved_toggle(instance, "lab")
+        return data
 
 
 class FormSectionPlacementSerializer(TenantMixin, serializers.ModelSerializer):
@@ -130,7 +230,7 @@ class FormSectionPlacementSerializer(TenantMixin, serializers.ModelSerializer):
         if tid is None:
             return value
         if not ClinicalFormSection.objects.filter(
-            Q(tenant_id=tid) | Q(is_system=True, tenant_id=_SYSTEM_TENANT_ID),
+            _accessible_section_q(tid),
             pk=value.pk,
         ).exists():
             raise serializers.ValidationError("Section not found or access denied.")
@@ -229,6 +329,12 @@ class ClinicalFormStructureSerializer(serializers.ModelSerializer):
                     "updated_at": section.updated_at,
                     "created_by_user_id": section.created_by_user_id,
                     "section_fields": fields,
+                    # Resolved pharmacy/lab sync flags — same resolution logic as
+                    # ClinicalFormSectionWriteSerializer.to_representation, so the
+                    # admin forms UI can show correct toggle state without
+                    # inferring it from raw `config` itself.
+                    "sync_pharmacy": ClinicalFormSectionWriteSerializer._resolved_toggle(section, "pharmacy"),
+                    "sync_lab": ClinicalFormSectionWriteSerializer._resolved_toggle(section, "lab"),
                 }
             )
         return result

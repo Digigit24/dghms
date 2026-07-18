@@ -1,4 +1,3 @@
-from celery.result import AsyncResult
 from django.contrib.contenttypes.models import ContentType
 from django.http import HttpResponse
 from django.db.models import Q
@@ -10,7 +9,9 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 
 from common.drf_auth import HMSPermission
+from common.celery_utils import enqueue_task, get_task_snapshot
 from common.pagination import StandardPagination
+from apps.clinical.reference_sections import get_reference_sections
 from .import_export import (
     InvestigationExporter,
     InvestigationFilePreview,
@@ -209,7 +210,9 @@ class InvestigationViewSet(viewsets.ModelViewSet):
             )
 
         # Fire and forget – Celery picks it up immediately
-        task = import_investigations_task.delay(
+        task = enqueue_task(
+            import_investigations_task,
+            log_event="investigation_import_publish_failed",
             file_path=session_key,
             file_format=file_format,
             tenant_id=str(request.tenant_id),
@@ -217,6 +220,11 @@ class InvestigationViewSet(viewsets.ModelViewSet):
             skip_duplicates=skip_duplicates,
             update_existing=update_existing,
         )
+        if task is None:
+            return Response(
+                {'success': False, 'error': 'Background processing is temporarily unavailable.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
 
         return Response({
             'success': True,
@@ -247,14 +255,15 @@ class InvestigationViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        celery_result = AsyncResult(task_id)
         cached = get_import_cache(task_id)
+        task_snapshot = get_task_snapshot(task_id)
+        task_state = task_snapshot['state'] if task_snapshot else 'UNAVAILABLE'
 
         data = {
             'success':     True,
             'task_id':     task_id,
-            'state':       celery_result.state,
-            'status':      cached['status'] or celery_result.state.lower(),
+            'state':       task_state,
+            'status':      cached['status'] or task_state.lower(),
             'progress':    cached['progress'],
             # Live counters (update while task is running)
             'imported':    cached['imported'],
@@ -264,9 +273,9 @@ class InvestigationViewSet(viewsets.ModelViewSet):
             'current_row': cached['current_row'],
         }
 
-        if celery_result.ready():
-            if celery_result.successful():
-                result = cached['result'] or celery_result.result
+        if task_snapshot and task_snapshot['ready']:
+            if task_snapshot['successful']:
+                result = cached['result'] or task_snapshot['result']
                 data['result'] = result
                 # Always mark as 'completed' when Celery says SUCCESS —
                 # this covers both import tasks (which set inv_status cache)
@@ -281,7 +290,7 @@ class InvestigationViewSet(viewsets.ModelViewSet):
                     data['skipped']  = result.get('skipped',  data['skipped'])
             else:
                 data['status'] = 'failed'
-                data['error'] = str(celery_result.info)
+                data['error'] = str(task_snapshot['info'])
         elif cached['result']:
             data['result'] = cached['result']
 
@@ -309,8 +318,8 @@ class InvestigationViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        celery_result = AsyncResult(task_id)
-        if celery_result.ready():
+        task_snapshot = get_task_snapshot(task_id)
+        if task_snapshot and task_snapshot['ready']:
             return Response(
                 {'success': False, 'error': 'Task already finished, nothing to cancel.'},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -356,11 +365,18 @@ class InvestigationViewSet(viewsets.ModelViewSet):
         if 'search' in request.query_params:
             filters['search'] = request.query_params['search']
 
-        task = export_investigations_task.delay(
+        task = enqueue_task(
+            export_investigations_task,
+            log_event="investigation_export_publish_failed",
             tenant_id=str(request.tenant_id),
             file_format=file_format,
             filters=filters or None,
         )
+        if task is None:
+            return Response(
+                {'success': False, 'error': 'Background processing is temporarily unavailable.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
 
         return Response({
             'success': True,
@@ -599,7 +615,17 @@ class DiagnosticOrderViewSet(viewsets.ModelViewSet):
             many=True,
             context={'request': request},
         )
-        return Response({'success': True, 'data': serializer.data})
+        reference_sections = get_reference_sections(
+            tenant_id=request.tenant_id,
+            encounter_type=encounter_type,
+            encounter_id=encounter_object_id,
+            audience='lab',
+        )
+        return Response({
+            'success': True,
+            'data': serializer.data,
+            'reference_sections': reference_sections,
+        })
 
     @action(detail=False, methods=['get'], url_path='lab-dashboard')
     def lab_dashboard(self, request):

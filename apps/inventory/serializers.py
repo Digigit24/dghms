@@ -33,6 +33,7 @@ class InventoryCategorySerializer(serializers.ModelSerializer):
         fields = [
             "id", "name", "code", "description",
             "parent", "parent_name",
+            "expiry_alert_days",
             "is_active", "children_count",
             "created_at", "updated_at",
         ]
@@ -79,6 +80,7 @@ class InventoryItemListSerializer(serializers.ModelSerializer):
             "tags", "unit_of_measure",
             "purchase_price", "selling_price",
             "reorder_level", "max_stock_level",
+            "expiry_alert_days",
             "current_stock",
             "is_active",
             "is_low_stock", "is_out_of_stock", "is_overstock",
@@ -108,6 +110,7 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             "purchase_price", "selling_price",
             "tax_rate", "hsn_code",
             "reorder_level", "max_stock_level",
+            "expiry_alert_days",
             "current_stock",
             "description", "is_active",
             "is_low_stock", "is_out_of_stock", "is_overstock",
@@ -299,6 +302,7 @@ class StockAlertSerializer(serializers.ModelSerializer):
 # ─── Dashboard ───────────────────────────────────────────────────────────────
 
 class InventoryDashboardSerializer(serializers.Serializer):
+    has_inventory_items = serializers.BooleanField()
     total_items         = serializers.IntegerField()
     active_items        = serializers.IntegerField()
     low_stock_count     = serializers.IntegerField()

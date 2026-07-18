@@ -276,6 +276,16 @@ def _doctor_name(doctor) -> str:
     )
 
 
+def _can_view_recent_encounters(request) -> bool:
+    """Allow the shared card for patient, pharmacy, or diagnostics users."""
+    allowed_permissions = (
+        "hms.patients.view",
+        "hms.pharmacy.view",
+        "hms.diagnostics.view",
+    )
+    return any(check_permission(request, key) for key in allowed_permissions)
+
+
 class RecentEncountersView(APIView):
     """GET /api/dashboard/recent-encounters/ — combined OPD/IPD encounter list."""
 
@@ -299,13 +309,13 @@ class RecentEncountersView(APIView):
         tags=["Dashboard"],
     )
     def get(self, request):
-        if not check_permission(request, "hms.patients.view"):
+        if not _can_view_recent_encounters(request):
             return Response(
                 {
                     "success": False,
                     "error": {
                         "code": "PERMISSION_DENIED",
-                        "message": "No permission to view patients.",
+                        "message": "No permission to view recent encounters.",
                     },
                 },
                 status=status.HTTP_403_FORBIDDEN,

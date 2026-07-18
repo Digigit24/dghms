@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from common.drf_auth import HMSPermission, IsAuthenticated
+from common.cache import CeliyoCache
 from common.responses import error_response, success_response
 from common import error_codes
 
@@ -128,6 +129,26 @@ class HospitalConfigView(generics.RetrieveUpdateAPIView):
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
+        if 'inventory_config' in serializer.validated_data:
+            # Reconcile persisted expiry alerts immediately so list/summary
+            # endpoints agree with the newly configured tenant threshold.
+            from apps.inventory.models import InventoryItem
+            from apps.inventory.services.expiry import get_tenant_default_expiry_alert_days
+            from apps.inventory.views import _check_and_update_alerts
+
+            tenant_default = get_tenant_default_expiry_alert_days(request.tenant_id)
+            for item in InventoryItem.objects.select_related("category").filter(
+                tenant_id=request.tenant_id,
+                is_active=True,
+            ):
+                _check_and_update_alerts(
+                    item,
+                    request.tenant_id,
+                    tenant_default=tenant_default,
+                )
+            cache = CeliyoCache()
+            cache.delete_pattern(f"inventory:dashboard:*:{request.tenant_id}:*")
+            cache.delete_pattern(f"inventory:alerts:{request.tenant_id}:*")
 
         return Response({
             'success': True,

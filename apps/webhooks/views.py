@@ -7,6 +7,7 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 
 from common.mixins import TenantViewSetMixin
+from common.celery_utils import enqueue_task
 from common.pagination import StandardPagination
 from common.permissions import check_permission, HMSPermissions
 from common.responses import success_response
@@ -135,7 +136,9 @@ class TenantWebhookViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             status=WebhookDelivery.Status.PENDING,
             attempt_count=0,
         )
-        _attempt_delivery.delay(
+        enqueue_task(
+            _attempt_delivery,
+            log_event="webhook_test_publish_failed",
             tenant_id=str(request.tenant_id),
             delivery_id=delivery.id,
         )

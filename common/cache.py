@@ -8,10 +8,14 @@ Celery broker and rate-limiting caches use separate databases.
 """
 
 import json
+import logging
 from urllib.parse import urlparse
 
 import redis
 from django.conf import settings
+
+
+logger = logging.getLogger(__name__)
 
 
 class CeliyoCache:
@@ -62,7 +66,11 @@ class CeliyoCache:
 
     def get(self, key, default=None):
         """Fetch a cached value. JSON-encoded strings are decoded automatically."""
-        value = self._get_client().get(key)
+        try:
+            value = self._get_client().get(key)
+        except (redis.RedisError, OSError) as exc:
+            logger.warning("Redis cache read failed for %s: %s", key, exc)
+            return default
         if value is None:
             return default
         if isinstance(value, bytes):
@@ -76,22 +84,44 @@ class CeliyoCache:
         """Store ``value`` under ``key``. ``ttl`` is in seconds."""
         if not isinstance(value, (str, bytes)):
             value = json.dumps(value, default=str)
-        self._get_client().set(key, value, ex=ttl)
+        try:
+            return bool(self._get_client().set(key, value, ex=ttl))
+        except (redis.RedisError, OSError) as exc:
+            logger.warning("Redis cache write failed for %s: %s", key, exc)
+            return False
 
     def delete(self, key):
         """Delete a single key."""
-        self._get_client().delete(key)
+        try:
+            return self._get_client().delete(key)
+        except (redis.RedisError, OSError) as exc:
+            logger.warning("Redis cache delete failed for %s: %s", key, exc)
+            return 0
 
     def delete_pattern(self, pattern):
         """Delete all keys matching ``pattern`` (uses SCAN to avoid blocking)."""
-        client = self._get_client()
-        for key in client.scan_iter(match=pattern):
-            client.delete(key)
+        try:
+            client = self._get_client()
+            deleted = 0
+            for key in client.scan_iter(match=pattern):
+                deleted += client.delete(key)
+            return deleted
+        except (redis.RedisError, OSError) as exc:
+            logger.warning("Redis cache pattern delete failed for %s: %s", pattern, exc)
+            return 0
 
     def exists(self, key):
         """Return True if the key exists."""
-        return bool(self._get_client().exists(key))
+        try:
+            return bool(self._get_client().exists(key))
+        except (redis.RedisError, OSError) as exc:
+            logger.warning("Redis cache exists check failed for %s: %s", key, exc)
+            return False
 
     def ttl(self, key):
         """Return remaining TTL in seconds."""
-        return self._get_client().ttl(key)
+        try:
+            return self._get_client().ttl(key)
+        except (redis.RedisError, OSError) as exc:
+            logger.warning("Redis cache TTL check failed for %s: %s", key, exc)
+            return -2

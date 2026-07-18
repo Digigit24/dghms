@@ -206,9 +206,17 @@ REDIS_CACHE_DB = config('REDIS_CACHE_DB', default=0, cast=int)
 
 CACHES = {
     'default': {
-        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+        'BACKEND': 'common.cache_backend.ResilientRedisCache',
         'LOCATION': f'redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_CACHE_DB}',
         'KEY_PREFIX': 'digihms',
+        'OPTIONS': {
+            'socket_connect_timeout': config(
+                'REDIS_CACHE_CONNECT_TIMEOUT', default=0.5, cast=float
+            ),
+            'socket_timeout': config(
+                'REDIS_CACHE_SOCKET_TIMEOUT', default=0.5, cast=float
+            ),
+        },
     }
 }
 
@@ -395,3 +403,26 @@ CELERY_TIMEZONE = 'UTC'
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
 CELERY_WORKER_HIJACK_ROOT_LOGGER = False
+CELERY_TASK_PUBLISH_RETRY = False
+CELERY_RESULT_BACKEND_ALWAYS_RETRY = False
+CELERY_RESULT_BACKEND_MAX_RETRIES = 1
+CELERY_REDIS_SOCKET_CONNECT_TIMEOUT = 0.5
+CELERY_REDIS_SOCKET_TIMEOUT = 0.5
+CELERY_REDIS_RETRY_ON_TIMEOUT = False
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    'socket_connect_timeout': 0.5,
+    'socket_timeout': 0.5,
+    'retry_on_timeout': False,
+    'max_retries': 1,
+}
+CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {
+    'socket_connect_timeout': 0.5,
+    'socket_timeout': 0.5,
+    'retry_on_timeout': False,
+    'retry_policy': {
+        'max_retries': 1,
+        'interval_start': 0,
+        'interval_step': 0.1,
+        'interval_max': 0.1,
+    },
+}

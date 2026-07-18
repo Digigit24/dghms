@@ -13,6 +13,7 @@ from rest_framework.response import Response
 
 from apps.inventory.models import InventoryItem, StockTransaction
 from apps.patients.models import PatientProfile
+from apps.clinical.reference_sections import get_reference_sections
 from common.drf_auth import HMSPermission
 from common.mixins import TenantViewSetMixin
 from common.responses import action_response, error_response
@@ -463,6 +464,12 @@ class PrescriptionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             )
 
         content_type = PrescriptionSerializer.resolve_encounter_type(encounter_type)
+        reference_sections = get_reference_sections(
+            tenant_id=request.tenant_id,
+            encounter_type=encounter_type,
+            encounter_id=encounter_id,
+            audience="pharmacy",
+        )
         prescription = (
             Prescription.objects.filter(
                 tenant_id=request.tenant_id,
@@ -477,10 +484,19 @@ class PrescriptionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
         if not prescription:
             return Response(
-                {"success": True, "data": None, "message": "No prescription found for this encounter."}
+                {
+                    "success": True,
+                    "data": None,
+                    "reference_sections": reference_sections,
+                    "message": "No prescription found for this encounter.",
+                }
             )
 
-        return Response({"success": True, "data": PrescriptionSerializer(prescription).data})
+        return Response({
+            "success": True,
+            "data": PrescriptionSerializer(prescription).data,
+            "reference_sections": reference_sections,
+        })
 
     @action(detail=False, methods=["get"])
     def dashboard(self, request):

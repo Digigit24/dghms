@@ -91,6 +91,49 @@ logger = structlog.get_logger(__name__)
 _SYSTEM_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000000")
 
 
+def _is_system_form_admin(request) -> bool:
+    """Return whether the caller may administer globally shared system forms."""
+    return bool(
+        getattr(request, "is_super_admin", False)
+        or check_permission(request, "admin.full_access.enabled")
+    )
+
+
+def _ensure_system_form_mutable(request, form, action: str) -> None:
+    """Keep system forms immutable except for an explicit admin override."""
+    if not form.is_system:
+        return
+    if not _is_system_form_admin(request):
+        raise PermissionDenied(f"System forms cannot be {action}.")
+    logger.warning(
+        "system_form_admin_override",
+        action=action,
+        form_id=form.id,
+        form_code=form.code,
+        request_tenant_id=str(request.tenant_id),
+        user_id=str(request.user_id),
+    )
+
+
+def _bust_form_list_cache(tenant_id, *, is_system: bool) -> None:
+    """System-form changes affect every tenant; tenant forms affect one tenant."""
+    pattern = "clinical:forms:*" if is_system else f"clinical:forms:{tenant_id}:*"
+    CeliyoCache().delete_pattern(pattern)
+
+
+def _system_section_q() -> Q:
+    """Sections shared globally either carry is_system or are placed on a system form.
+
+    ClinicalFormSection is reusable and is connected to forms through
+    FormSectionPlacement. Historical rows can have ``section.is_system=False``
+    even when their parent form is system-owned, so section access must consider
+    the parent form too.
+    """
+    return Q(tenant_id=_SYSTEM_TENANT_ID) & (
+        Q(is_system=True) | Q(form_placements__form__is_system=True)
+    )
+
+
 def _audit(
     tenant_id,
     record_id,
@@ -167,11 +210,40 @@ def _grid_quantity(value):
     return quantity if quantity > 0 else Decimal("1.00")
 
 
+def _section_has_sync_role(section, role):
+    """Read the legacy singular role and the independent multi-role extension."""
+    config = section.config or {}
+    return config.get("role") == role or role in (config.get("roles") or [])
+
+
+def _prescription_item_defaults(row, row_key):
+    """Map current and legacy clinical grid keys to PrescriptionItem fields."""
+    medicine_name = (
+        row.get("medicine_name")
+        or row.get("medicine")
+        or row.get("drug_name")
+        or row.get("name")
+        or ""
+    )
+    return {
+        "inventory_item": None,
+        "source_row_key": row_key,
+        "medicine_name": str(medicine_name).strip(),
+        "dosage": str(row.get("dosage") or row.get("dose") or ""),
+        "frequency": str(row.get("frequency") or ""),
+        "duration": str(row.get("duration") or row.get("days") or ""),
+        "quantity": _grid_quantity(
+            row.get("quantity") if row.get("quantity") not in (None, "")
+            else row.get("qty")
+        ),
+    }
+
+
 def _sync_prescription_grid_to_pharmacy(record, field, rows, user_id):
     """Reconcile a prescription GRID field into pharmacy Prescription/PrescriptionItem."""
     if field.field_type != ClinicalFormField.FieldType.GRID:
         return None
-    if (field.section.config or {}).get("role") != "prescription":
+    if not _section_has_sync_role(field.section, "prescription"):
         return None
     if rows is None:
         rows = []
@@ -225,29 +297,14 @@ def _sync_prescription_grid_to_pharmacy(record, field, rows, user_id):
     seen_item_ids = set()
     for index, raw_row in enumerate(rows):
         row = raw_row if isinstance(raw_row, dict) else {}
-        medicine_name = (
-            row.get("medicine_name")
-            or row.get("medicine")
-            or row.get("drug_name")
-            or row.get("name")
-            or ""
-        )
-        medicine_name = str(medicine_name).strip()
+        row_key = _prescription_row_key(row, index)
+        defaults = _prescription_item_defaults(row, row_key)
+        medicine_name = defaults["medicine_name"]
         if not medicine_name:
             continue
 
-        row_key = _prescription_row_key(row, index)
         fallback_key = f"{index}:{medicine_name}"
         item = existing_by_key.get(row_key) or existing_by_key.get(fallback_key)
-        defaults = {
-            "inventory_item": None,
-            "source_row_key": row_key,
-            "medicine_name": medicine_name,
-            "dosage": str(row.get("dosage") or row.get("dose") or ""),
-            "frequency": str(row.get("frequency") or ""),
-            "duration": str(row.get("duration") or ""),
-            "quantity": _grid_quantity(row.get("quantity")),
-        }
         if item is None:
             item = PrescriptionItem.objects.create(
                 tenant_id=record.tenant_id,
@@ -421,7 +478,7 @@ def _sync_investigation_grid_to_diagnostics(record, field, rows, user_id):
     """Convert an investigation GRID field into DiagnosticOrder rows."""
     if field.field_type != ClinicalFormField.FieldType.GRID:
         return None
-    if (field.section.config or {}).get("role") != "investigation":
+    if not _section_has_sync_role(field.section, "investigation"):
         return None
     investigation_ids = _investigation_ids_from_grid_rows(rows)
     if not investigation_ids:
@@ -520,11 +577,26 @@ class ClinicalFormViewSet(
             request.query_params.urlencode().encode()
         ).hexdigest()[:12]
         cache_key = f"clinical:forms:{request.tenant_id}:{params_hash}"
-        cached = cache.get(cache_key)
+        try:
+            cached = cache.get(cache_key)
+        except Exception as exc:
+            logger.warning(
+                "clinical_form_list_cache_read_failed",
+                tenant_id=str(request.tenant_id),
+                error=str(exc),
+            )
+            cached = None
         if cached is not None:
             return Response(cached)
         response = super().list(request, *args, **kwargs)
-        cache.set(cache_key, response.data, ttl=600)
+        try:
+            cache.set(cache_key, response.data, ttl=600)
+        except Exception as exc:
+            logger.warning(
+                "clinical_form_list_cache_write_failed",
+                tenant_id=str(request.tenant_id),
+                error=str(exc),
+            )
         return response
 
     def perform_create(self, serializer):
@@ -536,23 +608,27 @@ class ClinicalFormViewSet(
     def perform_update(self, serializer):
         if not check_permission(self.request, HMSPermissions.CLINICAL_EDIT):
             raise PermissionDenied("No permission to update clinical forms.")
-        if serializer.instance.is_system:
-            raise PermissionDenied("System forms cannot be modified.")
+        _ensure_system_form_mutable(self.request, serializer.instance, "modified")
+        is_system = serializer.instance.is_system
+        form_id = serializer.instance.id
         serializer.save()
-        CeliyoCache().delete_pattern(f"clinical:forms:{self.request.tenant_id}:*")
+        _bust_form_list_cache(self.request.tenant_id, is_system=is_system)
+        self._bust_form_cache(form_id)
 
     def _set_form_status(self, request, new_status, message):
         """Transition a form's lifecycle status (publish / stage / archive)."""
         if not check_permission(request, HMSPermissions.CLINICAL_EDIT):
             raise PermissionDenied("No permission to change form status.")
         form = self.get_object()
-        if form.is_system:
-            raise PermissionDenied("System forms cannot be changed.")
+        _ensure_system_form_mutable(request, form, "changed")
         form.status = new_status
         form.version = (form.version or 1) + 1
         form.save(update_fields=["status", "version", "updated_at"])
         cache = CeliyoCache()
-        cache.delete_pattern(f"clinical:forms:{request.tenant_id}:*")
+        cache.delete_pattern(
+            "clinical:forms:*" if form.is_system
+            else f"clinical:forms:{request.tenant_id}:*"
+        )
         cache.delete_pattern(f"clinical:form:{form.id}:*")
         return action_response(
             message=message,
@@ -805,11 +881,11 @@ class ClinicalFormViewSet(
     def perform_destroy(self, instance):
         if not check_permission(self.request, HMSPermissions.CLINICAL_DELETE):
             raise PermissionDenied("No permission to delete clinical forms.")
-        if instance.is_system:
-            raise PermissionDenied("System forms cannot be deleted.")
+        _ensure_system_form_mutable(self.request, instance, "deleted")
         tenant_id = self.request.tenant_id
+        is_system = instance.is_system
         super().perform_destroy(instance)
-        CeliyoCache().delete_pattern(f"clinical:forms:{tenant_id}:*")
+        _bust_form_list_cache(tenant_id, is_system=is_system)
 
     @extend_schema(
         summary="Get cached form structure",
@@ -913,6 +989,11 @@ class ClinicalFormSectionViewSet(
     def get_queryset(self):
         if not (check_permission(self.request, HMSPermissions.CLINICAL_VIEW) or check_permission(self.request, HMSPermissions.CLINICAL_CREATE) or check_permission(self.request, HMSPermissions.CLINICAL_EDIT)):
             raise PermissionDenied("No permission to view form sections.")
+        if _is_system_form_admin(self.request):
+            return self.queryset.filter(
+                Q(tenant_id=self.request.tenant_id)
+                | _system_section_q()
+            ).distinct()
         return super().get_queryset()
 
     def perform_create(self, serializer):

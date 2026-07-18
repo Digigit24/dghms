@@ -173,6 +173,15 @@ class Hospital(models.Model):
         help_text="Tenant-wide UI theme. JSON: { \"primary_color\": \"#hexcolour\" }",
     )
 
+    # Tenant-wide inventory defaults. Item/category overrides live in the
+    # inventory app; this JSON remains additive as more tenant defaults emerge.
+    # {"default_expiry_alert_days": 90}
+    inventory_config = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Tenant-wide inventory defaults.",
+    )
+
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

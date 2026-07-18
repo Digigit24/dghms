@@ -254,9 +254,11 @@ class PrescriptionSerializer(TenantMixin, serializers.ModelSerializer):
         read_only_fields = ["id", "tenant_id", "created_at", "updated_at"]
 
     ENCOUNTER_TYPE_ALIASES = {
+        "opd": ("opd", "visit"),
         "opd.visit": ("opd", "visit"),
         "opd_visit": ("opd", "visit"),
         "visit": ("opd", "visit"),
+        "ipd": ("ipd", "admission"),
         "ipd.admission": ("ipd", "admission"),
         "ipd_admission": ("ipd", "admission"),
         "admission": ("ipd", "admission"),
@@ -267,7 +269,8 @@ class PrescriptionSerializer(TenantMixin, serializers.ModelSerializer):
         normalized = str(value or "").strip().lower()
         if normalized not in cls.ENCOUNTER_TYPE_ALIASES:
             raise serializers.ValidationError(
-                "Unsupported encounter_type. Use 'opd.visit' or 'ipd.admission'."
+                "Unsupported encounter_type. Use 'opd'/'opd.visit' or "
+                "'ipd'/'ipd.admission'."
             )
         app_label, model = cls.ENCOUNTER_TYPE_ALIASES[normalized]
         try:
