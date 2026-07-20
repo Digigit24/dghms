@@ -16,15 +16,27 @@ from apps.clinical.views import (
 )
 
 
-def section(config=None, has_grid=False):
+def _grid_field(columns):
+    """A GRID-type field mock with the given grid_schema columns."""
+    return SimpleNamespace(
+        field_type=ClinicalFormField.FieldType.GRID,
+        is_active=True,
+        config={"grid_schema": {"columns": columns}},
+    )
+
+
+def section(config=None, grid_fields=None):
     fields = Mock()
-    fields.filter.return_value.exists.return_value = has_grid
+    fields.filter.return_value = grid_fields or []
     return SimpleNamespace(config=config or {}, fields=fields)
 
 
 class SectionSyncToggleTests(SimpleTestCase):
     def test_grid_toggle_resolves_to_structured_role(self):
-        instance = section(has_grid=True)
+        # The grid's columns match the medicines shape the pharmacy pipeline
+        # consumes (_prescription_item_defaults) — this is the real
+        # medicines/Rx grid, so the toggle should become structured.
+        instance = section(grid_fields=[_grid_field([{"key": "medicine_name"}, {"key": "dosage"}])])
         data = ClinicalFormSectionWriteSerializer._apply_toggles(
             instance, {"sync_pharmacy": True}
         )
@@ -34,7 +46,28 @@ class SectionSyncToggleTests(SimpleTestCase):
         self.assertTrue(_section_has_sync_role(SimpleNamespace(config=data["config"]), "prescription"))
 
     def test_non_grid_toggle_resolves_to_read_only_visibility(self):
-        instance = section(has_grid=False)
+        instance = section(grid_fields=[])
+        data = ClinicalFormSectionWriteSerializer._apply_toggles(
+            instance, {"sync_pharmacy": True}
+        )
+
+        self.assertTrue(data["config"]["visible_to_pharmacy"])
+        self.assertNotIn("role", data["config"])
+
+    def test_grid_with_unrelated_columns_stays_reference_only(self):
+        # Regression test: a section can contain a GRID field for unrelated
+        # tabular data (e.g. a blood-transfusion vitals-monitoring chart with
+        # pulse/bp/remarks columns). Merely *having* a grid must not route it
+        # into the structured prescription/investigation role — otherwise it
+        # silently disappears from get_reference_sections() and never
+        # surfaces as read-only reference data in the pharmacy/lab drawer.
+        instance = section(
+            grid_fields=[
+                _grid_field(
+                    [{"key": "interval"}, {"key": "pulse"}, {"key": "bp"}, {"key": "remarks"}]
+                )
+            ]
+        )
         data = ClinicalFormSectionWriteSerializer._apply_toggles(
             instance, {"sync_pharmacy": True}
         )
@@ -58,7 +91,7 @@ class SectionSyncToggleTests(SimpleTestCase):
         self.assertIs(data["print_on_discharge"], False)
 
     def test_print_on_discharge_is_a_plain_config_boolean(self):
-        instance = section(config={"visible_to_pharmacy": True}, has_grid=True)
+        instance = section(config={"visible_to_pharmacy": True})
 
         data = ClinicalFormSectionWriteSerializer._apply_toggles(
             instance, {"print_on_discharge": True}
@@ -69,13 +102,15 @@ class SectionSyncToggleTests(SimpleTestCase):
         self.assertNotIn("role", data["config"])
 
         disabled = ClinicalFormSectionWriteSerializer._apply_toggles(
-            section(config=data["config"], has_grid=False),
+            section(config=data["config"]),
             {"print_on_discharge": False},
         )
         self.assertIs(disabled["config"]["print_on_discharge"], False)
 
     def test_grid_can_sync_to_both_destinations(self):
-        instance = section(has_grid=True)
+        instance = section(
+            grid_fields=[_grid_field([{"key": "medicine_name"}, {"key": "investigation_id"}])]
+        )
         data = ClinicalFormSectionWriteSerializer._apply_toggles(
             instance, {"sync_pharmacy": True, "sync_lab": True}
         )

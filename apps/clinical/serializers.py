@@ -117,6 +117,39 @@ class ClinicalFormSectionWriteSerializer(TenantMixin, serializers.ModelSerialize
         fields = "__all__"
         read_only_fields = ["tenant_id"]
 
+    # Column keys that mark a GRID field as *the* medicines/investigations
+    # table the pharmacy/lab dispense pipelines know how to consume — see
+    # _prescription_item_defaults and _investigation_ids_from_grid_rows in
+    # views.py. A section can contain a GRID field for unrelated tabular data
+    # (a vitals-monitoring chart, a diet chart, etc.); such grids must not be
+    # treated as structured prescription/investigation data.
+    _GRID_ROLE_COLUMN_KEYS = {
+        "prescription": {"medicine_name", "medicine", "drug_name"},
+        "investigation": {"investigation_id"},
+    }
+
+    @classmethod
+    def _section_has_matching_grid(cls, instance, role):
+        """True only if the section has a GRID field shaped like the role's
+        expected table (not merely *any* grid field)."""
+        expected_keys = cls._GRID_ROLE_COLUMN_KEYS[role]
+        for field in instance.fields.filter(
+            field_type=ClinicalFormField.FieldType.GRID, is_active=True
+        ):
+            grid_schema = (field.config or {}).get("grid_schema")
+            if isinstance(grid_schema, dict):
+                columns = grid_schema.get("columns") or []
+            elif isinstance(grid_schema, list):
+                # Legacy shape: some older fields store the column list
+                # directly under grid_schema instead of {"columns": [...]}.
+                columns = grid_schema
+            else:
+                columns = []
+            column_keys = {col.get("key") for col in columns if isinstance(col, dict)}
+            if column_keys & expected_keys:
+                return True
+        return False
+
     @staticmethod
     def _sync_roles(config):
         roles = {
@@ -150,10 +183,6 @@ class ClinicalFormSectionWriteSerializer(TenantMixin, serializers.ModelSerialize
         if print_on_discharge is not None:
             config["print_on_discharge"] = print_on_discharge
         roles = cls._sync_roles(config)
-        has_grid = instance.fields.filter(
-            field_type=ClinicalFormField.FieldType.GRID,
-            is_active=True,
-        ).exists()
 
         for enabled, role, visible_key in (
             (pharmacy, "prescription", "visible_to_pharmacy"),
@@ -161,7 +190,7 @@ class ClinicalFormSectionWriteSerializer(TenantMixin, serializers.ModelSerialize
         ):
             if enabled is None:
                 continue
-            if enabled and has_grid:
+            if enabled and cls._section_has_matching_grid(instance, role):
                 roles.add(role)
                 config.pop(visible_key, None)
             elif enabled:

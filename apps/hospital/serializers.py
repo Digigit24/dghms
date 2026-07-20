@@ -6,9 +6,34 @@ from .models import Hospital
 def with_letterhead_defaults(config: dict) -> dict:
     """Return the additive letterhead schema without mutating stored JSON."""
     normalized = dict(config)
+    normalized.setdefault("show_logo", False)
+    normalized.setdefault("logo_url", "")
+    normalized.setdefault("show_badge", False)
+    normalized.setdefault("badge_url", "")
+    normalized.setdefault("alignment", "center")
+    normalized.setdefault("show_hairline", True)
+    normalized.setdefault("text_lines", [])
     normalized.setdefault("layout_mode", "simple")
     normalized.setdefault("right_column_lines", [])
     normalized.setdefault("background_pattern_url", None)
+    normalized.setdefault(
+        "left_image",
+        {
+            "enabled": bool(normalized["show_logo"]),
+            "url": normalized["logo_url"],
+            "width_px": 72,
+            "height_px": 72,
+        },
+    )
+    normalized.setdefault(
+        "right_image",
+        {
+            "enabled": bool(normalized["show_badge"]),
+            "url": normalized["badge_url"],
+            "width_px": 72,
+            "height_px": 72,
+        },
+    )
     normalized.setdefault(
         "info_bar",
         {
@@ -122,6 +147,10 @@ class HospitalLetterheadSerializer(serializers.Serializer):
           "logo_url": str,
           "show_badge": bool,
           "badge_url": str,
+          "left_image": {"enabled": bool, "url": str,
+                         "width_px": int, "height_px": int},
+          "right_image": {"enabled": bool, "url": str,
+                          "width_px": int, "height_px": int},
           "alignment": "left" | "center",
           "show_hairline": bool,
           "layout_mode": "simple" | "two_column",
@@ -144,6 +173,8 @@ class HospitalLetterheadSerializer(serializers.Serializer):
     logo_url = serializers.CharField(allow_blank=True)
     show_badge = serializers.BooleanField()
     badge_url = serializers.CharField(allow_blank=True)
+    left_image = serializers.DictField(required=False)
+    right_image = serializers.DictField(required=False)
     alignment = serializers.ChoiceField(choices=list(Hospital.LETTERHEAD_ALIGNMENTS))
     show_hairline = serializers.BooleanField()
     text_lines = serializers.ListField(child=serializers.DictField())

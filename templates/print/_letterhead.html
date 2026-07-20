@@ -7,6 +7,8 @@ contract:
   "enabled": bool,
   "show_logo": bool, "logo_url": str,
   "show_badge": bool, "badge_url": str,
+  "left_image": {"enabled": bool, "url": str, "width_px": int, "height_px": int},
+  "right_image": {"enabled": bool, "url": str, "width_px": int, "height_px": int},
   "alignment": "left"|"center",
   "show_hairline": bool,
   "text_lines": [...],
@@ -33,35 +35,43 @@ contract:
 </style>
 <div class="print-letterhead-running">
 <div style="background: {% if letterhead.background_pattern_url %}url('{{ letterhead.background_pattern_url }}') center/cover no-repeat{% else %}transparent{% endif %};">
-<div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding-bottom: 6px;">
-    <div style="display: flex; flex: 1; align-items: flex-start; gap: 10px; {% if letterhead.alignment == 'center' and letterhead.layout_mode != 'two_column' %}margin: 0 auto; text-align: center; flex-direction: column; align-items: center;{% endif %}">
-        {% if letterhead.show_logo and letterhead.logo_url %}
-        <img src="{{ letterhead.logo_url }}" alt="Logo" style="height: 42px; width: 42px; object-fit: contain; flex-shrink: 0;" />
+<div style="display: table; width: 100%; table-layout: fixed; padding-bottom: 7px;">
+    <div style="display: table-cell; width: 24%; vertical-align: middle; text-align: left;">
+        {% if letterhead.left_image.enabled and letterhead.left_image.url %}
+        <img src="{{ letterhead.left_image.url }}" alt="Left letterhead image" style="display: block; width: {{ letterhead.left_image.width_px }}px; height: {{ letterhead.left_image.height_px }}px; max-width: 100%; object-fit: contain;" />
         {% endif %}
-        <div>
+    </div>
+    <div style="display: table-cell; width: 52%; vertical-align: middle; text-align: center; padding: 0 8px;">
+        {% if letterhead.layout_mode == "two_column" %}
+        <div style="display: table; width: 100%; table-layout: fixed;">
+        <div style="display: table-cell; width: 50%; vertical-align: middle; text-align: center; padding-right: 5px;">
+        {% endif %}
             {% for line in letterhead.text_lines %}
                 {% if line.style == "title" %}
-                <div style="font-size: 13pt; font-weight: 700; line-height: 1.25;">{{ line.text }}</div>
+                <div style="font-size: 14pt; font-weight: 700; line-height: 1.2; white-space: nowrap;">{{ line.text }}</div>
                 {% else %}
-                <div style="font-size: 7.5pt; line-height: 1.4; color: #374151;">{{ line.text }}</div>
+                <div style="font-size: 8pt; line-height: 1.35; color: #374151; text-align: center;">{{ line.text }}</div>
                 {% endif %}
             {% endfor %}
+        {% if letterhead.layout_mode == "two_column" %}
         </div>
-    </div>
-    {% if letterhead.layout_mode == "two_column" %}
-    <div style="flex: 1; text-align: right;">
+        <div style="display: table-cell; width: 50%; vertical-align: middle; text-align: center; padding-left: 5px;">
         {% for line in letterhead.right_column_lines %}
             {% if line.style == "title" %}
-            <div style="font-size: 10pt; font-weight: 700; line-height: 1.25;">{{ line.text }}</div>
+            <div style="font-size: 10pt; font-weight: 700; line-height: 1.25; text-align: center;">{{ line.text }}</div>
             {% else %}
-            <div style="font-size: 7.5pt; line-height: 1.4; color: #374151;">{{ line.text }}</div>
+            <div style="font-size: 7.5pt; line-height: 1.4; color: #374151; text-align: center;">{{ line.text }}</div>
             {% endif %}
         {% endfor %}
+        </div>
+        </div>
+        {% endif %}
     </div>
-    {% endif %}
-    {% if letterhead.show_badge and letterhead.badge_url %}
-    <img src="{{ letterhead.badge_url }}" alt="Badge" style="height: 46px; width: 46px; object-fit: contain; flex-shrink: 0;" />
-    {% endif %}
+    <div style="display: table-cell; width: 24%; vertical-align: middle; text-align: right;">
+        {% if letterhead.right_image.enabled and letterhead.right_image.url %}
+        <img src="{{ letterhead.right_image.url }}" alt="Right letterhead image" style="display: inline-block; width: {{ letterhead.right_image.width_px }}px; height: {{ letterhead.right_image.height_px }}px; max-width: 100%; object-fit: contain;" />
+        {% endif %}
+    </div>
 </div>
 {% if letterhead.show_hairline %}
 <hr style="border: none; border-top: 1.5px solid #1f2937; margin: 0 0 8px;" />
@@ -69,7 +79,7 @@ contract:
 {% if letterhead.info_bar.enabled %}
 <div style="background: {{ letterhead.info_bar.background_color }}; color: {{ letterhead.info_bar.text_color }}; padding: 3px 8px; margin-bottom: 6px; font-size: 7pt; line-height: 1.35;">
     {% for line in letterhead.info_bar.lines %}
-    <div style="text-align: {{ line.align }};">{{ line.text }}</div>
+    <div style="text-align: center;">{{ line.text }}</div>
     {% endfor %}
 </div>
 {% endif %}

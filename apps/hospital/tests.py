@@ -5,11 +5,13 @@ from datetime import datetime, timedelta, timezone
 
 import jwt
 from django.conf import settings
-from django.urls import reverse
+from django.test import SimpleTestCase
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.hospital.models import Hospital
+from apps.hospital.serializers import with_letterhead_defaults
+from apps.hospital.views import _validate_letterhead_config
 
 
 def _make_token(tenant_id, user_id):
@@ -86,3 +88,73 @@ class HospitalConfigAuthTest(APITestCase):
         self._auth_client()
         response = self.client.get('/api/hospital/config/letterhead/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+        letterhead = response.data['data']['letterhead']
+        self.assertEqual(letterhead['alignment'], 'center')
+        self.assertEqual(letterhead['left_image']['width_px'], 72)
+        self.assertEqual(letterhead['right_image']['height_px'], 72)
+
+
+class LetterheadImageSlotContractTest(SimpleTestCase):
+    def setUp(self):
+        self.legacy_config = {
+            "show_logo": True,
+            "logo_url": "https://example.com/logo.png",
+            "show_badge": False,
+            "badge_url": "",
+            "alignment": "center",
+            "show_hairline": True,
+            "text_lines": [],
+        }
+
+    def test_legacy_images_are_normalized_into_slots(self):
+        normalized = with_letterhead_defaults(self.legacy_config)
+
+        self.assertEqual(
+            normalized["left_image"],
+            {
+                "enabled": True,
+                "url": "https://example.com/logo.png",
+                "width_px": 72,
+                "height_px": 72,
+            },
+        )
+        self.assertFalse(normalized["right_image"]["enabled"])
+
+    def test_validator_accepts_configurable_image_slots(self):
+        payload = {
+            **self.legacy_config,
+            "left_image": {
+                "enabled": True,
+                "url": "data:image/png;base64,abc",
+                "width_px": 150,
+                "height_px": 52,
+            },
+            "right_image": {
+                "enabled": True,
+                "url": "https://example.com/badge.png",
+                "width_px": 64,
+                "height_px": 64,
+            },
+        }
+
+        cleaned, error = _validate_letterhead_config(payload)
+
+        self.assertIsNone(error)
+        self.assertEqual(cleaned["left_image"]["width_px"], 150)
+        self.assertEqual(cleaned["right_image"]["height_px"], 64)
+
+    def test_validator_rejects_oversized_image_slot(self):
+        payload = {
+            **self.legacy_config,
+            "left_image": {
+                "enabled": True,
+                "url": "https://example.com/logo.png",
+                "width_px": 241,
+                "height_px": 72,
+            },
+        }
+
+        cleaned, error = _validate_letterhead_config(payload)
+
+        self.assertIsNone(cleaned)
+        self.assertEqual(error["field"], "left_image.width_px")

@@ -16,7 +16,8 @@ import datetime
 from typing import Any, Callable, Optional
 
 import structlog
-from django.db.models import Q
+from django.contrib.contenttypes.models import ContentType
+from django.db.models import Count, Q
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from rest_framework import status
@@ -25,6 +26,8 @@ from rest_framework.views import APIView
 
 from common.cache import CeliyoCache
 from common.permissions import IsTenantAuthenticated, check_permission
+
+from .serializers import RecentEncountersResponseSerializer
 
 log = structlog.get_logger(__name__)
 
@@ -286,6 +289,128 @@ def _can_view_recent_encounters(request) -> bool:
     return any(check_permission(request, key) for key in allowed_permissions)
 
 
+def _pending_counts_for_encounters(tenant_id, rows):
+    """Return pending pharmacy/lab counts with a constant number of queries."""
+    encounter_ids = {
+        "opd": {
+            row["encounter_id"]
+            for row in rows
+            if row["encounter_type"] == "opd"
+        },
+        "ipd": {
+            row["encounter_id"]
+            for row in rows
+            if row["encounter_type"] == "ipd"
+        },
+    }
+    if not encounter_ids["opd"] and not encounter_ids["ipd"]:
+        return {}, {}
+
+    from apps.diagnostics.models import DiagnosticOrder
+    from apps.ipd.models import Admission
+    from apps.opd.models import Visit
+    from apps.pharmacy.models import PrescriptionItem
+
+    content_types = ContentType.objects.get_for_models(Visit, Admission)
+    visit_content_type_id = content_types[Visit].id
+    admission_content_type_id = content_types[Admission].id
+
+    pharmacy_filter = Q()
+    if encounter_ids["opd"]:
+        pharmacy_filter |= Q(
+            prescription__visit_id__in=encounter_ids["opd"]
+        ) | Q(
+            prescription__content_type_id=visit_content_type_id,
+            prescription__object_id__in=encounter_ids["opd"],
+        )
+    if encounter_ids["ipd"]:
+        pharmacy_filter |= Q(
+            prescription__content_type_id=admission_content_type_id,
+            prescription__object_id__in=encounter_ids["ipd"],
+        )
+
+    pharmacy_counts = {}
+    pharmacy_groups = (
+        PrescriptionItem.objects.filter(
+            tenant_id=tenant_id,
+            prescription__tenant_id=tenant_id,
+            is_dispensed=False,
+        )
+        .filter(pharmacy_filter)
+        .values(
+            "prescription__visit_id",
+            "prescription__content_type_id",
+            "prescription__object_id",
+        )
+        .annotate(pending_count=Count("id"))
+    )
+    for group in pharmacy_groups:
+        visit_id = group["prescription__visit_id"]
+        content_type_id = group["prescription__content_type_id"]
+        object_id = group["prescription__object_id"]
+        if visit_id in encounter_ids["opd"]:
+            key = ("opd", visit_id)
+        elif (
+            content_type_id == visit_content_type_id
+            and object_id in encounter_ids["opd"]
+        ):
+            key = ("opd", object_id)
+        elif (
+            content_type_id == admission_content_type_id
+            and object_id in encounter_ids["ipd"]
+        ):
+            key = ("ipd", object_id)
+        else:
+            continue
+        pharmacy_counts[key] = pharmacy_counts.get(key, 0) + group["pending_count"]
+
+    lab_filter = Q()
+    if encounter_ids["opd"]:
+        lab_filter |= Q(
+            requisition__content_type_id=visit_content_type_id,
+            requisition__object_id__in=encounter_ids["opd"],
+        )
+    if encounter_ids["ipd"]:
+        lab_filter |= Q(
+            requisition__content_type_id=admission_content_type_id,
+            requisition__object_id__in=encounter_ids["ipd"],
+        )
+
+    lab_counts = {}
+    lab_groups = (
+        DiagnosticOrder.objects.filter(
+            tenant_id=tenant_id,
+            requisition__tenant_id=tenant_id,
+            requisition__requisition_type="investigation",
+        )
+        .filter(lab_filter)
+        .exclude(status__in=["completed", "cancelled"])
+        .values(
+            "requisition__content_type_id",
+            "requisition__object_id",
+        )
+        .annotate(pending_count=Count("id"))
+    )
+    for group in lab_groups:
+        content_type_id = group["requisition__content_type_id"]
+        object_id = group["requisition__object_id"]
+        if (
+            content_type_id == visit_content_type_id
+            and object_id in encounter_ids["opd"]
+        ):
+            key = ("opd", object_id)
+        elif (
+            content_type_id == admission_content_type_id
+            and object_id in encounter_ids["ipd"]
+        ):
+            key = ("ipd", object_id)
+        else:
+            continue
+        lab_counts[key] = group["pending_count"]
+
+    return pharmacy_counts, lab_counts
+
+
 class RecentEncountersView(APIView):
     """GET /api/dashboard/recent-encounters/ — combined OPD/IPD encounter list."""
 
@@ -296,7 +421,9 @@ class RecentEncountersView(APIView):
         description=(
             "Tenant-scoped combined encounter feed for pharmacy/lab dashboards. "
             "Rows include encounter_type, encounter_id, patient_id, patient_name, "
-            "number, doctor_name, date, and status."
+            "number, doctor_name, date, status, pending_pharmacy_count, and "
+            "pending_lab_count. Pending counts are integers and are 0 when no "
+            "matching pending work exists."
         ),
         parameters=[
             OpenApiParameter(name="search", type=str, required=False),
@@ -305,7 +432,7 @@ class RecentEncountersView(APIView):
             OpenApiParameter(name="page", type=int, required=False),
             OpenApiParameter(name="page_size", type=int, required=False),
         ],
-        responses={200: OpenApiResponse(description="Combined recent encounters")},
+        responses={200: RecentEncountersResponseSerializer},
         tags=["Dashboard"],
     )
     def get(self, request):
@@ -415,7 +542,14 @@ class RecentEncountersView(APIView):
         count = len(rows)
         start = (page - 1) * page_size
         paged_rows = rows[start : start + page_size]
+        pharmacy_counts, lab_counts = _pending_counts_for_encounters(
+            tenant_id,
+            paged_rows,
+        )
         for row in paged_rows:
+            key = (row["encounter_type"], row["encounter_id"])
+            row["pending_pharmacy_count"] = pharmacy_counts.get(key, 0)
+            row["pending_lab_count"] = lab_counts.get(key, 0)
             row.pop("_sort_date", None)
 
         return Response(

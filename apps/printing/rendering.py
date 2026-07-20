@@ -31,6 +31,7 @@ from apps.clinical.models import (
 )
 from apps.clinical.serializers import ClinicalFormStructureSerializer
 from apps.hospital.models import Hospital
+from apps.hospital.serializers import with_letterhead_defaults
 from apps.ipd.models import Admission, IPDBilling
 from apps.opd.models import OPDBill, Visit
 
@@ -172,7 +173,9 @@ def get_letterhead_context(tenant_id: uuid.UUID, show_letterhead: bool) -> dict[
     if hospital is None:
         return {"enabled": False}
 
-    config = hospital.letterhead_config or hospital.get_default_letterhead_config()
+    config = with_letterhead_defaults(
+        hospital.letterhead_config or hospital.get_default_letterhead_config()
+    )
     text_lines = sorted(
         [line for line in (config.get("text_lines") or []) if line.get("enabled")],
         key=lambda line: line.get("order", 0),
@@ -193,6 +196,8 @@ def get_letterhead_context(tenant_id: uuid.UUID, show_letterhead: bool) -> dict[
         "logo_url": config.get("logo_url") or "",
         "show_badge": bool(config.get("show_badge")),
         "badge_url": config.get("badge_url") or "",
+        "left_image": config["left_image"],
+        "right_image": config["right_image"],
         "alignment": config.get("alignment") or "left",
         "show_hairline": bool(config.get("show_hairline")),
         "text_lines": text_lines,

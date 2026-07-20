@@ -127,6 +127,10 @@ class Hospital(models.Model):
     #   "logo_url": str,                # falls back to Hospital.logo
     #   "show_badge": bool,              # no source field yet -> defaults False
     #   "badge_url": str,                # no source field yet -> defaults ""
+    #   "left_image": {"enabled": bool, "url": str,
+    #                  "width_px": int, "height_px": int},
+    #   "right_image": {"enabled": bool, "url": str,
+    #                   "width_px": int, "height_px": int},
     #   "alignment": "left" | "center",
     #   "show_hairline": bool,
     #   "layout_mode": "simple" | "two_column",
@@ -298,7 +302,19 @@ class Hospital(models.Model):
             "logo_url": self.logo or "",
             "show_badge": False,
             "badge_url": "",
-            "alignment": "left",
+            "left_image": {
+                "enabled": bool(self.logo),
+                "url": self.logo or "",
+                "width_px": 72,
+                "height_px": 72,
+            },
+            "right_image": {
+                "enabled": False,
+                "url": "",
+                "width_px": 72,
+                "height_px": 72,
+            },
+            "alignment": "center",
             "show_hairline": True,
             "text_lines": text_lines,
             "layout_mode": "simple",

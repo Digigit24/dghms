@@ -316,6 +316,42 @@ def _validate_letterhead_config(payload: dict):
             "field": "alignment",
         }
 
+    normalized = with_letterhead_defaults(payload)
+
+    def validate_image_slot(slot, field_name):
+        if not isinstance(slot, dict):
+            return {"message": f"'{field_name}' must be an object.", "field": field_name}
+        required = {"enabled", "url", "width_px", "height_px"}
+        missing_slot_keys = required - set(slot)
+        if missing_slot_keys:
+            return {
+                "message": f"'{field_name}' is missing required keys: {sorted(missing_slot_keys)}.",
+                "field": field_name,
+            }
+        if not isinstance(slot["enabled"], bool):
+            return {
+                "message": f"'{field_name}.enabled' must be a boolean.",
+                "field": f"{field_name}.enabled",
+            }
+        if not isinstance(slot["url"], str):
+            return {
+                "message": f"'{field_name}.url' must be a string.",
+                "field": f"{field_name}.url",
+            }
+        for size_key in ("width_px", "height_px"):
+            size = slot[size_key]
+            if isinstance(size, bool) or not isinstance(size, int) or not 16 <= size <= 240:
+                return {
+                    "message": f"'{field_name}.{size_key}' must be an integer from 16 to 240.",
+                    "field": f"{field_name}.{size_key}",
+                }
+        return None
+
+    for image_field in ("left_image", "right_image"):
+        image_error = validate_image_slot(normalized[image_field], image_field)
+        if image_error:
+            return None, image_error
+
     text_lines = payload["text_lines"]
     if not isinstance(text_lines, list):
         return None, {"message": "'text_lines' must be a list.", "field": "text_lines"}
@@ -467,7 +503,7 @@ def _validate_letterhead_config(payload: dict):
                 "field": f"info_bar.lines[{idx}].align",
             }
 
-    cleaned = dict(payload)
+    cleaned = dict(normalized)
     cleaned.update(
         {
             "layout_mode": layout_mode,
@@ -555,7 +591,9 @@ class HospitalLetterheadView(APIView):
             "every user of the tenant. The full letterhead object must be "
             "supplied under the 'letterhead' key and must conform to the "
             "documented schema (show_logo, logo_url, show_badge, badge_url, "
-            "alignment, show_hairline, text_lines[]). Requires the "
+            "left_image, right_image, alignment, show_hairline, text_lines[]). "
+            "Image slots accept enabled/url/width_px/height_px and preserve "
+            "the legacy logo/badge fields for backward compatibility. Requires the "
             "hms.hospital.edit_config permission (admin-level tenant config "
             "write, same gate as the rest of hospital settings)."
         ),
@@ -570,7 +608,19 @@ class HospitalLetterheadView(APIView):
                         "logo_url": "https://cdn.example.com/logo.png",
                         "show_badge": True,
                         "badge_url": "https://cdn.example.com/nabh-badge.png",
-                        "alignment": "left",
+                        "left_image": {
+                            "enabled": True,
+                            "url": "https://cdn.example.com/logo.png",
+                            "width_px": 150,
+                            "height_px": 52,
+                        },
+                        "right_image": {
+                            "enabled": True,
+                            "url": "https://cdn.example.com/nabh-badge.png",
+                            "width_px": 72,
+                            "height_px": 72,
+                        },
+                        "alignment": "center",
                         "show_hairline": True,
                         "text_lines": [
                             {"id": "name", "text": "Rahane Hospital", "style": "title", "enabled": True, "order": 0},
