@@ -13,7 +13,9 @@ every queryset by it, per CLAUDE.md §3.
 
 from __future__ import annotations
 
+import os
 import uuid
+from pathlib import Path
 from typing import Any
 
 import structlog
@@ -613,9 +615,49 @@ def render_pdf_from_html(html: str) -> bytes:
     handling / URL wiring) can be exercised without WeasyPrint's native
     dependencies (Pango/Cairo) being installed in every environment.
     """
+    _ensure_windows_gtk_runtime()
+
     from weasyprint import HTML
 
     return HTML(string=html).write_pdf()
+
+
+_GTK_DLL_DIRECTORY_HANDLES: list[Any] = []
+
+
+def _ensure_windows_gtk_runtime() -> None:
+    """Make an installed GTK runtime discoverable before importing WeasyPrint.
+
+    Windows does not consistently search a system-wide GTK installation for
+    dependent DLLs. Previously PDF rendering depended on the shell that
+    launched ``runserver`` having the GTK ``bin`` directory in ``PATH``; a
+    normal restart from VS Code could therefore regress every print endpoint
+    to ``cannot load library 'gobject-2.0-0'``. Registering the directory here
+    keeps rendering independent of the process-launch environment.
+    """
+    if os.name != "nt":
+        return
+
+    configured = os.environ.get("WEASYPRINT_GTK_BIN")
+    candidates = [
+        Path(configured) if configured else None,
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
+        / "GTK3-Runtime Win64"
+        / "bin",
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
+        / "GTK3-Runtime"
+        / "bin",
+    ]
+    for candidate in candidates:
+        if candidate is None or not candidate.is_dir():
+            continue
+        candidate_text = str(candidate)
+        path_parts = os.environ.get("PATH", "").split(os.pathsep)
+        if candidate_text.casefold() not in {part.casefold() for part in path_parts}:
+            os.environ["PATH"] = candidate_text + os.pathsep + os.environ.get("PATH", "")
+        if hasattr(os, "add_dll_directory") and not _GTK_DLL_DIRECTORY_HANDLES:
+            _GTK_DLL_DIRECTORY_HANDLES.append(os.add_dll_directory(candidate_text))
+        return
 
 
 # ---------------------------------------------------------------------------

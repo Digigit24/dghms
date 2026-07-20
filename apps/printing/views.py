@@ -350,7 +350,7 @@ class PrintBatchView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
         except Exception as exc:
-            log.error(
+            log.exception(
                 "print_batch_render_failed",
                 tenant_id=str(tenant_id),
                 form=form_code,
