@@ -23,6 +23,12 @@ class ClinicalForm(models.Model):
         IPD_ADMISSION = "ipd_admission", "IPD Admission"
         GENERIC = "generic", "Generic"
 
+    class PrintTemplateCode(models.TextChoices):
+        CLINICAL_FORM = "clinical_form", "Generic Clinical Form"
+        NURSING_PAPER = "nursing_paper", "Nursing Paper"
+        MONITORING_CHART = "monitoring_chart", "Monitoring Chart"
+        PROGRESS_SHEET = "progress_sheet", "Progress Sheet"
+
     id = models.BigAutoField(primary_key=True)
     tenant_id = models.UUIDField(db_index=True)
     code = models.CharField(max_length=64, db_index=True, help_text="Stable machine identifier for MCP")
@@ -32,6 +38,12 @@ class ClinicalForm(models.Model):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
     is_system = models.BooleanField(default=False, help_text="System forms are seeded and protected")
     entity_type = models.CharField(max_length=32, choices=EntityType.choices, default=EntityType.GENERIC)
+    print_template_code = models.CharField(
+        max_length=64,
+        choices=PrintTemplateCode.choices,
+        default=PrintTemplateCode.CLINICAL_FORM,
+        help_text="Registered /api/print form code used when printing ClinicalRecord rows for this form.",
+    )
     config = models.JSONField(default=dict, blank=True, help_text="Layout/display configuration")
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)

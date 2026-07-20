@@ -8,4 +8,6 @@ class IpdConfig(AppConfig):
     verbose_name = 'IPD Management'
 
     def ready(self):
-        pass
+        # Register bill/item synchronization receivers. Without this import,
+        # IPDBillItem writes do not reliably recalculate their parent IPDBilling.
+        import apps.ipd.signals  # noqa: F401

@@ -10,6 +10,7 @@ CHART_FORMS = [
         "description": "Hourly monitoring / intake-output chart — IPD 8 / 9.",
         "entity_type": "ipd_admission",
         "status": "published",
+        "print_template_code": "monitoring_chart",
         "config": {"icon": "line-chart", "color": "cyan"},
         "sections": [
             {"ref": "shared_patient_banner", "display_order": 1},

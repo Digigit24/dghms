@@ -3,11 +3,14 @@ import uuid
 
 import jwt
 from django.conf import settings
+from django.db.models.signals import post_save
+from django.test import SimpleTestCase
 from django.test import TestCase
 from rest_framework.test import APIClient
 
 from apps.doctors.models import DoctorProfile
-from apps.ipd.models import Admission, Bed, Ward
+from apps.ipd.models import Admission, Bed, IPDBillItem, Ward
+from apps.ipd.signals import update_ipd_bill_totals
 from apps.patients.models import PatientProfile
 
 
@@ -106,3 +109,9 @@ class AdmissionOwnScopeTests(TestCase):
         self.assertEqual(response.status_code, 200)
         result_ids = [row["id"] for row in response.data["results"]]
         self.assertEqual(result_ids, [self.own_admission.id])
+
+
+class IPDBillSynchronizationTests(SimpleTestCase):
+    def test_bill_item_recalculation_receiver_is_registered(self):
+        synchronous_receivers, _ = post_save._live_receivers(IPDBillItem)
+        self.assertIn(update_ipd_bill_totals, synchronous_receivers)

@@ -55,6 +55,24 @@ class SectionSyncToggleTests(SimpleTestCase):
 
         self.assertIs(data["sync_pharmacy"], True)
         self.assertIs(data["sync_lab"], False)
+        self.assertIs(data["print_on_discharge"], False)
+
+    def test_print_on_discharge_is_a_plain_config_boolean(self):
+        instance = section(config={"visible_to_pharmacy": True}, has_grid=True)
+
+        data = ClinicalFormSectionWriteSerializer._apply_toggles(
+            instance, {"print_on_discharge": True}
+        )
+
+        self.assertIs(data["config"]["print_on_discharge"], True)
+        self.assertTrue(data["config"]["visible_to_pharmacy"])
+        self.assertNotIn("role", data["config"])
+
+        disabled = ClinicalFormSectionWriteSerializer._apply_toggles(
+            section(config=data["config"], has_grid=False),
+            {"print_on_discharge": False},
+        )
+        self.assertIs(disabled["config"]["print_on_discharge"], False)
 
     def test_grid_can_sync_to_both_destinations(self):
         instance = section(has_grid=True)

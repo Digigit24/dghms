@@ -161,6 +161,7 @@ IPD_FORMS = [
         "description": "Initial assessment by nursing — IPD 6.",
         "entity_type": "ipd_admission",
         "status": "published",
+        "print_template_code": "nursing_paper",
         "config": {"icon": "clipboard-list", "color": "teal"},
         "sections": [
             {"ref": "shared_patient_banner", "display_order": 1},
@@ -189,6 +190,7 @@ IPD_FORMS = [
         "description": "Daily structured doctor round note.",
         "entity_type": "ipd_admission",
         "status": "published",
+        "print_template_code": "progress_sheet",
         "config": {"icon": "notebook-pen", "color": "indigo", "repeatable_daily": True},
         "sections": [
             {"ref": "shared_patient_banner", "display_order": 1},
@@ -215,6 +217,7 @@ IPD_FORMS = [
         "description": "Quick structured progress note.",
         "entity_type": "ipd_admission",
         "status": "published",
+        "print_template_code": "progress_sheet",
         "config": {"icon": "pen-line", "color": "indigo", "repeatable_daily": True},
         "sections": [
             {"ref": "shared_patient_banner", "display_order": 1},

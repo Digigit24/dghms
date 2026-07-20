@@ -110,6 +110,7 @@ class ClinicalFormSectionWriteSerializer(TenantMixin, serializers.ModelSerialize
 
     sync_pharmacy = serializers.BooleanField(required=False, write_only=True)
     sync_lab = serializers.BooleanField(required=False, write_only=True)
+    print_on_discharge = serializers.BooleanField(required=False, write_only=True)
 
     class Meta:
         model = ClinicalFormSection
@@ -133,14 +134,21 @@ class ClinicalFormSectionWriteSerializer(TenantMixin, serializers.ModelSerialize
         visible = "visible_to_pharmacy" if destination == "pharmacy" else "visible_to_lab"
         return role in cls._sync_roles(config) or config.get(visible) is True
 
+    @staticmethod
+    def _resolved_print_on_discharge(instance):
+        return (instance.config or {}).get("print_on_discharge") is True
+
     @classmethod
     def _apply_toggles(cls, instance, validated_data):
         pharmacy = validated_data.pop("sync_pharmacy", None)
         lab = validated_data.pop("sync_lab", None)
-        if pharmacy is None and lab is None:
+        print_on_discharge = validated_data.pop("print_on_discharge", None)
+        if pharmacy is None and lab is None and print_on_discharge is None:
             return validated_data
 
         config = dict(validated_data.get("config", instance.config or {}))
+        if print_on_discharge is not None:
+            config["print_on_discharge"] = print_on_discharge
         roles = cls._sync_roles(config)
         has_grid = instance.fields.filter(
             field_type=ClinicalFormField.FieldType.GRID,
@@ -186,11 +194,14 @@ class ClinicalFormSectionWriteSerializer(TenantMixin, serializers.ModelSerialize
         # it to structured sync.
         sync_pharmacy = validated_data.pop("sync_pharmacy", None)
         sync_lab = validated_data.pop("sync_lab", None)
+        print_on_discharge = validated_data.pop("print_on_discharge", None)
         config = dict(validated_data.get("config") or {})
         if sync_pharmacy:
             config["visible_to_pharmacy"] = True
         if sync_lab:
             config["visible_to_lab"] = True
+        if print_on_discharge is not None:
+            config["print_on_discharge"] = print_on_discharge
         validated_data["config"] = config
         return super().create(validated_data)
 
@@ -198,6 +209,7 @@ class ClinicalFormSectionWriteSerializer(TenantMixin, serializers.ModelSerialize
         data = super().to_representation(instance)
         data["sync_pharmacy"] = self._resolved_toggle(instance, "pharmacy")
         data["sync_lab"] = self._resolved_toggle(instance, "lab")
+        data["print_on_discharge"] = self._resolved_print_on_discharge(instance)
         return data
 
 
@@ -263,6 +275,7 @@ class ClinicalFormStructureSerializer(serializers.ModelSerializer):
             "status",
             "is_system",
             "entity_type",
+            "print_template_code",
             "config",
             "is_active",
             "created_at",
@@ -335,6 +348,7 @@ class ClinicalFormStructureSerializer(serializers.ModelSerializer):
                     # inferring it from raw `config` itself.
                     "sync_pharmacy": ClinicalFormSectionWriteSerializer._resolved_toggle(section, "pharmacy"),
                     "sync_lab": ClinicalFormSectionWriteSerializer._resolved_toggle(section, "lab"),
+                    "print_on_discharge": ClinicalFormSectionWriteSerializer._resolved_print_on_discharge(section),
                 }
             )
         return result
@@ -433,6 +447,7 @@ class ClinicalRecordListSerializer(TenantMixin, serializers.ModelSerializer):
 
     form_code = serializers.CharField(source="form.code", read_only=True)
     form_name = serializers.CharField(source="form.name", read_only=True)
+    form_print_template_code = serializers.CharField(source="form.print_template_code", read_only=True)
 
     class Meta:
         model = ClinicalRecord
@@ -442,6 +457,7 @@ class ClinicalRecordListSerializer(TenantMixin, serializers.ModelSerializer):
             "form",
             "form_code",
             "form_name",
+            "form_print_template_code",
             "encounter_type",
             "encounter_id",
             "occurrence_index",
@@ -465,6 +481,7 @@ class ClinicalRecordDetailSerializer(TenantMixin, serializers.ModelSerializer):
 
     form_code = serializers.CharField(source="form.code", read_only=True)
     form_name = serializers.CharField(source="form.name", read_only=True)
+    form_print_template_code = serializers.CharField(source="form.print_template_code", read_only=True)
     field_values = ClinicalFieldValueSerializer(many=True, read_only=True)
 
     class Meta:

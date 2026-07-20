@@ -215,10 +215,15 @@ class Command(BaseCommand):
                     "status": form_def.get("status", "published"),
                     "is_system": form_def.get("is_system", True),
                     "entity_type": form_def.get("entity_type", "generic"),
+                    "print_template_code": form_def.get("print_template_code", "clinical_form"),
                     "config": form_def.get("config", {}),
                     "created_by_user_id": user_id,
                 },
             )
+            print_template_code = form_def.get("print_template_code", "clinical_form")
+            if form.print_template_code != print_template_code:
+                form.print_template_code = print_template_code
+                form.save(update_fields=["print_template_code", "updated_at"])
             form_map[form_def["code"]] = form
 
             for order, sec in enumerate(form_def.get("sections", []), start=1):

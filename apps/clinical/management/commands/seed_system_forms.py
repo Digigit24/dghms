@@ -323,10 +323,15 @@ class Command(BaseCommand):
                 "status": form_def.get("status", "published"),
                 "is_system": form_def.get("is_system", True),
                 "entity_type": form_def.get("entity_type", "generic"),
+                "print_template_code": form_def.get("print_template_code", "clinical_form"),
                 "config": form_def.get("config", {}),
                 "created_by_user_id": user_id,
             },
         )
+        print_template_code = form_def.get("print_template_code", "clinical_form")
+        if form.print_template_code != print_template_code:
+            form.print_template_code = print_template_code
+            form.save(update_fields=["print_template_code", "updated_at"])
         for section_def in form_def.get("sections", []):
             section_code = f"{form_def['code']}_{section_def['code']}"[:64]
             section, _ = ClinicalFormSection.objects.get_or_create(
@@ -451,10 +456,15 @@ def seed_hospital_system_forms(tenant_id, user_id=None):
                 "status": form_def["status"],
                 "is_system": form_def["is_system"],
                 "entity_type": form_def["entity_type"],
+                "print_template_code": form_def.get("print_template_code", "clinical_form"),
                 "config": form_def["config"],
                 "created_by_user_id": user_id,
             },
         )
+        print_template_code = form_def.get("print_template_code", "clinical_form")
+        if form.print_template_code != print_template_code:
+            form.print_template_code = print_template_code
+            form.save(update_fields=["print_template_code", "updated_at"])
         for sd in form_def["sections"]:
             section_code = f"{form_def['code']}_{sd['code']}"[:64]
             section, _ = ClinicalFormSection.objects.get_or_create(
@@ -563,10 +573,15 @@ def seed_system_forms(tenant_id, user_id=None):
             "status": form_def["status"],
             "is_system": form_def["is_system"],
             "entity_type": form_def["entity_type"],
+            "print_template_code": form_def.get("print_template_code", "clinical_form"),
             "config": form_def["config"],
             "created_by_user_id": user_id,
         },
     )
+    print_template_code = form_def.get("print_template_code", "clinical_form")
+    if form.print_template_code != print_template_code:
+        form.print_template_code = print_template_code
+        form.save(update_fields=["print_template_code", "updated_at"])
 
     for section_def in form_def["sections"]:
         section_code = f"{form_def['code']}_{section_def['code']}"[:64]

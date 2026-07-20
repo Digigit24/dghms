@@ -42,9 +42,9 @@ from .rendering import (
     FORM_OPD_VISIT,
     FORM_IPD_BILL,
     MAX_DOCUMENT_BATCH_SIZE,
+    PdfMergeError,
     PrintFormCodeError,
     PrintNotFoundError,
-    REGISTERED_FORM_CODES,
     render_batch_html,
     render_document_batch_pdf,
     render_pdf_from_html,
@@ -93,10 +93,10 @@ def _parse_common_params(request) -> tuple[str | None, int | None, bool, str, Re
     letterhead_raw = request.query_params.get("letterhead", "true")
     language = (request.query_params.get("language") or "en").strip().lower()
 
-    if not form_code or form_code not in REGISTERED_FORM_CODES:
+    if not form_code:
         return None, None, False, language, error_response(
             code=error_codes.INVALID_PAYLOAD,
-            message=f"'form' must be one of {sorted(REGISTERED_FORM_CODES)}.",
+            message="'form' query parameter is required.",
             status=status.HTTP_400_BAD_REQUEST,
             field="form",
         )
@@ -323,14 +323,6 @@ class PrintBatchView(APIView):
         letterhead = data["letterhead"]
         language = data["language"]
 
-        if form_code not in REGISTERED_FORM_CODES:
-            return error_response(
-                code=error_codes.INVALID_PAYLOAD,
-                message=f"'form' must be one of {sorted(REGISTERED_FORM_CODES)}.",
-                status=status.HTTP_400_BAD_REQUEST,
-                field="form",
-            )
-
         if len(record_ids) > MAX_BATCH_SIZE:
             return error_response(
                 code=error_codes.INVALID_PAYLOAD,
@@ -469,6 +461,32 @@ class ClinicalDocumentBatchPrintView(APIView):
                 code=error_codes.RECORD_NOT_FOUND,
                 message=str(exc),
                 status=status.HTTP_404_NOT_FOUND,
+            )
+        except PdfMergeError as exc:
+            failed_index = exc.document_index
+            failed_code = (
+                template_codes[failed_index]
+                if failed_index is not None and failed_index < len(template_codes)
+                else None
+            )
+            log.error(
+                "print_document_batch_merge_failed",
+                tenant_id=str(tenant_id),
+                encounter_type=encounter_type,
+                encounter_id=encounter_id,
+                document_count=len(template_codes),
+                failed_document_index=failed_index,
+                failed_document_code=failed_code,
+                error=str(exc),
+            )
+            return error_response(
+                code=error_codes.PDF_MERGE_FAILED,
+                message="One or more documents could not be merged into a valid A4 PDF.",
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "document_index": failed_index,
+                    "document_code": failed_code,
+                },
             )
         except Exception as exc:
             log.error(

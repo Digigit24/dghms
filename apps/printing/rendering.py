@@ -59,6 +59,13 @@ REGISTERED_FORM_CODES = {
     FORM_OPD_BILL,
 }
 
+CLINICAL_RECORD_FORM_CODES = {
+    FORM_NURSING_PAPER,
+    FORM_MONITORING_CHART,
+    FORM_PROGRESS_SHEET,
+    FORM_CLINICAL_GENERIC,
+}
+
 # Template used for each registered form code.
 _TEMPLATE_BY_FORM_CODE = {
     FORM_ADMISSION: "print/admission_form.html",
@@ -103,6 +110,40 @@ class PrintNotFoundError(Exception):
 
 class PrintFormCodeError(Exception):
     """Raised when the requested ``form`` query/body param is not a registered code."""
+
+
+class PdfMergeError(Exception):
+    """Raised when a rendered document cannot be safely merged.
+
+    ``document_index`` is zero-based and lets the API identify the selected
+    document that failed without exposing parser/native-library internals.
+    """
+
+    def __init__(self, message: str, *, document_index: int | None = None):
+        super().__init__(message)
+        self.document_index = document_index
+
+
+def resolve_print_form_code(form_code: str, tenant_id: uuid.UUID | None = None) -> str:
+    """Resolve a client-supplied print/form code to a registered print code."""
+    normalized = (form_code or "").strip()
+    if normalized in REGISTERED_FORM_CODES:
+        return normalized
+
+    if tenant_id is not None:
+        form = (
+            ClinicalForm.objects.filter(
+                tenant_id__in=[tenant_id, _SYSTEM_TENANT_ID],
+                code=normalized,
+                is_active=True,
+            )
+            .only("print_template_code")
+            .first()
+        )
+        if form and form.print_template_code in CLINICAL_RECORD_FORM_CODES:
+            return form.print_template_code
+
+    raise PrintFormCodeError(f"Unknown print form code: {form_code!r}.")
 
 
 # ---------------------------------------------------------------------------
@@ -504,8 +545,7 @@ def build_print_context(
     ``PrintNotFoundError`` if the record/admission does not exist for the
     tenant.
     """
-    if form_code not in REGISTERED_FORM_CODES:
-        raise PrintFormCodeError(f"Unknown print form code: {form_code!r}.")
+    form_code = resolve_print_form_code(form_code, tenant_id)
 
     template_name = _TEMPLATE_BY_FORM_CODE[form_code]
     context: dict[str, Any] = {
@@ -554,8 +594,7 @@ def render_batch_html(
     them as separate pages in a single PDF. The letterhead renders on every
     page because it lives inside each per-record template, not hoisted out.
     """
-    if form_code not in REGISTERED_FORM_CODES:
-        raise PrintFormCodeError(f"Unknown print form code: {form_code!r}.")
+    form_code = resolve_print_form_code(form_code, tenant_id)
 
     pages = []
     for index, record_id in enumerate(record_ids):
@@ -739,25 +778,102 @@ def render_document_pdf(
     return render_pdf_from_html(html)
 
 
-def merge_pdfs(pdfs: list[bytes]) -> bytes:
-    """Merge multiple PDF byte-strings into one, preserving page order.
+A4_WIDTH_POINTS = 595.275591
+A4_HEIGHT_POINTS = 841.889764
+_A4_TOLERANCE_POINTS = 1.0
 
-    pypdf is imported lazily so this module stays importable in environments
-    where the native PDF stack isn't installed (mirrors render_pdf_from_html).
+
+def _page_as_a4(page: Any) -> Any:
+    """Return ``page`` on an A4 portrait canvas, preserving aspect ratio.
+
+    WeasyPrint templates normally already emit A4 pages, in which case the
+    original page object is returned untouched (preserving links/annotations).
+    Tenant-authored HTML can declare another page size, so non-A4 pages are
+    scaled to fit and centred rather than leaving a mixed-size merged file.
+    """
+    from pypdf import PageObject, Transformation
+
+    if page.rotation:
+        page.transfer_rotation_to_content()
+
+    box = page.mediabox
+    width = float(box.width)
+    height = float(box.height)
+    left = float(box.left)
+    bottom = float(box.bottom)
+    if width <= 0 or height <= 0:
+        raise ValueError("page has a zero or negative media box")
+
+    is_a4 = (
+        abs(width - A4_WIDTH_POINTS) <= _A4_TOLERANCE_POINTS
+        and abs(height - A4_HEIGHT_POINTS) <= _A4_TOLERANCE_POINTS
+        and abs(left) <= _A4_TOLERANCE_POINTS
+        and abs(bottom) <= _A4_TOLERANCE_POINTS
+    )
+    if is_a4:
+        return page
+
+    scale = min(A4_WIDTH_POINTS / width, A4_HEIGHT_POINTS / height)
+    x_offset = (A4_WIDTH_POINTS - width * scale) / 2 - left * scale
+    y_offset = (A4_HEIGHT_POINTS - height * scale) / 2 - bottom * scale
+    transform = Transformation().scale(scale).translate(x_offset, y_offset)
+    a4_page = PageObject.create_blank_page(
+        width=A4_WIDTH_POINTS,
+        height=A4_HEIGHT_POINTS,
+    )
+    a4_page.merge_transformed_page(page, transform, expand=False)
+    return a4_page
+
+
+def merge_pdfs(pdfs: list[bytes]) -> bytes:
+    """Validate and merge PDF byte-strings into one A4 document.
+
+    Page and document order are preserved. Invalid, encrypted, or zero-page
+    inputs fail closed with the source document index instead of producing a
+    corrupt output that only fails later in the browser PDF viewer.
     """
     from io import BytesIO
 
     from pypdf import PdfReader, PdfWriter
 
+    if not pdfs:
+        raise PdfMergeError("At least one rendered PDF is required for merging.")
+
     writer = PdfWriter()
-    for pdf in pdfs:
-        reader = PdfReader(BytesIO(pdf))
-        for page in reader.pages:
-            writer.add_page(page)
+    expected_page_count = 0
+    for index, pdf in enumerate(pdfs):
+        try:
+            if not isinstance(pdf, bytes) or not pdf:
+                raise ValueError("rendered PDF is empty")
+            reader = PdfReader(BytesIO(pdf), strict=True)
+            if reader.is_encrypted and not reader.decrypt(""):
+                raise ValueError("rendered PDF is password-protected")
+            if not reader.pages:
+                raise ValueError("rendered PDF contains no pages")
+            for page in reader.pages:
+                writer.add_page(_page_as_a4(page))
+                expected_page_count += 1
+        except PdfMergeError:
+            raise
+        except Exception as exc:
+            raise PdfMergeError(
+                f"Rendered document {index + 1} is not a mergeable PDF: {exc}",
+                document_index=index,
+            ) from exc
 
     buffer = BytesIO()
-    writer.write(buffer)
-    return buffer.getvalue()
+    try:
+        writer.write(buffer)
+        merged = buffer.getvalue()
+        result = PdfReader(BytesIO(merged), strict=True)
+        if len(result.pages) != expected_page_count:
+            raise ValueError(
+                f"expected {expected_page_count} pages, wrote {len(result.pages)}"
+            )
+    except Exception as exc:
+        raise PdfMergeError(f"Merged PDF validation failed: {exc}") from exc
+
+    return merged
 
 
 def render_document_batch_pdf(
@@ -771,7 +887,8 @@ def render_document_batch_pdf(
     """Render each selected document to its own PDF, then merge into one.
 
     Order is preserved (documents print in the order the codes are supplied).
-    A single-document batch skips the merge and returns that PDF directly.
+    Single-document batches also pass through ``merge_pdfs`` so validation and
+    A4 normalization are identical for every response size.
     """
     if encounter_type not in DOCUMENT_ENCOUNTER_TYPES:
         raise PrintFormCodeError(
@@ -779,12 +896,24 @@ def render_document_batch_pdf(
             f"Expected one of {sorted(DOCUMENT_ENCOUNTER_TYPES)}."
         )
 
-    pdfs = [
-        render_document_pdf(
-            tenant_id, code, encounter_type, encounter_id, letterhead, language
-        )
-        for code in template_codes
-    ]
-    if len(pdfs) == 1:
-        return pdfs[0]
+    pdfs = []
+    for index, code in enumerate(template_codes):
+        try:
+            pdfs.append(
+                render_document_pdf(
+                    tenant_id,
+                    code,
+                    encounter_type,
+                    encounter_id,
+                    letterhead,
+                    language,
+                )
+            )
+        except (PrintFormCodeError, PrintNotFoundError):
+            raise
+        except Exception as exc:
+            raise PdfMergeError(
+                f"Document {code!r} could not be rendered: {exc}",
+                document_index=index,
+            ) from exc
     return merge_pdfs(pdfs)
