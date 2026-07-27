@@ -478,7 +478,8 @@ def _clinical_record_context(tenant_id: uuid.UUID, record_id: int, language: str
         fields = []
         for field_data in section.get("section_fields", []):
             fv = values_by_key.get(field_data["field_key"])
-            display_value = _field_value_to_display(fv, language) if fv else None
+            raw_value = _field_value_to_display(fv, language) if fv else None
+            display_value = _format_print_display(field_data, raw_value)
             fields.append({**field_data, "display_value": display_value})
         sections.append({**section, "section_fields": fields})
 
@@ -524,14 +525,170 @@ def _field_value_to_display(field_value: ClinicalFieldValue, language: str) -> A
         return field_value.value_datetime
     if field_type == ClinicalFormField.FieldType.TIME:
         return field_value.value_time
-    if field_type in (ClinicalFormField.FieldType.GRID, ClinicalFormField.FieldType.MULTISELECT):
+    if field_type == ClinicalFormField.FieldType.GRID:
+        # Grid keeps its list-of-rows shape; the template renders it as a table.
         return field_value.value_json
+    if field_type in (
+        ClinicalFormField.FieldType.MULTISELECT,
+        ClinicalFormField.FieldType.BODY_DIAGRAM,
+    ):
+        # Composite values are stored as JSON. Fall back to text for legacy rows
+        # that predate JSON persistence (so nothing is silently dropped).
+        return (
+            field_value.value_json
+            if field_value.value_json is not None
+            else field_value.value_text
+        )
     if field_value.picklist_item_id:
         item = field_value.picklist_item
         if language == "mr" and item.label_mr:
             return item.label_mr
         return item.label
+    # Prefer structured JSON when only a placeholder/blank text was persisted
+    # for a composite value (legacy rows saved before the client stored JSON).
+    if field_value.value_json is not None and (
+        field_value.value_text is None or _is_object_placeholder(field_value.value_text)
+    ):
+        return field_value.value_json
     return field_value.value_text
+
+
+# ---------------------------------------------------------------------------
+# Display formatting for composite (object / array) field values
+#
+# WeasyPrint templates print ``{{ value }}`` directly, so a ``dict`` or ``list``
+# reaches the page as its Python repr (``{'selected': [...]}``) and a value the
+# client stringified with ``String(obj)`` reaches it as ``[object Object]``.
+# These helpers flatten such values into compact, human-readable text.
+# ---------------------------------------------------------------------------
+
+
+def _is_object_placeholder(text: Any) -> bool:
+    """True when ``text`` is the JS ``String(object)`` artifact.
+
+    A composite value that reached ``String()`` on the client is stored as one
+    or more comma-joined ``[object Object]`` tokens; such text carries no real
+    data and must never be printed.
+    """
+    if not isinstance(text, str):
+        return False
+    stripped = text.strip()
+    if not stripped:
+        return False
+    tokens = [token.strip() for token in stripped.split(",")]
+    return all(token == "[object Object]" for token in tokens)
+
+
+def _humanize_key(key: Any) -> str:
+    """Turn a field/option code ("ps_tenderness") into a readable label."""
+    return " ".join(str(key).replace("_", " ").replace("-", " ").split()).title()
+
+
+def _options_label_map(field_data: dict[str, Any]) -> dict[str, str]:
+    """Build a ``{option_value: label}`` map from a serialized field."""
+    labels: dict[str, str] = {}
+    for item in field_data.get("picklist_items") or []:
+        if isinstance(item, dict) and item.get("value") is not None:
+            labels[str(item["value"])] = str(item.get("label") or item["value"])
+    config = field_data.get("config") or {}
+    for opt in config.get("options") or []:
+        if isinstance(opt, dict) and opt.get("value") is not None:
+            labels.setdefault(str(opt["value"]), str(opt.get("label") or opt["value"]))
+    return labels
+
+
+def _humanize_json(value: Any) -> str:
+    """Render an arbitrary JSON value as compact text.
+
+    Never emits a Python ``dict``/``list`` repr or the ``[object Object]``
+    artifact.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    if isinstance(value, (str, int, float)):
+        return str(value)
+    if isinstance(value, dict):
+        parts = []
+        for key, val in value.items():
+            rendered = _humanize_json(val)
+            if rendered == "":
+                continue
+            parts.append(f"{_humanize_key(key)}: {rendered}")
+        return "; ".join(parts)
+    if isinstance(value, (list, tuple)):
+        return ", ".join(r for r in (_humanize_json(item) for item in value) if r != "")
+    return str(value)
+
+
+def _format_multiselect(field_data: dict[str, Any], raw: Any) -> str:
+    """Render a multi-select value (plain list or ``{selected, notes}``) as text."""
+    labels = _options_label_map(field_data)
+
+    def label_for(option_value: Any) -> str:
+        return labels.get(str(option_value)) or _humanize_key(option_value)
+
+    if isinstance(raw, dict) and "selected" in raw:
+        selected = raw.get("selected") or []
+        notes = raw.get("notes") if isinstance(raw.get("notes"), dict) else {}
+        parts = []
+        for option_value in selected:
+            base = label_for(option_value)
+            note = notes.get(str(option_value)) if notes else None
+            parts.append(f"{base}: {note}" if note else base)
+        return ", ".join(parts)
+    if isinstance(raw, (list, tuple)):
+        return ", ".join(label_for(option_value) for option_value in raw)
+    if isinstance(raw, str):
+        if _is_object_placeholder(raw):
+            return ""
+        return ", ".join(label_for(v.strip()) for v in raw.split(",") if v.strip()) or raw
+    return _humanize_json(raw)
+
+
+def _format_body_diagram(raw: Any) -> str:
+    """Render a body-diagram pin array (``{x, y, view, note}[]``) as text."""
+    if not raw:
+        return ""
+    if isinstance(raw, str):
+        return "" if _is_object_placeholder(raw) else raw
+    pins = list(raw) if isinstance(raw, (list, tuple)) else [raw]
+    parts = []
+    for pin in pins:
+        if not isinstance(pin, dict):
+            continue
+        view = pin.get("view")
+        note = pin.get("note") or pin.get("notes")
+        site = f"{str(view).title()} view" if view else "Marked point"
+        parts.append(f"{site}: {note}" if note else site)
+    if parts:
+        return ", ".join(parts)
+    count = len(pins)
+    return f"{count} marked point{'s' if count != 1 else ''}"
+
+
+def _format_print_display(field_data: dict[str, Any], raw: Any) -> Any:
+    """Coerce a raw stored value into what the print template should show.
+
+    GRID keeps its list-of-rows shape (the template renders it as a table);
+    every other composite type is flattened to readable text so the printout
+    never shows ``[object Object]`` or a raw ``dict``/``list`` repr.
+    """
+    if raw is None:
+        return None
+    field_type = field_data.get("field_type")
+    if field_type == ClinicalFormField.FieldType.GRID:
+        return raw
+    if field_type == ClinicalFormField.FieldType.MULTISELECT:
+        return _format_multiselect(field_data, raw)
+    if field_type == ClinicalFormField.FieldType.BODY_DIAGRAM:
+        return _format_body_diagram(raw)
+    if isinstance(raw, (dict, list, tuple)):
+        return _humanize_json(raw)
+    if isinstance(raw, str) and _is_object_placeholder(raw):
+        return ""
+    return raw
 
 
 # ---------------------------------------------------------------------------
