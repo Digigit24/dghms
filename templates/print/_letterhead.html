@@ -1,95 +1,117 @@
 {% comment %}
-Renders the tenant letterhead header block. Expects a `letterhead` context
-dict shaped exactly like the GET /api/hospital/config/letterhead/ JSON
-contract:
+Renders the tenant letterhead as a FULL-BLEED header that repeats on every
+printed page. Expects a `letterhead` context dict shaped exactly like the
+GET /api/hospital/config/letterhead/ JSON contract:
 
 {
   "enabled": bool,
-  "show_logo": bool, "logo_url": str,
-  "show_badge": bool, "badge_url": str,
   "left_image": {"enabled": bool, "url": str, "width_px": int, "height_px": int},
   "right_image": {"enabled": bool, "url": str, "width_px": int, "height_px": int},
-  "alignment": "left"|"center",
   "show_hairline": bool,
   "text_lines": [...],
   "layout_mode": "simple"|"two_column",
   "right_column_lines": [...],
+  "right_column_align": "left"|"center"|"right",
   "background_pattern_url": str|null,
+  "background_pattern_opacity": float,
+  "body_watermark": {"enabled": bool, "url": str, "size_pct": int, "opacity": float},
   "info_bar": {"enabled": bool, "background_color": str, "text_color": str,
                "lines": [{"id": str, "text": str, "align": "left"|"center"}]}
 }
+
+The header is a `position: fixed` box pulled up into the reserved 42mm top page
+margin and stretched 16mm past each side margin, so its background and info bar
+bleed to the full A4 width (edge to edge) on every page, while the body content
+keeps the normal 16mm side margins. Keep these offsets in sync with the @page
+margins declared in print/_print_base.css (15mm/16mm/20mm) — the letterhead
+overrides only the top margin to 42mm to reserve room for itself.
 {% endcomment %}
 {% if letterhead.enabled %}
 <style>
-    @page {
-        margin-top: 42mm;
-        @top-center {
-            content: element(print-letterhead);
-            vertical-align: bottom;
-        }
+    /* Reserve the top page margin for the fixed full-bleed header (every page). */
+    @page { margin-top: 42mm; }
+    .print-letterhead-fixed {
+        position: fixed;
+        top: -42mm;      /* pull up into the reserved top margin => page top edge */
+        left: -16mm;     /* bleed past the 16mm side margins ... */
+        width: 210mm;    /* ... to the full A4 page width (edge to edge) */
+        z-index: 1;
     }
-    .print-letterhead-running {
-        position: running(print-letterhead);
-        width: 100%;
-    }
+    .print-letterhead-inner { padding: 5mm 16mm 0; }
 </style>
+
 {% if letterhead.body_watermark.enabled and letterhead.body_watermark.url %}
 <img src="{{ letterhead.body_watermark.url }}" alt="" aria-hidden="true"
      style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: {{ letterhead.body_watermark.size_pct|default:45 }}%; height: auto; opacity: {{ letterhead.body_watermark.opacity|default:'0.1' }}; z-index: -1;" />
 {% endif %}
-<div class="print-letterhead-running">
+
+<div class="print-letterhead-fixed">
 <div style="position: relative;">
     {% if letterhead.background_pattern_url %}
     <img src="{{ letterhead.background_pattern_url }}" alt="" aria-hidden="true" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; opacity: {{ letterhead.background_pattern_opacity|default:1 }}; z-index: -1;" />
     {% endif %}
-<div style="display: table; width: 100%; table-layout: fixed; padding-bottom: 7px;">
-    <div style="display: table-cell; width: 24%; vertical-align: middle; text-align: left;">
-        {% if letterhead.left_image.enabled and letterhead.left_image.url %}
-        <img src="{{ letterhead.left_image.url }}" alt="Left letterhead image" style="display: block; width: {{ letterhead.left_image.width_px }}px; height: {{ letterhead.left_image.height_px }}px; max-width: 100%; object-fit: contain;" />
-        {% endif %}
-    </div>
-    <div style="display: table-cell; width: 52%; vertical-align: middle; text-align: center; padding: 0 8px;">
-        {% if letterhead.layout_mode == "two_column" %}
+
+    <div class="print-letterhead-inner">
         <div style="display: table; width: 100%; table-layout: fixed;">
-        <div style="display: table-cell; width: 50%; vertical-align: middle; text-align: center; padding-right: 5px;">
-        {% endif %}
-            {% for line in letterhead.text_lines %}
-                {% if line.style == "title" %}
-                <div style="font-size: 14pt; font-weight: 700; line-height: 1.2; white-space: nowrap;">{{ line.text }}</div>
-                {% else %}
-                <div style="font-size: 8pt; line-height: 1.35; color: #374151; text-align: center;">{{ line.text }}</div>
-                {% endif %}
-            {% endfor %}
         {% if letterhead.layout_mode == "two_column" %}
+            <div style="display: table-cell; width: 22%; vertical-align: middle; text-align: left;">
+                {% if letterhead.left_image.enabled and letterhead.left_image.url %}
+                <img src="{{ letterhead.left_image.url }}" alt="Left letterhead image" style="display: block; width: {{ letterhead.left_image.width_px }}px; height: {{ letterhead.left_image.height_px }}px; max-width: 100%; object-fit: contain;" />
+                {% endif %}
+            </div>
+            <div style="display: table-cell; width: 40%; vertical-align: middle; text-align: center; padding: 0 6px;">
+                {% for line in letterhead.text_lines %}
+                    {% if line.style == "title" %}
+                    <div style="font-size: 14pt; font-weight: 700; line-height: 1.2; white-space: nowrap;">{{ line.text }}</div>
+                    {% else %}
+                    <div style="font-size: 8pt; line-height: 1.35; color: #374151;">{{ line.text }}</div>
+                    {% endif %}
+                {% endfor %}
+            </div>
+            <div style="display: table-cell; width: 38%; vertical-align: middle; text-align: {{ letterhead.right_column_align|default:'right' }};">
+                {% for line in letterhead.right_column_lines %}
+                    {% if line.style == "title" %}
+                    <div style="font-size: 11pt; font-weight: 700; line-height: 1.25;">{{ line.text }}</div>
+                    {% else %}
+                    <div style="font-size: 7.5pt; line-height: 1.4; color: #374151;">{{ line.text }}</div>
+                    {% endif %}
+                {% endfor %}
+            </div>
+        {% else %}
+            <div style="display: table-cell; width: 24%; vertical-align: middle; text-align: left;">
+                {% if letterhead.left_image.enabled and letterhead.left_image.url %}
+                <img src="{{ letterhead.left_image.url }}" alt="Left letterhead image" style="display: block; width: {{ letterhead.left_image.width_px }}px; height: {{ letterhead.left_image.height_px }}px; max-width: 100%; object-fit: contain;" />
+                {% endif %}
+            </div>
+            <div style="display: table-cell; width: 52%; vertical-align: middle; text-align: center; padding: 0 8px;">
+                {% for line in letterhead.text_lines %}
+                    {% if line.style == "title" %}
+                    <div style="font-size: 14pt; font-weight: 700; line-height: 1.2; white-space: nowrap;">{{ line.text }}</div>
+                    {% else %}
+                    <div style="font-size: 8pt; line-height: 1.35; color: #374151;">{{ line.text }}</div>
+                    {% endif %}
+                {% endfor %}
+            </div>
+            <div style="display: table-cell; width: 24%; vertical-align: middle; text-align: right;">
+                {% if letterhead.right_image.enabled and letterhead.right_image.url %}
+                <img src="{{ letterhead.right_image.url }}" alt="Right letterhead image" style="display: inline-block; width: {{ letterhead.right_image.width_px }}px; height: {{ letterhead.right_image.height_px }}px; max-width: 100%; object-fit: contain;" />
+                {% endif %}
+            </div>
+        {% endif %}
         </div>
-        <div style="display: table-cell; width: 50%; vertical-align: middle; text-align: center; padding-left: 5px;">
-        {% for line in letterhead.right_column_lines %}
-            {% if line.style == "title" %}
-            <div style="font-size: 10pt; font-weight: 700; line-height: 1.25; text-align: {{ letterhead.right_column_align|default:'right' }};">{{ line.text }}</div>
-            {% else %}
-            <div style="font-size: 7.5pt; line-height: 1.4; color: #374151; text-align: {{ letterhead.right_column_align|default:'right' }};">{{ line.text }}</div>
-            {% endif %}
+
+        {% if letterhead.show_hairline %}
+        <hr style="border: none; border-top: 1.5px solid #1f2937; margin: 5px 0 0;" />
+        {% endif %}
+    </div>
+
+    {% if letterhead.info_bar.enabled %}
+    <div style="background: {{ letterhead.info_bar.background_color }}; color: {{ letterhead.info_bar.text_color }}; padding: 4px 16mm; margin-top: 5px; font-size: 7pt; line-height: 1.35;">
+        {% for line in letterhead.info_bar.lines %}
+        <div style="text-align: center;">{{ line.text }}</div>
         {% endfor %}
-        </div>
-        </div>
-        {% endif %}
     </div>
-    <div style="display: table-cell; width: 24%; vertical-align: middle; text-align: right;">
-        {% if letterhead.right_image.enabled and letterhead.right_image.url %}
-        <img src="{{ letterhead.right_image.url }}" alt="Right letterhead image" style="display: inline-block; width: {{ letterhead.right_image.width_px }}px; height: {{ letterhead.right_image.height_px }}px; max-width: 100%; object-fit: contain;" />
-        {% endif %}
-    </div>
-</div>
-{% if letterhead.show_hairline %}
-<hr style="border: none; border-top: 1.5px solid #1f2937; margin: 0 0 8px;" />
-{% endif %}
-{% if letterhead.info_bar.enabled %}
-<div style="background: {{ letterhead.info_bar.background_color }}; color: {{ letterhead.info_bar.text_color }}; padding: 3px 8px; margin-bottom: 6px; font-size: 7pt; line-height: 1.35;">
-    {% for line in letterhead.info_bar.lines %}
-    <div style="text-align: center;">{{ line.text }}</div>
-    {% endfor %}
-</div>
-{% endif %}
+    {% endif %}
 </div>
 </div>
 {% endif %}
