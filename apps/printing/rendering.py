@@ -511,7 +511,7 @@ def _clinical_record_context(tenant_id: uuid.UUID, record_id: int, language: str
         "uhid": patient.patient_id if patient else "",
         "ipd_no": admission.admission_id if admission else (visit.visit_number if visit else ""),
         "patient_name": patient.full_name if patient else "",
-        "age": patient.age if patient else "",
+        "age": patient.age if patient and patient.age is not None else "",
         "gender": patient.get_gender_display() if patient and patient.gender else "",
         "consulting_doctor_ids": admission.consulting_doctor_ids if admission else [],
         "encounter_type": encounter_type,

@@ -33,11 +33,12 @@ overrides only the top margin to 42mm to reserve room for itself.
     .print-letterhead-fixed {
         position: fixed;
         top: -42mm;      /* pull up into the reserved top margin => page top edge */
-        left: -16mm;     /* bleed past the 16mm side margins ... */
-        width: 210mm;    /* ... to the full A4 page width (edge to edge) */
+        left: -20mm;     /* over-bleed 4mm past each 16mm side margin so the ... */
+        right: -20mm;    /* ... background + info bar always reach the paper edge */
         z-index: 1;
     }
-    .print-letterhead-inner { padding: 5mm 16mm 0; }
+    /* Inner padding = bleed (20mm) keeps header content at the normal 16mm inset. */
+    .print-letterhead-inner { padding: 5mm 20mm 0; }
 </style>
 
 {% if letterhead.body_watermark.enabled and letterhead.body_watermark.url %}
@@ -106,7 +107,7 @@ overrides only the top margin to 42mm to reserve room for itself.
     </div>
 
     {% if letterhead.info_bar.enabled %}
-    <div style="background: {{ letterhead.info_bar.background_color }}; color: {{ letterhead.info_bar.text_color }}; padding: 4px 16mm; margin-top: 5px; font-size: 7pt; line-height: 1.35;">
+    <div style="background: {{ letterhead.info_bar.background_color }}; color: {{ letterhead.info_bar.text_color }}; padding: 4px 20mm; margin-top: 5px; font-size: 7pt; line-height: 1.35;">
         {% for line in letterhead.info_bar.lines %}
         <div style="text-align: center;">{{ line.text }}</div>
         {% endfor %}
