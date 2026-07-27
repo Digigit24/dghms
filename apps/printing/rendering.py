@@ -672,6 +672,102 @@ def _format_body_diagram(raw: Any) -> str:
     return f"{count} marked point{'s' if count != 1 else ''}"
 
 
+# Common medical grid column keys, in the order they should print, with
+# display labels. Used to lay out grid tables (e.g. the prescription grid) with
+# proper headers even when the stored ``config.grid_schema`` has drifted from
+# the keys the client actually saves.
+_GRID_KEY_ORDER = [
+    "medicine", "medicine_name", "drug", "drug_name", "item", "product",
+    "dose", "dosage", "strength",
+    "frequency", "freq", "route",
+    "days", "duration", "period",
+    "quantity", "qty",
+    "timing", "when",
+    "instruction", "instructions", "direction", "directions",
+    "remark", "remarks", "note", "notes",
+]
+_GRID_KEY_LABELS = {
+    "medicine": "Medicine", "medicine_name": "Medicine", "drug": "Drug",
+    "drug_name": "Drug", "item": "Item", "product": "Product",
+    "dose": "Dose", "dosage": "Dose", "strength": "Strength",
+    "frequency": "Frequency", "freq": "Frequency", "route": "Route",
+    "days": "Days", "duration": "Duration", "period": "Period",
+    "quantity": "Quantity", "qty": "Qty",
+    "timing": "Timing", "when": "When",
+    "instruction": "Instruction", "instructions": "Instructions",
+    "direction": "Direction", "directions": "Directions",
+    "remark": "Remark", "remarks": "Remarks", "note": "Note", "notes": "Notes",
+}
+
+
+def _grid_label(key: Any) -> str:
+    return _GRID_KEY_LABELS.get(str(key).lower()) or _humanize_key(key)
+
+
+def _order_grid_keys(keys: list) -> list:
+    order = {k: i for i, k in enumerate(_GRID_KEY_ORDER)}
+    return sorted(keys, key=lambda k: (order.get(str(k).lower(), len(_GRID_KEY_ORDER)), str(k)))
+
+
+def _grid_cell(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    if isinstance(value, (dict, list, tuple)):
+        return _humanize_json(value)
+    return str(value).strip()
+
+
+def _format_grid(field_data: dict[str, Any], raw: Any) -> Any:
+    """Turn a GRID value (list of row dicts) into an aligned table with headers.
+
+    Columns come from the field's ``config.grid_schema``/``columns`` when those
+    keys actually match the stored data; otherwise (schema drift, e.g. the
+    prescription grid whose config keys differ from the saved keys) they are
+    derived from the data keys, ordered by a medical-form preference list. Every
+    row emits a cell for every column in the same order, so empty values stay
+    empty and columns never shift. Returns ``{"columns": [...], "rows": [...]}``
+    or ``None`` when there is no tabular data.
+    """
+    if not isinstance(raw, (list, tuple)):
+        return None
+    rows = [r for r in raw if isinstance(r, dict)]
+    if not rows:
+        return None
+
+    data_keys: list = []
+    for row in rows:
+        for key in row.keys():
+            if key not in data_keys:
+                data_keys.append(key)
+    if not data_keys:
+        return None
+
+    config = field_data.get("config") or {}
+    schema = config.get("grid_schema") or config.get("columns") or []
+    schema_cols = [c for c in schema if isinstance(c, dict) and c.get("key")]
+    schema_keys = [str(c["key"]) for c in schema_cols]
+    matched = sum(1 for k in schema_keys if k in data_keys)
+    use_schema = bool(schema_keys) and matched >= max(1, (len(schema_keys) + 1) // 2)
+
+    columns: list = []
+    if use_schema:
+        for col in schema_cols:
+            key = str(col["key"])
+            if key in data_keys:
+                columns.append({"key": key, "label": str(col.get("label") or _grid_label(key))})
+        used = {c["key"] for c in columns}
+        for key in _order_grid_keys([k for k in data_keys if k not in used]):
+            columns.append({"key": key, "label": _grid_label(key)})
+    else:
+        for key in _order_grid_keys(data_keys):
+            columns.append({"key": key, "label": _grid_label(key)})
+
+    table_rows = [[_grid_cell(row.get(col["key"], "")) for col in columns] for row in rows]
+    return {"columns": columns, "rows": table_rows}
+
+
 def _format_print_display(field_data: dict[str, Any], raw: Any) -> Any:
     """Coerce a raw stored value into what the print template should show.
 
@@ -683,7 +779,7 @@ def _format_print_display(field_data: dict[str, Any], raw: Any) -> Any:
         return None
     field_type = field_data.get("field_type")
     if field_type == ClinicalFormField.FieldType.GRID:
-        return raw
+        return _format_grid(field_data, raw)
     if field_type == ClinicalFormField.FieldType.MULTISELECT:
         return _format_multiselect(field_data, raw)
     if field_type == ClinicalFormField.FieldType.BODY_DIAGRAM:

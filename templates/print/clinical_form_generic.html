@@ -43,10 +43,17 @@
         <div class="field-row" style="display: block;">
             <div class="field-label" style="display: block; margin-bottom: 2px;">{{ field.label }}:</div>
             <table class="bordered dense">
-                <tbody>
-                    {% for row in field.display_value %}
+                <thead>
                     <tr>
-                        {% for cell in row.values %}
+                        {% for col in field.display_value.columns %}
+                        <th>{{ col.label }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in field.display_value.rows %}
+                    <tr>
+                        {% for cell in row %}
                         <td>{{ cell }}</td>
                         {% endfor %}
                     </tr>
