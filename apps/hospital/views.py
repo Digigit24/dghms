@@ -425,12 +425,79 @@ def _validate_letterhead_config(payload: dict):
     if line_error:
         return None, line_error
 
+    right_column_align = payload.get("right_column_align", "right")
+    if right_column_align not in ("left", "center", "right"):
+        return None, {
+            "message": "'right_column_align' must be one of ['center', 'left', 'right'].",
+            "field": "right_column_align",
+        }
+
     background_pattern_url = payload.get("background_pattern_url")
     if background_pattern_url is not None and not isinstance(background_pattern_url, str):
         return None, {
             "message": "'background_pattern_url' must be a string or null.",
             "field": "background_pattern_url",
         }
+
+    background_pattern_opacity = payload.get("background_pattern_opacity", 1.0)
+    if (
+        isinstance(background_pattern_opacity, bool)
+        or not isinstance(background_pattern_opacity, (int, float))
+        or not 0.0 <= float(background_pattern_opacity) <= 1.0
+    ):
+        return None, {
+            "message": "'background_pattern_opacity' must be a number from 0 to 1.",
+            "field": "background_pattern_opacity",
+        }
+    background_pattern_opacity = float(background_pattern_opacity)
+
+    body_watermark = payload.get(
+        "body_watermark",
+        {"enabled": False, "url": "", "size_pct": 45, "opacity": 0.10},
+    )
+    if not isinstance(body_watermark, dict):
+        return None, {
+            "message": "'body_watermark' must be an object.",
+            "field": "body_watermark",
+        }
+    bw_missing = {"enabled", "url", "size_pct", "opacity"} - set(body_watermark)
+    if bw_missing:
+        return None, {
+            "message": f"'body_watermark' is missing required keys: {sorted(bw_missing)}.",
+            "field": "body_watermark",
+        }
+    if not isinstance(body_watermark["enabled"], bool):
+        return None, {
+            "message": "'body_watermark.enabled' must be a boolean.",
+            "field": "body_watermark.enabled",
+        }
+    if not isinstance(body_watermark["url"], str):
+        return None, {
+            "message": "'body_watermark.url' must be a string.",
+            "field": "body_watermark.url",
+        }
+    bw_size = body_watermark["size_pct"]
+    if isinstance(bw_size, bool) or not isinstance(bw_size, int) or not 10 <= bw_size <= 100:
+        return None, {
+            "message": "'body_watermark.size_pct' must be an integer from 10 to 100.",
+            "field": "body_watermark.size_pct",
+        }
+    bw_opacity = body_watermark["opacity"]
+    if (
+        isinstance(bw_opacity, bool)
+        or not isinstance(bw_opacity, (int, float))
+        or not 0.0 <= float(bw_opacity) <= 1.0
+    ):
+        return None, {
+            "message": "'body_watermark.opacity' must be a number from 0 to 1.",
+            "field": "body_watermark.opacity",
+        }
+    body_watermark = {
+        "enabled": body_watermark["enabled"],
+        "url": body_watermark["url"],
+        "size_pct": int(bw_size),
+        "opacity": float(bw_opacity),
+    }
 
     info_bar = payload.get(
         "info_bar",
@@ -508,7 +575,10 @@ def _validate_letterhead_config(payload: dict):
         {
             "layout_mode": layout_mode,
             "right_column_lines": right_column_lines,
+            "right_column_align": right_column_align,
             "background_pattern_url": background_pattern_url,
+            "background_pattern_opacity": background_pattern_opacity,
+            "body_watermark": body_watermark,
             "info_bar": info_bar,
         }
     )

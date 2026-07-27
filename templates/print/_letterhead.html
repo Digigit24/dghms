@@ -33,8 +33,15 @@ contract:
         width: 100%;
     }
 </style>
+{% if letterhead.body_watermark.enabled and letterhead.body_watermark.url %}
+<img src="{{ letterhead.body_watermark.url }}" alt="" aria-hidden="true"
+     style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: {{ letterhead.body_watermark.size_pct|default:45 }}%; height: auto; opacity: {{ letterhead.body_watermark.opacity|default:'0.1' }}; z-index: -1;" />
+{% endif %}
 <div class="print-letterhead-running">
-<div style="background: {% if letterhead.background_pattern_url %}url('{{ letterhead.background_pattern_url }}') center/cover no-repeat{% else %}transparent{% endif %};">
+<div style="position: relative;">
+    {% if letterhead.background_pattern_url %}
+    <img src="{{ letterhead.background_pattern_url }}" alt="" aria-hidden="true" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; opacity: {{ letterhead.background_pattern_opacity|default:1 }}; z-index: -1;" />
+    {% endif %}
 <div style="display: table; width: 100%; table-layout: fixed; padding-bottom: 7px;">
     <div style="display: table-cell; width: 24%; vertical-align: middle; text-align: left;">
         {% if letterhead.left_image.enabled and letterhead.left_image.url %}
@@ -58,9 +65,9 @@ contract:
         <div style="display: table-cell; width: 50%; vertical-align: middle; text-align: center; padding-left: 5px;">
         {% for line in letterhead.right_column_lines %}
             {% if line.style == "title" %}
-            <div style="font-size: 10pt; font-weight: 700; line-height: 1.25; text-align: center;">{{ line.text }}</div>
+            <div style="font-size: 10pt; font-weight: 700; line-height: 1.25; text-align: {{ letterhead.right_column_align|default:'right' }};">{{ line.text }}</div>
             {% else %}
-            <div style="font-size: 7.5pt; line-height: 1.4; color: #374151; text-align: center;">{{ line.text }}</div>
+            <div style="font-size: 7.5pt; line-height: 1.4; color: #374151; text-align: {{ letterhead.right_column_align|default:'right' }};">{{ line.text }}</div>
             {% endif %}
         {% endfor %}
         </div>

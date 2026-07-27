@@ -15,7 +15,18 @@ def with_letterhead_defaults(config: dict) -> dict:
     normalized.setdefault("text_lines", [])
     normalized.setdefault("layout_mode", "simple")
     normalized.setdefault("right_column_lines", [])
+    normalized.setdefault("right_column_align", "right")
     normalized.setdefault("background_pattern_url", None)
+    normalized.setdefault("background_pattern_opacity", 1.0)
+    normalized.setdefault(
+        "body_watermark",
+        {
+            "enabled": False,
+            "url": "",
+            "size_pct": 45,
+            "opacity": 0.10,
+        },
+    )
     normalized.setdefault(
         "left_image",
         {

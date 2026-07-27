@@ -203,7 +203,11 @@ def get_letterhead_context(tenant_id: uuid.UUID, show_letterhead: bool) -> dict[
         "text_lines": text_lines,
         "layout_mode": config.get("layout_mode") or "simple",
         "right_column_lines": right_column_lines,
+        "right_column_align": config.get("right_column_align", "right"),
         "background_pattern_url": config.get("background_pattern_url"),
+        "background_pattern_opacity": config.get("background_pattern_opacity", 1.0),
+        "body_watermark": config.get("body_watermark")
+        or {"enabled": False, "url": "", "size_pct": 45, "opacity": 0.10},
         "info_bar": info_bar,
     }
 
@@ -486,10 +490,14 @@ def _clinical_record_context(tenant_id: uuid.UUID, record_id: int, language: str
     encounter_type = record.encounter_type
     encounter_id = record.encounter_id
     admission = None
+    visit = None
     patient = None
     if encounter_type == ClinicalForm.EntityType.IPD_ADMISSION:
         admission = Admission.objects.filter(tenant_id=tenant_id, pk=encounter_id).select_related("patient").first()
         patient = admission.patient if admission else None
+    elif encounter_type == ClinicalForm.EntityType.OPD_VISIT:
+        visit = Visit.objects.filter(tenant_id=tenant_id, pk=encounter_id).select_related("patient").first()
+        patient = visit.patient if visit else None
 
     return {
         "record": record,
@@ -498,9 +506,10 @@ def _clinical_record_context(tenant_id: uuid.UUID, record_id: int, language: str
         "values": values_by_key,
         "get_value": _plain_value,
         "admission": admission,
+        "visit": visit,
         "patient": patient,
         "uhid": patient.patient_id if patient else "",
-        "ipd_no": admission.admission_id if admission else "",
+        "ipd_no": admission.admission_id if admission else (visit.visit_number if visit else ""),
         "patient_name": patient.full_name if patient else "",
         "age": patient.age if patient else "",
         "gender": patient.get_gender_display() if patient and patient.gender else "",
@@ -564,12 +573,7 @@ def _field_value_to_display(field_value: ClinicalFieldValue, language: str) -> A
 
 
 def _is_object_placeholder(text: Any) -> bool:
-    """True when ``text`` is the JS ``String(object)`` artifact.
-
-    A composite value that reached ``String()`` on the client is stored as one
-    or more comma-joined ``[object Object]`` tokens; such text carries no real
-    data and must never be printed.
-    """
+    """True when ``text`` is the JS ``String(object)`` artifact."""
     if not isinstance(text, str):
         return False
     stripped = text.strip()

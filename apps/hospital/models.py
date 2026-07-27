@@ -319,7 +319,15 @@ class Hospital(models.Model):
             "text_lines": text_lines,
             "layout_mode": "simple",
             "right_column_lines": [],
+            "right_column_align": "right",
             "background_pattern_url": None,
+            "background_pattern_opacity": 1.0,
+            "body_watermark": {
+                "enabled": False,
+                "url": "",
+                "size_pct": 45,
+                "opacity": 0.10,
+            },
             "info_bar": {
                 "enabled": False,
                 "background_color": "#1e3a5f",
