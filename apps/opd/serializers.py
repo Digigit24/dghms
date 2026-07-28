@@ -232,7 +232,7 @@ class OPDBillCreateUpdateSerializer(serializers.ModelSerializer):
         model = OPDBill
         fields = [
             'id', 'visit', 'doctor', 'opd_type', 'opd_subtype', 'charge_type',
-            'diagnosis', 'remarks', 'total_amount', 'discount_percent',
+            'bill_date', 'diagnosis', 'remarks', 'total_amount', 'discount_percent',
             'payment_mode', 'payment_details', 'received_amount'
         ]
         read_only_fields = ['id']
@@ -241,6 +241,8 @@ class OPDBillCreateUpdateSerializer(serializers.ModelSerializer):
             # The post_save signal on OPDBillItem recalculates these automatically.
             'total_amount': {'required': False, 'default': Decimal('0.00')},
             'received_amount': {'required': False, 'default': Decimal('0.00')},
+            # Editable, but auto-filled at creation by the model default.
+            'bill_date': {'required': False},
         }
 
     def validate(self, data):

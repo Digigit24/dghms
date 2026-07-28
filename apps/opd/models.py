@@ -368,7 +368,13 @@ class OPDBill(models.Model):
         max_length=50,
         help_text="Unique bill identifier (e.g., OPD-BILL/20231223/001)"
     )
-    bill_date = models.DateTimeField(auto_now_add=True)
+    # Editable bill/document date. Defaults to creation time but can be changed
+    # from the billing UI (created_at remains the immutable audit timestamp).
+    bill_date = models.DateTimeField(
+        default=timezone.now,
+        db_index=True,
+        help_text="Bill date shown on the printed bill (editable)."
+    )
 
     # Doctor Information
     doctor = models.ForeignKey(
