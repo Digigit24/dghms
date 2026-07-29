@@ -1,0 +1,100 @@
+name: Deploy DGHMS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: dghms-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Setup SSH
+        run: |
+          set -euo pipefail
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          printf '%s' "${{ secrets.VPS_SSH_KEY_B64 }}" \
+            | base64 --decode > ~/.ssh/dghms_key
+
+          chmod 600 ~/.ssh/dghms_key
+          ssh-keygen -y -f ~/.ssh/dghms_key > /dev/null
+
+      - name: Deploy DGHMS
+        run: |
+          ssh -4 -T \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=10 \
+            -i ~/.ssh/dghms_key \
+            "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+            'bash -s' <<'EOS'
+          set -euo pipefail
+
+          APP_DIR="/srv/apps/dghms/app/dghms"
+          VENV="/srv/apps/dghms/venv"
+          SERVICE="dghms.service"
+
+          exec 9>/tmp/dghms-deploy.lock
+
+          flock -n 9 || {
+            echo "Another DGHMS deployment is running."
+            exit 1
+          }
+
+          cd "$APP_DIR"
+
+          test -f manage.py || {
+            echo "manage.py not found in $APP_DIR"
+            exit 1
+          }
+
+          test -f requirements.txt || {
+            echo "requirements.txt not found"
+            exit 1
+          }
+
+          echo ">>> Fetching latest code"
+          git fetch origin main
+          git reset --hard origin/main
+          git clean -fd
+
+          echo ">>> Installing dependencies"
+          "$VENV/bin/pip" install \
+            --no-cache-dir \
+            -r requirements.txt
+
+          echo ">>> Running Django checks"
+          "$VENV/bin/python" manage.py check
+
+          echo ">>> Applying migrations"
+          "$VENV/bin/python" manage.py migrate --noinput
+
+          echo ">>> Collecting static files"
+          "$VENV/bin/python" manage.py collectstatic --noinput
+
+          echo ">>> Restarting DGHMS"
+          sudo -n systemctl restart "$SERVICE"
+
+          if ! sudo -n systemctl is-active --quiet "$SERVICE"; then
+            echo "DGHMS service failed to start"
+            sudo -n systemctl status "$SERVICE" --no-pager --full || true
+            exit 1
+          fi
+
+          echo "DGHMS deployment completed successfully"
+          echo "Revision: $(git rev-parse --short HEAD)"
+          EOS
