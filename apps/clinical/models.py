@@ -28,6 +28,7 @@ class ClinicalForm(models.Model):
         NURSING_PAPER = "nursing_paper", "Nursing Paper"
         MONITORING_CHART = "monitoring_chart", "Monitoring Chart"
         PROGRESS_SHEET = "progress_sheet", "Progress Sheet"
+        JEEVISHA_PAIN_OPD = "jeevisha_pain_opd", "Jeevisha Pain OPD"
 
     id = models.BigAutoField(primary_key=True)
     tenant_id = models.UUIDField(db_index=True)

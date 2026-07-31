@@ -4,6 +4,7 @@ from django.test import TestCase
 
 from apps.clinical.models import ClinicalForm
 from apps.printing.rendering import (
+    _format_checklist_options,
     PrintFormCodeError,
     PrintNotFoundError,
     build_print_context,
@@ -12,6 +13,31 @@ from apps.printing.rendering import (
 
 
 class PrintFormCodeResolutionTests(TestCase):
+    def test_jeevisha_print_code_is_registered(self):
+        self.assertEqual(
+            resolve_print_form_code("jeevisha_pain_opd", uuid.uuid4()),
+            "jeevisha_pain_opd",
+        )
+
+    def test_checklist_options_include_unselected_items_and_notes(self):
+        field = {
+            "picklist_items": [
+                {"value": "slr", "label": "SLR"},
+                {"value": "fair", "label": "FAIR"},
+            ]
+        }
+        result = _format_checklist_options(
+            field,
+            {"selected": ["slr"], "notes": {"slr": "Left"}},
+        )
+        self.assertEqual(
+            result,
+            [
+                {"value": "slr", "label": "SLR", "selected": True, "note": "Left"},
+                {"value": "fair", "label": "FAIR", "selected": False, "note": ""},
+            ],
+        )
+
     def test_resolves_actual_tenant_clinical_form_code_to_registered_print_code(self):
         tenant_id = uuid.uuid4()
         ClinicalForm.objects.create(

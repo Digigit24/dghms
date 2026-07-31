@@ -289,6 +289,7 @@ class Command(BaseCommand):
                     "status": ClinicalForm.Status.PUBLISHED,
                     "is_system": False,
                     "entity_type": ClinicalForm.EntityType.OPD_VISIT,
+                    "print_template_code": ClinicalForm.PrintTemplateCode.JEEVISHA_PAIN_OPD,
                     "config": {"layout": "sections", "source": "jeevisha_paper_opd_form"},
                     "is_active": True,
                     "created_by_user_id": user_id,

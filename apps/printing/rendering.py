@@ -47,6 +47,7 @@ FORM_NURSING_PAPER = "nursing_paper"
 FORM_MONITORING_CHART = "monitoring_chart"
 FORM_PROGRESS_SHEET = "progress_sheet"
 FORM_CLINICAL_GENERIC = "clinical_form"
+FORM_JEEVISHA_PAIN_OPD = "jeevisha_pain_opd"
 FORM_OPD_VISIT = "opd_visit_form"
 FORM_IPD_BILL = "ipd_bill"
 FORM_OPD_BILL = "opd_bill"
@@ -57,6 +58,7 @@ REGISTERED_FORM_CODES = {
     FORM_MONITORING_CHART,
     FORM_PROGRESS_SHEET,
     FORM_CLINICAL_GENERIC,
+    FORM_JEEVISHA_PAIN_OPD,
     FORM_OPD_VISIT,
     FORM_IPD_BILL,
     FORM_OPD_BILL,
@@ -67,6 +69,7 @@ CLINICAL_RECORD_FORM_CODES = {
     FORM_MONITORING_CHART,
     FORM_PROGRESS_SHEET,
     FORM_CLINICAL_GENERIC,
+    FORM_JEEVISHA_PAIN_OPD,
 }
 
 # Template used for each registered form code.
@@ -76,6 +79,7 @@ _TEMPLATE_BY_FORM_CODE = {
     FORM_MONITORING_CHART: "print/monitoring_chart.html",
     FORM_PROGRESS_SHEET: "print/progress_sheet.html",
     FORM_CLINICAL_GENERIC: "print/clinical_form_generic.html",
+    FORM_JEEVISHA_PAIN_OPD: "print/jeevisha_pain_opd.html",
     FORM_OPD_VISIT: "print/opd_visit_form.html",
     FORM_IPD_BILL: "print/ipd_bill.html",
     FORM_OPD_BILL: "print/opd_bill.html",
@@ -478,13 +482,26 @@ def _clinical_record_context(tenant_id: uuid.UUID, record_id: int, language: str
         return _field_value_to_display(fv, language)
 
     sections = []
+    fields_by_key: dict[str, dict[str, Any]] = {}
     for section in structure.get("sections", []):
         fields = []
         for field_data in section.get("section_fields", []):
             fv = values_by_key.get(field_data["field_key"])
             raw_value = _field_value_to_display(fv, language) if fv else None
             display_value = _format_print_display(field_data, raw_value)
-            fields.append({**field_data, "display_value": display_value})
+            print_field = {**field_data, "display_value": display_value, "raw_value": raw_value}
+            if field_data.get("field_type") == ClinicalFormField.FieldType.MULTISELECT:
+                print_field["checklist_options"] = _format_checklist_options(field_data, raw_value)
+            if field_data.get("field_type") == ClinicalFormField.FieldType.BODY_DIAGRAM:
+                pins = raw_value if isinstance(raw_value, (list, tuple)) else []
+                print_field["front_pins"] = [
+                    pin for pin in pins if isinstance(pin, dict) and pin.get("view") == "front"
+                ]
+                print_field["back_pins"] = [
+                    pin for pin in pins if isinstance(pin, dict) and pin.get("view") == "back"
+                ]
+            fields.append(print_field)
+            fields_by_key[field_data["field_key"]] = print_field
         sections.append({**section, "section_fields": fields})
 
     encounter_type = record.encounter_type
@@ -503,6 +520,7 @@ def _clinical_record_context(tenant_id: uuid.UUID, record_id: int, language: str
         "record": record,
         "structure": structure,
         "sections": sections,
+        "fields_by_key": fields_by_key,
         "values": values_by_key,
         "get_value": _plain_value,
         "admission": admission,
@@ -649,6 +667,40 @@ def _format_multiselect(field_data: dict[str, Any], raw: Any) -> str:
             return ""
         return ", ".join(label_for(v.strip()) for v in raw.split(",") if v.strip()) or raw
     return _humanize_json(raw)
+
+
+def _format_checklist_options(field_data: dict[str, Any], raw: Any) -> list[dict[str, Any]]:
+    """Return all configured options with selection state and optional notes."""
+    selected: list[Any] = []
+    notes: dict[str, Any] = {}
+    if isinstance(raw, dict):
+        selected = list(raw.get("selected") or [])
+        notes = raw.get("notes") if isinstance(raw.get("notes"), dict) else {}
+    elif isinstance(raw, (list, tuple)):
+        selected = list(raw)
+    elif isinstance(raw, str):
+        selected = [value.strip() for value in raw.split(",") if value.strip()]
+
+    selected_keys = {str(value) for value in selected}
+    options = field_data.get("picklist_items") or (field_data.get("config") or {}).get("options") or []
+    result = []
+    for option in options:
+        if isinstance(option, dict):
+            value = option.get("value")
+            label = option.get("label") or value
+        else:
+            value = option
+            label = option
+        key = str(value)
+        result.append(
+            {
+                "value": value,
+                "label": label,
+                "selected": key in selected_keys,
+                "note": notes.get(key, ""),
+            }
+        )
+    return result
 
 
 def _format_body_diagram(raw: Any) -> str:

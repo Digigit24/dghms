@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ structure.name|default:"Jeevisha Pain OPD" }}</title>
+{% include "print/_print_base.css" %}
+<style>
+    .jeevisha-sheet { font-size: 8.2pt; line-height: 1.25; }
+    .jeevisha-sheet .patient-info-bar { margin-bottom: 5px; }
+    .j-section { break-inside: avoid; }
+    .j-title {
+        border-bottom: 1.2px solid #273449; font-size: 8.8pt; font-weight: 700;
+        letter-spacing: .045em; margin: 5px 0 3px; padding-bottom: 1px; text-transform: uppercase;
+    }
+    .j-grid { display: flex; gap: 7mm; }
+    .j-grid > * { min-width: 0; }
+    .j-col { flex: 1; }
+    .j-field { display: flex; gap: 3px; min-height: 4.2mm; }
+    .j-label { color: #374151; font-weight: 600; white-space: nowrap; }
+    .j-value { flex: 1; min-width: 0; }
+    .j-history { display: flex; align-items: flex-start; gap: 7mm; }
+    .j-history .conditions { flex: 2; }
+    .j-history .history-field { flex: 1; }
+    .check-list { display: flex; flex-direction: column; gap: 1px; }
+    .check-item { display: flex; align-items: baseline; gap: 3px; min-height: 3.8mm; }
+    .check-box {
+        border: .7px solid #1f2937; display: inline-block; flex: 0 0 auto;
+        height: 2.6mm; position: relative; top: .3mm; width: 2.6mm;
+    }
+    .check-box.selected:after {
+        content: ""; border-bottom: 1px solid #111827; border-right: 1px solid #111827;
+        height: 1.8mm; left: .75mm; position: absolute; top: .15mm;
+        transform: rotate(42deg); width: .8mm;
+    }
+    .exam-grid { display: flex; gap: 5mm; align-items: flex-start; }
+    .exam-list { flex: 0 0 24%; }
+    .diagram-column { display: flex; flex: 1; gap: 3mm; }
+    .diagram-view { flex: 1; text-align: center; }
+    .diagram-view svg { color: #344054; display: block; height: 62mm; margin: 0 auto; width: 31mm; }
+    .diagram-caption { color: #475467; font-size: 6.8pt; margin-bottom: -2mm; text-transform: capitalize; }
+    .diagram-note { font-size: 6pt; }
+    .lower-exam { display: flex; gap: 10mm; margin-top: 2mm; }
+    .lower-exam > div { flex: 1; }
+    .writing-area { min-height: 16mm; white-space: pre-wrap; }
+    .writing-area.large { min-height: 27mm; }
+    .bottom-grid { display: flex; gap: 10mm; }
+    .bottom-grid > div { flex: 1; }
+</style>
+</head>
+<body>
+<div class="print-page jeevisha-sheet{% if page_break_before %} page-break-before{% endif %}">
+    {% include "print/_print_footer.html" %}
+    {% include "print/_letterhead.html" %}
+
+    <div class="form-title">{{ structure.name|default:"Jeevisha Pain OPD" }}</div>
+    <div class="patient-info-bar">
+        <div><span class="field-label">UHID:</span> {{ uhid }}</div>
+        <div><span class="field-label">IPD/OPD ID:</span> {{ ipd_no|default:encounter_id }}</div>
+        <div><span class="field-label">Patient Name:</span> {{ patient_name }}</div>
+        <div><span class="field-label">Age / Gender:</span> {{ age }} / {{ gender }}</div>
+        <div><span class="field-label">Encounter Type:</span> {{ encounter_type }}</div>
+        <div><span class="field-label">Record #:</span> {{ record.id }}</div>
+    </div>
+
+    <section class="j-section">
+        <div class="j-title">Chief Complaint</div>
+        <div class="j-grid">
+            <div class="j-col">
+                <div class="j-field"><span class="j-label">C/O Pain — Site:</span><span class="j-value">{{ fields_by_key.co_pain_site.display_value }}</span></div>
+                <div class="j-field"><span class="j-label">Type:</span><span class="j-value">{{ fields_by_key.co_pain_type.display_value }}</span></div>
+                <div class="j-field"><span class="j-label">Duration:</span><span class="j-value">{{ fields_by_key.duration.display_value }}</span></div>
+                <div class="j-field"><span class="j-label">Radiation:</span><span class="j-value">{{ fields_by_key.radiation.display_value }}</span></div>
+                <div class="j-field"><span class="j-label">Aggravated on:</span><span class="j-value">{{ fields_by_key.aggravated_on.display_value }}</span></div>
+                <div class="j-field"><span class="j-label">Relieved on:</span><span class="j-value">{{ fields_by_key.relieved_on.display_value }}</span></div>
+            </div>
+            <div class="j-col">
+                <div class="j-field"><span class="j-label">Tingling:</span><span class="j-value">{{ fields_by_key.tingling.display_value }}</span></div>
+                <div class="j-field"><span class="j-label">Numbness:</span><span class="j-value">{{ fields_by_key.numbness.display_value }}</span></div>
+                <div class="j-field"><span class="j-label">Burning:</span><span class="j-value">{{ fields_by_key.burning.display_value }}</span></div>
+                <div class="j-field"><span class="j-label">Weakness:</span><span class="j-value">{{ fields_by_key.weakness.display_value }}</span></div>
+                <div class="j-field"><span class="j-label">EMS:</span><span class="j-value">{{ fields_by_key.ems.display_value }}</span></div>
+                <div class="j-field"><span class="j-label">Associated Features:</span><span class="j-value">{{ fields_by_key.associated_features.display_value }}</span></div>
+            </div>
+            <div class="j-col">
+                <div class="j-field"><span class="j-label">Direct / Referral:</span><span class="j-value">{{ fields_by_key.direct_referral.display_value }}</span></div>
+                <div class="j-field"><span class="j-label">B/B:</span><span class="j-value">{{ fields_by_key.bowel_bladder.display_value }}</span></div>
+                <div class="j-field"><span class="j-label">Acidity/Sleep/Appetite:</span><span class="j-value">{{ fields_by_key.acidity_sleep_appetite.display_value }}</span></div>
+                <div class="j-field"><span class="j-label">Treatment History:</span><span class="j-value">{{ fields_by_key.treatment_history.display_value }}</span></div>
+            </div>
+        </div>
+    </section>
+
+    <section class="j-section">
+        <div class="j-title">Past Medical History</div>
+        <div class="j-history">
+            <div class="conditions check-list">
+                {% for option in fields_by_key.pmh_conditions.checklist_options %}
+                <div class="check-item"><span class="check-box{% if option.selected %} selected{% endif %}"></span><span>{{ option.label }}{% if option.note %}: {{ option.note }}{% endif %}</span></div>
+                {% endfor %}
+            </div>
+            <div class="history-field"><span class="j-label">Allergies:</span> {{ fields_by_key.allergies.display_value }}</div>
+            <div class="history-field"><span class="j-label">Addiction:</span> {{ fields_by_key.addiction.display_value }}</div>
+            <div class="history-field"><span class="j-label">Occupation:</span> {{ fields_by_key.occupation.display_value }}</div>
+            <div class="history-field"><span class="j-label">Veg / Non-veg:</span> {{ fields_by_key.diet.display_value }}</div>
+        </div>
+    </section>
+
+    <section class="j-section">
+        <div class="j-title">Examination</div>
+        <div class="exam-grid">
+            <div class="exam-list">
+                <div class="j-label">L/S Spine</div>
+                <div class="check-list">
+                    {% for option in fields_by_key.ls_spine_findings.checklist_options %}
+                    <div class="check-item"><span class="check-box{% if option.selected %} selected{% endif %}"></span><span>{{ option.label }}{% if option.note %}: {{ option.note }}{% endif %}</span></div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="exam-list">
+                <div class="j-label">C Spine</div>
+                <div class="check-list">
+                    {% for option in fields_by_key.c_spine_findings.checklist_options %}
+                    <div class="check-item"><span class="check-box{% if option.selected %} selected{% endif %}"></span><span>{{ option.label }}{% if option.note %}: {{ option.note }}{% endif %}</span></div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="diagram-column">
+                <div class="diagram-view">
+                    <div class="diagram-caption">Right&nbsp;&nbsp;&nbsp; Front &nbsp;&nbsp;&nbsp;Left</div>
+                    <svg viewBox="0 0 100 200" role="img" aria-label="Front body diagram">
+                        <g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="50" cy="14" r="10"/><path d="M46 24V30 M54 24V30 M20 36Q50 30 80 36"/>
+                            <path d="M28 36V90Q28 100 50 100Q72 100 72 90V36 M20 38L14 80L12 105 M80 38L86 80L88 105"/>
+                            <path d="M38 100L36 155L34 190 M62 100L64 155L66 190"/>
+                        </g>
+                        {% for pin in fields_by_key.body_diagram_canvas.front_pins %}
+                        <circle cx="{{ pin.x }}" cy="{{ pin.y }}" r="3.5" fill="#b42318"/>
+                        {% if pin.note %}<text class="diagram-note" x="{{ pin.x }}" y="{{ pin.y|add:'-5' }}" text-anchor="middle">{{ pin.note }}</text>{% endif %}
+                        {% endfor %}
+                    </svg>
+                </div>
+                <div class="diagram-view">
+                    <div class="diagram-caption">Left&nbsp;&nbsp;&nbsp; Back &nbsp;&nbsp;&nbsp;Right</div>
+                    <svg viewBox="0 0 100 200" role="img" aria-label="Back body diagram">
+                        <g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="50" cy="14" r="10"/><path d="M46 24V30 M54 24V30 M20 36Q50 30 80 36"/>
+                            <path d="M28 36L30 90Q30 100 50 100Q70 100 70 90L72 36 M20 38L14 80L12 105 M80 38L86 80L88 105"/>
+                            <path d="M38 100L36 155L34 190 M62 100L64 155L66 190"/>
+                        </g>
+                        {% for pin in fields_by_key.body_diagram_canvas.back_pins %}
+                        <circle cx="{{ pin.x }}" cy="{{ pin.y }}" r="3.5" fill="#b42318"/>
+                        {% if pin.note %}<text class="diagram-note" x="{{ pin.x }}" y="{{ pin.y|add:'-5' }}" text-anchor="middle">{{ pin.note }}</text>{% endif %}
+                        {% endfor %}
+                    </svg>
+                </div>
+            </div>
+        </div>
+        <div class="lower-exam">
+            <div>
+                <div class="j-label">Knee — Left</div>
+                {% for option in fields_by_key.left_knee_findings.checklist_options %}
+                <div class="check-item"><span class="check-box{% if option.selected %} selected{% endif %}"></span><span>{{ option.label }}{% if option.note %}: {{ option.note }}{% endif %}</span></div>
+                {% endfor %}
+            </div>
+            <div>
+                <div class="j-label">Knee — Right</div>
+                {% for option in fields_by_key.right_knee_findings.checklist_options %}
+                <div class="check-item"><span class="check-box{% if option.selected %} selected{% endif %}"></span><span>{{ option.label }}{% if option.note %}: {{ option.note }}{% endif %}</span></div>
+                {% endfor %}
+            </div>
+            <div>
+                <div class="j-label">Shoulder</div>
+                {% for option in fields_by_key.shoulder_findings.checklist_options %}
+                <div class="check-item"><span class="check-box{% if option.selected %} selected{% endif %}"></span><span>{{ option.label }}{% if option.note %}: {{ option.note }}{% endif %}</span></div>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+
+    <section><div class="j-title">Provisional Diagnosis</div><div class="writing-area">{{ fields_by_key.provisional_diagnosis.display_value }}</div></section>
+    <section><div class="j-title">Rx</div><div class="writing-area large">
+        {% if fields_by_key.prescription.display_value %}
+        <table class="bordered dense"><thead><tr>{% for col in fields_by_key.prescription.display_value.columns %}<th>{{ col.label }}</th>{% endfor %}</tr></thead>
+        <tbody>{% for row in fields_by_key.prescription.display_value.rows %}<tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>{% endfor %}</tbody></table>
+        {% endif %}
+    </div></section>
+    <div class="bottom-grid">
+        <section><div class="j-title">Plan</div><div class="writing-area">{{ fields_by_key.plan_text.display_value }}</div></section>
+        <section><div class="j-title">Follow up</div><div class="writing-area"></div></section>
+    </div>
+    <section><div class="j-title">Physiotherapy</div><div class="writing-area">{{ fields_by_key.physiotherapy_text.display_value }}</div></section>
+</div>
+</body>
+</html>
