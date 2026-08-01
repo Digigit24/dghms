@@ -9,7 +9,7 @@ from __future__ import annotations
 import datetime
 from typing import Any
 
-from django.db.models import Avg, Count, Sum
+from django.db.models import Avg, Count, Q, Sum
 from django.db.models.functions import TruncDate
 
 
@@ -24,41 +24,46 @@ def compute_patient_statistics(tenant_id: Any, group_by_day: bool = False) -> di
 
     base_qs = PatientProfile.objects.filter(tenant_id=tenant_id)
 
-    total = base_qs.count()
-    active = base_qs.filter(status='active').count()
-    inactive = base_qs.filter(status='inactive').count()
-    deceased = base_qs.filter(status='deceased').count()
-
     today = datetime.date.today()
-    patients_with_insurance = base_qs.filter(
-        insurance_provider__isnull=False,
-        insurance_expiry_date__gte=today
-    ).count()
-    avg_age = base_qs.aggregate(avg=Avg('age'))['avg'] or 0
-    total_visits = base_qs.aggregate(total=Sum('total_visits'))['total'] or 0
-
-    gender_dist = {label: base_qs.filter(gender=code).count()
-                   for code, label in getattr(PatientProfile, 'GENDER_CHOICES', [])}
-
-    blood_dist = {}
-    for bg_code, _bg_label in getattr(PatientProfile, 'BLOOD_GROUP_CHOICES', []):
-        c = base_qs.filter(blood_group=bg_code).count()
-        if c > 0:
-            blood_dist[bg_code] = c
-
-    registrations_today = base_qs.filter(registration_date__date=today).count()
+    totals = base_qs.aggregate(
+        total=Count('id'),
+        active=Count('id', filter=Q(status='active')),
+        inactive=Count('id', filter=Q(status='inactive')),
+        deceased=Count('id', filter=Q(status='deceased')),
+        insured=Count('id', filter=Q(
+            insurance_provider__isnull=False,
+            insurance_expiry_date__gte=today,
+        )),
+        registrations_today=Count(
+            'id', filter=Q(registration_date__date=today)
+        ),
+        avg_age=Avg('age'),
+        total_visits=Sum('total_visits'),
+    )
+    gender_counts = dict(
+        base_qs.values_list('gender').annotate(count=Count('id'))
+    )
+    gender_dist = {
+        label: gender_counts.get(code, 0)
+        for code, label in getattr(PatientProfile, 'GENDER_CHOICES', [])
+    }
+    blood_dist = dict(
+        base_qs.exclude(blood_group='')
+        .values_list('blood_group')
+        .annotate(count=Count('id'))
+    )
 
     data = {
-        'total_patients': total,
-        'active_patients': active,
-        'inactive_patients': inactive,
-        'deceased_patients': deceased,
-        'patients_with_insurance': patients_with_insurance,
-        'average_age': round(avg_age, 1),
-        'total_visits': total_visits,
+        'total_patients': totals['total'],
+        'active_patients': totals['active'],
+        'inactive_patients': totals['inactive'],
+        'deceased_patients': totals['deceased'],
+        'patients_with_insurance': totals['insured'],
+        'average_age': round(totals['avg_age'] or 0, 1),
+        'total_visits': totals['total_visits'] or 0,
         'gender_distribution': gender_dist,
         'blood_group_distribution': blood_dist,
-        'registrations_today': registrations_today,
+        'registrations_today': totals['registrations_today'],
     }
 
     if group_by_day:

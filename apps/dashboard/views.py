@@ -33,6 +33,14 @@ log = structlog.get_logger(__name__)
 
 SUMMARY_CACHE_TTL = 60  # seconds
 
+DASHBOARD_DOMAIN_TTLS = {
+    'overview': 30,
+    'operations': 15,
+    'financial': 120,
+    'clinical': 120,
+    'inventory': 60,
+}
+
 
 def _parse_date(value: Optional[str]) -> Optional[datetime.date]:
     try:
@@ -232,6 +240,194 @@ class DashboardSummaryView(APIView):
                 error=str(exc),
             )
         return Response(result)
+
+
+def _dashboard_domain_data(request, domain, date_from, date_to):
+    """Compute only one dashboard domain, keeping the critical path small."""
+    tenant_id = request.tenant_id
+    today = datetime.date.today()
+    range_start = date_from or today
+    range_end = date_to or range_start
+    bill_start = date_from or (today - datetime.timedelta(days=30))
+
+    def section(name: str, fn: Callable[[], Any]) -> Any:
+        started = timezone.now()
+        try:
+            return fn()
+        except Exception as exc:
+            log.error(
+                "dashboard_domain_section_failed",
+                tenant_id=str(tenant_id),
+                domain=domain,
+                section=name,
+                error=str(exc),
+                exc_info=True,
+            )
+            return None
+        finally:
+            elapsed_ms = (timezone.now() - started).total_seconds() * 1000
+            log.info(
+                "dashboard_domain_section_timing",
+                tenant_id=str(tenant_id),
+                domain=domain,
+                section=name,
+                duration_ms=round(elapsed_ms, 2),
+            )
+
+    data = {'generated_at': timezone.now().isoformat()}
+
+    if domain == 'overview':
+        from apps.ipd.services.stats import compute_admission_statistics
+        from apps.opd.services.stats import compute_visit_statistics
+
+        data.update({
+            'opd_statistics': section(
+                'opd_statistics',
+                lambda: compute_visit_statistics(tenant_id, range_start, range_end),
+            ),
+            'ipd_statistics': section(
+                'ipd_statistics',
+                lambda: compute_admission_statistics(tenant_id, date_from, date_to),
+            ),
+        })
+    elif domain == 'operations':
+        from apps.appointments.services.stats import (
+            base_appointment_queryset,
+            compute_today_appointments,
+        )
+
+        data['appointments_today'] = section(
+            'appointments_today',
+            lambda: compute_today_appointments(
+                base_appointment_queryset(tenant_id),
+                context={'request': request},
+            ),
+        )
+    elif domain == 'financial':
+        from apps.ipd.services.stats import compute_billing_statistics
+        from apps.opd.services.stats import compute_bill_statistics
+        from apps.payments.services.stats import (
+            compute_transaction_statistics,
+            tenant_transaction_queryset,
+        )
+
+        data.update({
+            'payment_stats': section(
+                'payment_stats',
+                lambda: compute_transaction_statistics(
+                    tenant_transaction_queryset(tenant_id, date_from, date_to)
+                ),
+            ),
+            'opd_bill_stats': section(
+                'opd_bill_stats',
+                lambda: compute_bill_statistics(tenant_id, bill_start, date_to),
+            ),
+            'ipd_billing_stats': section(
+                'ipd_billing_stats',
+                lambda: compute_billing_statistics(tenant_id),
+            ),
+        })
+    elif domain == 'clinical':
+        from apps.ipd.services.stats import compute_ipd_doctor_stats
+        from apps.opd.services.stats import compute_doctor_stats
+
+        data.update({
+            'opd_doctor_stats': section(
+                'opd_doctor_stats',
+                lambda: compute_doctor_stats(tenant_id, range_start, range_end),
+            ),
+            'ipd_doctor_stats': section(
+                'ipd_doctor_stats',
+                lambda: compute_ipd_doctor_stats(tenant_id, range_start, range_end),
+            ),
+        })
+    elif domain == 'inventory':
+        raw_tags = request.query_params.get('tags') or ''
+        tags = [tag.strip() for tag in raw_tags.split(',') if tag.strip()]
+        from apps.inventory.services.stats import (
+            compute_alerts_summary,
+            compute_dashboard_stats,
+        )
+        from apps.pharmacy.services.stats import (
+            compute_order_statistics,
+            compute_product_statistics,
+        )
+
+        data.update({
+            'pharmacy_product_stats': section(
+                'pharmacy_product_stats',
+                lambda: compute_product_statistics(tenant_id),
+            ),
+            'pharmacy_order_stats': section(
+                'pharmacy_order_stats',
+                lambda: compute_order_statistics(tenant_id),
+            ),
+            'inventory_dashboard': section(
+                'inventory_dashboard',
+                lambda: compute_dashboard_stats(tenant_id, tags=tags),
+            ),
+            'inventory_alerts': section(
+                'inventory_alerts',
+                lambda: compute_alerts_summary(tenant_id, tags=tags),
+            ),
+        })
+    return data
+
+
+class DashboardDomainView(APIView):
+    """Small, independently cached dashboard payload for one widget domain."""
+
+    permission_classes = [IsTenantAuthenticated]
+    domain = ''
+
+    def get(self, request):
+        date_from = _parse_date(request.query_params.get('date_from'))
+        date_to = _parse_date(request.query_params.get('date_to'))
+        if date_from and date_to and date_from > date_to:
+            date_from, date_to = date_to, date_from
+        tags = request.query_params.get('tags') or ''
+        cache_key = (
+            f"dashboard:v2:{self.domain}:{request.tenant_id}:"
+            f"{date_from or 'default'}:{date_to or 'default'}:{tags}"
+        )
+        cache = CeliyoCache()
+        cached = cache.get(cache_key)
+        if cached is not None:
+            response = Response(cached)
+            response['X-Dashboard-Cache'] = 'HIT'
+            return response
+
+        started = timezone.now()
+        data = _dashboard_domain_data(
+            request, self.domain, date_from, date_to
+        )
+        result = {'success': True, 'data': data}
+        cache.set(cache_key, result, ttl=DASHBOARD_DOMAIN_TTLS[self.domain])
+        elapsed_ms = (timezone.now() - started).total_seconds() * 1000
+        response = Response(result)
+        response['X-Dashboard-Cache'] = 'MISS'
+        response['Server-Timing'] = f"dashboard-{self.domain};dur={elapsed_ms:.2f}"
+        return response
+
+
+class DashboardOverviewView(DashboardDomainView):
+    domain = 'overview'
+
+
+class DashboardOperationsView(DashboardDomainView):
+    domain = 'operations'
+
+
+class DashboardFinancialView(DashboardDomainView):
+    domain = 'financial'
+
+
+class DashboardClinicalView(DashboardDomainView):
+    domain = 'clinical'
+
+
+class DashboardInventoryView(DashboardDomainView):
+    domain = 'inventory'
 
 
 def _positive_int(value: Optional[str], default: int, max_value: Optional[int] = None) -> int:

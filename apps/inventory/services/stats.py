@@ -10,7 +10,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
-from django.db.models import Count, F, Sum
+from django.db.models import Count, F, Q, Sum
 from django.utils import timezone
 
 def _filter_by_tags(queryset, tags, field_prefix=""):
@@ -43,15 +43,22 @@ def compute_dashboard_stats(tenant_id: Any, tags=None) -> dict:
     items = InventoryItem.objects.filter(tenant_id=tenant_id)
     items = _filter_by_tags(items, tags)
 
-    total_items = items.count()
-    active_items = items.filter(is_active=True).count()
-    low_stock_count = items.filter(
-        is_active=True, current_stock__lte=F("reorder_level"), current_stock__gt=0
-    ).count()
-    out_of_stock_count = items.filter(is_active=True, current_stock__lte=0).count()
-    overstock_count = items.filter(
-        is_active=True, max_stock_level__gt=0, current_stock__gt=F("max_stock_level")
-    ).count()
+    item_totals = items.aggregate(
+        total=Count('id'),
+        active=Count('id', filter=Q(is_active=True)),
+        low_stock=Count('id', filter=Q(
+            is_active=True, current_stock__lte=F('reorder_level'), current_stock__gt=0,
+        )),
+        out_of_stock=Count('id', filter=Q(is_active=True, current_stock__lte=0)),
+        overstock=Count('id', filter=Q(
+            is_active=True, max_stock_level__gt=0, current_stock__gt=F('max_stock_level'),
+        )),
+    )
+    total_items = item_totals['total']
+    active_items = item_totals['active']
+    low_stock_count = item_totals['low_stock']
+    out_of_stock_count = item_totals['out_of_stock']
+    overstock_count = item_totals['overstock']
 
     batches = InventoryBatch.objects.filter(tenant_id=tenant_id, is_active=True)
     batches = _filter_by_tags(batches, tags, "item__")
@@ -79,8 +86,12 @@ def compute_dashboard_stats(tenant_id: Any, tags=None) -> dict:
 
     alerts = StockAlert.objects.filter(tenant_id=tenant_id)
     alerts = _filter_by_tags(alerts, tags, "item__")
-    active_alerts = alerts.filter(is_active=True).count()
-    unacknowledged_alerts = alerts.filter(is_active=True, is_acknowledged=False).count()
+    alert_totals = alerts.aggregate(
+        active=Count('id', filter=Q(is_active=True)),
+        unacknowledged=Count('id', filter=Q(is_active=True, is_acknowledged=False)),
+    )
+    active_alerts = alert_totals['active']
+    unacknowledged_alerts = alert_totals['unacknowledged']
 
     total_stock_value = (
         items.filter(is_active=True)

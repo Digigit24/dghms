@@ -248,16 +248,17 @@ def compute_bill_statistics(
     if end_date is not None:
         bills = bills.filter(bill_date__date__lte=end_date)
 
-    total_bills = bills.count()
-    bills_paid = bills.filter(payment_status='paid').count()
-    bills_partial = bills.filter(payment_status='partial').count()
-    bills_unpaid = bills.filter(payment_status='unpaid').count()
-
-    total_revenue = bills.aggregate(Sum('total_amount'))['total_amount__sum'] or Decimal('0.00')
-    paid_revenue = bills.aggregate(Sum('received_amount'))['received_amount__sum'] or Decimal('0.00')
-    pending_amount = bills.aggregate(Sum('balance_amount'))['balance_amount__sum'] or Decimal('0.00')
-    total_discount = bills.aggregate(Sum('discount_amount'))['discount_amount__sum'] or Decimal('0.00')
-    average_bill_amount = bills.aggregate(Avg('total_amount'))['total_amount__avg'] or Decimal('0.00')
+    totals = bills.aggregate(
+        total_bills=Count('id'),
+        bills_paid=Count('id', filter=Q(payment_status='paid')),
+        bills_partial=Count('id', filter=Q(payment_status='partial')),
+        bills_unpaid=Count('id', filter=Q(payment_status='unpaid')),
+        total_revenue=Sum('total_amount'),
+        paid_revenue=Sum('received_amount'),
+        pending_amount=Sum('balance_amount'),
+        total_discount=Sum('discount_amount'),
+        average_bill_amount=Avg('total_amount'),
+    )
 
     # Breakdown by OPD type
     by_opd_type = list(bills.values('opd_type').annotate(
@@ -272,17 +273,17 @@ def compute_bill_statistics(
     ))
 
     data = {
-        'total_bills': total_bills,
-        'total_revenue': total_revenue,
-        'paid_revenue': paid_revenue,
-        'pending_amount': pending_amount,
-        'total_discount': total_discount,
-        'bills_paid': bills_paid,
-        'bills_partial': bills_partial,
-        'bills_unpaid': bills_unpaid,
+        'total_bills': totals['total_bills'],
+        'total_revenue': totals['total_revenue'] or Decimal('0.00'),
+        'paid_revenue': totals['paid_revenue'] or Decimal('0.00'),
+        'pending_amount': totals['pending_amount'] or Decimal('0.00'),
+        'total_discount': totals['total_discount'] or Decimal('0.00'),
+        'bills_paid': totals['bills_paid'],
+        'bills_partial': totals['bills_partial'],
+        'bills_unpaid': totals['bills_unpaid'],
         'by_opd_type': by_opd_type,
         'by_payment_mode': by_payment_mode,
-        'average_bill_amount': round(average_bill_amount, 2),
+        'average_bill_amount': round(totals['average_bill_amount'] or Decimal('0.00'), 2),
     }
 
     return OPDBillStatisticsSerializer(data).data

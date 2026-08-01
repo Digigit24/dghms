@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Any, Optional
 
-from django.db.models import F, QuerySet, Sum
+from django.db.models import Count, F, Q, QuerySet, Sum
 from django.utils import timezone
 
 
@@ -34,25 +34,24 @@ def compute_product_statistics(
 
     today = timezone.now().date()
 
-    return {
-        'total_products': queryset.count(),
-        'active_products': queryset.filter(is_active=True).count(),
-        'inactive_products': queryset.filter(is_active=False).count(),
-        'in_stock_products': queryset.filter(quantity__gt=0, is_active=True).count(),
-        'out_of_stock_products': queryset.filter(quantity=0, is_active=True).count(),
-        'low_stock_products': queryset.filter(
-            quantity__lte=F('minimum_stock_level'),
-            quantity__gt=0,
-            is_active=True
-        ).count(),
-        'near_expiry_products': queryset.filter(
+    totals = queryset.aggregate(
+        total_products=Count('id'),
+        active_products=Count('id', filter=Q(is_active=True)),
+        inactive_products=Count('id', filter=Q(is_active=False)),
+        in_stock_products=Count('id', filter=Q(quantity__gt=0, is_active=True)),
+        out_of_stock_products=Count('id', filter=Q(quantity=0, is_active=True)),
+        low_stock_products=Count('id', filter=Q(
+            quantity__lte=F('minimum_stock_level'), quantity__gt=0, is_active=True,
+        )),
+        near_expiry_products=Count('id', filter=Q(
             expiry_date__lte=today + timedelta(days=90),
             expiry_date__gte=today,
-            is_active=True
-        ).count(),
-        'expired_products': queryset.filter(
-            expiry_date__lt=today
-        ).count(),
+            is_active=True,
+        )),
+        expired_products=Count('id', filter=Q(expiry_date__lt=today)),
+    )
+    return {
+        **totals,
         'categories': ProductCategory.objects.filter(
             tenant_id=tenant_id, is_active=True
         ).count(),
@@ -68,14 +67,12 @@ def compute_order_statistics(tenant_id: Any) -> dict:
 
     queryset = PharmacyOrder.objects.filter(tenant_id=tenant_id)
 
-    return {
-        'total_orders': queryset.count(),
-        'pending_orders': queryset.filter(status='pending').count(),
-        'processing_orders': queryset.filter(status='processing').count(),
-        'shipped_orders': queryset.filter(status='shipped').count(),
-        'delivered_orders': queryset.filter(status='delivered').count(),
-        'cancelled_orders': queryset.filter(status='cancelled').count(),
-        'total_spent': queryset.filter(
-            payment_status='paid'
-        ).aggregate(total=Sum('total_amount'))['total'] or 0,
-    }
+    return queryset.aggregate(
+        total_orders=Count('id'),
+        pending_orders=Count('id', filter=Q(status='pending')),
+        processing_orders=Count('id', filter=Q(status='processing')),
+        shipped_orders=Count('id', filter=Q(status='shipped')),
+        delivered_orders=Count('id', filter=Q(status='delivered')),
+        cancelled_orders=Count('id', filter=Q(status='cancelled')),
+        total_spent=Sum('total_amount', filter=Q(payment_status='paid'), default=0),
+    )

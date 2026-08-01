@@ -9,8 +9,50 @@ from django.test.utils import CaptureQueriesContext
 
 from apps.dashboard.views import (
     _can_view_recent_encounters,
+    _dashboard_domain_data,
     _pending_counts_for_encounters,
 )
+
+
+class DashboardDomainSplitTest(SimpleTestCase):
+    def setUp(self):
+        self.tenant_id = uuid.uuid4()
+        self.request = SimpleNamespace(
+            tenant_id=self.tenant_id,
+            query_params={},
+        )
+
+    @patch("apps.ipd.services.stats.compute_admission_statistics")
+    @patch("apps.opd.services.stats.compute_visit_statistics")
+    def test_overview_only_computes_critical_sections(
+        self, visit_stats, admission_stats
+    ):
+        visit_stats.return_value = {"total_visits": 4}
+        admission_stats.return_value = {"currently_admitted": 2}
+
+        data = _dashboard_domain_data(
+            self.request, "overview", None, None
+        )
+
+        self.assertEqual(
+            set(data) - {"generated_at"},
+            {"opd_statistics", "ipd_statistics"},
+        )
+        visit_stats.assert_called_once()
+        admission_stats.assert_called_once()
+
+    @patch("apps.appointments.services.stats.compute_today_appointments")
+    @patch("apps.appointments.services.stats.base_appointment_queryset")
+    def test_operations_isolated_from_analytics(self, base_queryset, compute):
+        base_queryset.return_value = object()
+        compute.return_value = []
+
+        data = _dashboard_domain_data(
+            self.request, "operations", None, None
+        )
+
+        self.assertEqual(set(data) - {"generated_at"}, {"appointments_today"})
+        compute.assert_called_once()
 
 
 class RecentEncountersPermissionTest(SimpleTestCase):
