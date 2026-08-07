@@ -250,6 +250,7 @@ SUPERADMIN_URL = config('SUPERADMIN_URL')
 # --- OpenAI / Clinical Form AI Wizard ---
 OPENAI_API_KEY = config('OPENAI_API_KEY', default='')
 OPENAI_FORM_MODEL = config('OPENAI_FORM_MODEL', default='gpt-4o-mini')
+OPENAI_DISCHARGE_MODEL = config('OPENAI_DISCHARGE_MODEL', default=OPENAI_FORM_MODEL)
 
 # --- Cloudflare CDN (cache purge helpers in common/cloudflare.py) ---
 # Both default to empty: purge helpers become safe no-ops with a warning log.

@@ -19,7 +19,7 @@ from common import permission_evaluator
 from common.responses import error_response, action_response, success_response
 from common import error_codes
 from .models import (
-    Ward, Bed, Admission, BedTransfer, IPDBilling, IPDBillItem,
+    Ward, Bed, Admission, DischargePacket, BedTransfer, IPDBilling, IPDBillItem,
     IPDBillTemplate, IPDBillTemplateItem,
 )
 from .serializers import (
@@ -34,6 +34,7 @@ from .services.stats import (
     compute_billing_statistics,
     compute_ipd_doctor_stats,
 )
+from .services.discharge import collect_discharge_sections, generate_discharge_narrative
 
 log = structlog.get_logger(__name__)
 
@@ -538,6 +539,78 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
         return date_from, date_to
 
+    def _discharge_packet_data(self, packet, sections=None):
+        return {
+            'id': packet.id,
+            'admission': packet.admission_id,
+            'status': packet.status,
+            'narrative': packet.narrative,
+            'sections': packet.sections_snapshot if sections is None else sections,
+            'source_record_ids': packet.source_record_ids,
+            'ai_model': packet.ai_model,
+            'generation_count': packet.generation_count,
+            'generated_at': packet.generated_at,
+            'approved_at': packet.approved_at,
+            'updated_at': packet.updated_at,
+        }
+
+    @action(detail=True, methods=['get', 'patch'], url_path='discharge-packet')
+    def discharge_packet(self, request, pk=None):
+        admission = self.get_object()
+        packet, _ = DischargePacket.objects.get_or_create(
+            tenant_id=request.tenant_id,
+            admission=admission,
+        )
+        if request.method == 'PATCH':
+            if 'narrative' in request.data:
+                packet.narrative = str(request.data.get('narrative') or '')
+            if request.data.get('approved') is True:
+                if not packet.narrative.strip():
+                    return Response({'error': 'A discharge summary is required before approval.'}, status=400)
+                packet.status = 'approved'
+                packet.approved_at = timezone.now()
+                packet.approved_by_user_id = request.user_id
+            elif 'narrative' in request.data and packet.status == 'approved':
+                packet.status = 'generated'
+                packet.approved_at = None
+                packet.approved_by_user_id = None
+            packet.save()
+            return Response(self._discharge_packet_data(packet))
+
+        if packet.status == 'approved' and packet.sections_snapshot:
+            sections = packet.sections_snapshot
+        else:
+            sections, _ = collect_discharge_sections(admission)
+        return Response(self._discharge_packet_data(packet, sections=sections))
+
+    @action(detail=True, methods=['post'], url_path='discharge-packet/generate')
+    def generate_discharge_packet(self, request, pk=None):
+        admission = self.get_object()
+        sections, record_ids = collect_discharge_sections(admission)
+        try:
+            narrative, model = generate_discharge_narrative(admission, sections)
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            log.exception('discharge_summary_generation_failed', admission_id=admission.id)
+            return Response({'error': 'AI discharge summary generation failed. Please try again.'}, status=502)
+        packet, _ = DischargePacket.objects.get_or_create(
+            tenant_id=request.tenant_id,
+            admission=admission,
+        )
+        packet.narrative = narrative
+        packet.sections_snapshot = sections
+        packet.source_record_ids = record_ids
+        packet.ai_model = model
+        packet.status = 'generated'
+        packet.generation_count += 1
+        packet.generated_at = timezone.now()
+        packet.generated_by_user_id = request.user_id
+        packet.approved_at = None
+        packet.approved_by_user_id = None
+        packet.save()
+        return Response(self._discharge_packet_data(packet))
+
     @action(detail=True, methods=['post'])
     def discharge(self, request, pk=None):
         """Discharge a patient.
@@ -557,6 +630,12 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
         discharge_type = request.data.get('discharge_type', 'Normal')
         discharge_summary = request.data.get('discharge_summary', '')
+        if not discharge_summary:
+            packet = DischargePacket.objects.filter(
+                tenant_id=request.tenant_id, admission=admission
+            ).first()
+            if packet:
+                discharge_summary = packet.narrative
         final_diagnosis = request.data.get('final_diagnosis', '')
         discharge_date = request.data.get('discharge_date')
 

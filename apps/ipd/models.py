@@ -524,6 +524,43 @@ class Admission(models.Model):
             self.bed.mark_available()
 
 
+class DischargePacket(models.Model):
+    """Versioned, clinician-reviewable discharge summary and source snapshot."""
+
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('generated', 'AI Generated'),
+        ('approved', 'Approved'),
+    ]
+
+    id = models.BigAutoField(primary_key=True)
+    tenant_id = models.UUIDField(db_index=True)
+    admission = models.OneToOneField(
+        Admission,
+        on_delete=models.CASCADE,
+        related_name='discharge_packet',
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
+    narrative = models.TextField(blank=True, default='')
+    sections_snapshot = models.JSONField(default=list, blank=True)
+    source_record_ids = models.JSONField(default=list, blank=True)
+    ai_model = models.CharField(max_length=100, blank=True, default='')
+    generation_count = models.PositiveIntegerField(default=0)
+    generated_at = models.DateTimeField(null=True, blank=True)
+    generated_by_user_id = models.UUIDField(null=True, blank=True)
+    approved_at = models.DateTimeField(null=True, blank=True)
+    approved_by_user_id = models.UUIDField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'ipd_discharge_packets'
+        indexes = [models.Index(fields=['tenant_id', 'status'])]
+
+    def __str__(self):
+        return f"Discharge packet / {self.admission_id}"
+
+
 class BedTransfer(models.Model):
     """
     Bed Transfer Model - Track bed transfers within hospital.
