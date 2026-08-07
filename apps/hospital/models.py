@@ -102,6 +102,11 @@ class Hospital(models.Model):
         default=4,
         help_text="Zero-padding width for the running number (e.g. 6 -> UHID000123)."
     )
+    daycare_prefix = models.CharField(
+        max_length=24,
+        default='DAYCARE',
+        help_text='Prefix used for Daycare admission, billing, and discharge documents.'
+    )
 
     # --- UI preference ------------------------------------------------------
     # Tenant-wide (shared across all users of this tenant) — which navigation

@@ -50,6 +50,7 @@ urlpatterns = [
 
     # Phase 1 APIs
     path('api/clinical/', include('apps.clinical.urls')),
+    path('api/mrd/', include('apps.mrd.urls')),
     path('api/webhooks/', include('apps.webhooks.urls')),
 
     # Inventory Management

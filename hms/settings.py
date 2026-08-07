@@ -117,6 +117,7 @@ INSTALLED_APPS = [
 
     # Phase 1 apps
     'apps.clinical',
+    'apps.mrd',
     'apps.webhooks',
     'apps.activity',
 

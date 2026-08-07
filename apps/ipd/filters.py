@@ -9,6 +9,7 @@ class AdmissionFilter(django_filters.FilterSet):
     Replaces filterset_fields in AdmissionViewSet.
     """
     status = django_filters.CharFilter(field_name='status', lookup_expr='exact')
+    admission_type = django_filters.CharFilter(field_name='admission_type', lookup_expr='exact')
     ward = django_filters.NumberFilter(field_name='ward', lookup_expr='exact')
     doctor_id = django_filters.UUIDFilter(field_name='doctor_id', lookup_expr='exact')
     patient = django_filters.NumberFilter(field_name='patient', lookup_expr='exact')
@@ -39,4 +40,4 @@ class AdmissionFilter(django_filters.FilterSet):
 
     class Meta:
         model = Admission
-        fields = ['status', 'ward', 'doctor_id', 'patient', 'has_mediclaim', 'claim_status', 'tpa_name']
+        fields = ['status', 'admission_type', 'ward', 'doctor_id', 'patient', 'has_mediclaim', 'claim_status', 'tpa_name']

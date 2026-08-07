@@ -582,6 +582,26 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         else:
             discharge_datetime = timezone.now()
 
+        if admission.admission_type == 'daycare' and (
+            timezone.localdate(discharge_datetime) != timezone.localdate(admission.admission_date)
+        ):
+            log.warning(
+                'daycare_discharge_rejected_outside_admission_day',
+                admission_id=admission.id,
+                tenant_id=str(request.tenant_id),
+            )
+            return Response(
+                {'error': 'Daycare admissions must be discharged on the admission date.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if admission.admission_type == 'daycare':
+            log.info(
+                'daycare_discharge_requested',
+                admission_id=admission.id,
+                tenant_id=str(request.tenant_id),
+            )
+
         admission.discharge(
             discharge_type=discharge_type,
             discharge_summary=discharge_summary,

@@ -253,6 +253,7 @@ class Admission(models.Model):
         ('emergency', 'Emergency'),
         ('transfer', 'Transfer'),
         ('readmission', 'Readmission'),
+        ('daycare', 'Daycare'),
     ]
     admission_type = models.CharField(
         max_length=20,
@@ -380,6 +381,7 @@ class Admission(models.Model):
             models.Index(fields=['status'], name='ipd_status_idx'),
             models.Index(fields=['tenant_id', 'has_mediclaim']),
             models.Index(fields=['tenant_id', 'claim_status']),
+            models.Index(fields=['tenant_id', 'admission_type']),
         ]
 
     def __str__(self):
@@ -409,7 +411,8 @@ class Admission(models.Model):
 
                         self.admission_id = self.generate_admission_id_for_tenant(
                             self.tenant_id,
-                            admission_day
+                            admission_day,
+                            self.admission_type,
                         )
                         super().save(*args, **kwargs)
                     break
@@ -433,8 +436,8 @@ class Admission(models.Model):
         return value.date() if hasattr(value, 'date') else value
 
     @staticmethod
-    def generate_admission_id_for_tenant(tenant_id, admission_day):
-        """Generate a unique admission ID per tenant: IPD/YYYYMMDD/###
+    def generate_admission_id_for_tenant(tenant_id, admission_day, admission_type='regular'):
+        """Generate a unique admission ID per tenant and day.
 
         Fetches matching IDs for this tenant/date and sorts in Python to ensure
         correct numeric sequencing (001 < 010 < 100) regardless of DB string sort.
@@ -443,7 +446,16 @@ class Admission(models.Model):
 
         admission_day = admission_day if isinstance(admission_day, date) else admission_day.date()
         date_str = admission_day.strftime('%Y%m%d')
-        prefix = f"IPD/{date_str}/"
+        base_prefix = 'IPD'
+        if admission_type == 'daycare':
+            from apps.hospital.models import Hospital
+            base_prefix = (
+                Hospital.objects.filter(tenant_id=tenant_id)
+                .values_list('daycare_prefix', flat=True)
+                .first()
+                or 'DAYCARE'
+            )
+        prefix = f"{base_prefix}/{date_str}/"
 
         with connection.cursor() as cursor:
             cursor.execute(
@@ -494,8 +506,14 @@ class Admission(models.Model):
             discharged_by_user_id: ID of user performing discharge
             discharge_date: Optional specific discharge date/time (defaults to current time)
         """
+        resolved_discharge_date = discharge_date or timezone.now()
+        if self.admission_type == 'daycare' and (
+            timezone.localdate(resolved_discharge_date)
+            != timezone.localdate(self.admission_date)
+        ):
+            raise ValueError('Daycare admissions must be discharged on the admission date.')
         self.status = 'discharged'
-        self.discharge_date = discharge_date or timezone.now()
+        self.discharge_date = resolved_discharge_date
         self.discharge_type = discharge_type
         self.discharge_summary = discharge_summary
         self.discharged_by_user_id = discharged_by_user_id
@@ -808,13 +826,25 @@ class IPDBilling(models.Model):
         today = date.today()
         date_str = today.strftime('%Y%m%d')
 
-        # Get count of bills for today, scoped to this tenant only
+        base_prefix = 'IPD-BILL'
+        if self.admission.admission_type == 'daycare':
+            from apps.hospital.models import Hospital
+            daycare_prefix = (
+                Hospital.objects.filter(tenant_id=self.tenant_id)
+                .values_list('daycare_prefix', flat=True)
+                .first()
+                or 'DAYCARE'
+            )
+            base_prefix = f"{daycare_prefix}-BILL"
+
+        # Get count of same-prefix bills for today, scoped to this tenant only.
         today_count = IPDBilling.objects.filter(
             tenant_id=self.tenant_id,
-            bill_date__date=today
+            bill_date__date=today,
+            bill_number__startswith=f"{base_prefix}/",
         ).count() + 1
 
-        return f"IPD-BILL/{date_str}/{today_count:03d}"
+        return f"{base_prefix}/{date_str}/{today_count:03d}"
 
     def _calculate_derived_totals(self):
         """
@@ -886,12 +916,14 @@ class IPDBilling(models.Model):
         if not self.admission.bed:
             return {'total_los': 0, 'already_billed_days': 0, 'remaining_days': 0, 'this_bill_days': 0}
 
-        if self.admission.discharge_date:
+        if self.admission.admission_type == 'daycare':
+            total_los = 1
+        elif self.admission.discharge_date:
             delta = self.admission.discharge_date - self.admission.admission_date
+            total_los = max(1, delta.days if delta.days > 0 else 1)
         else:
             delta = timezone.now() - self.admission.admission_date
-
-        total_los = max(1, delta.days if delta.days > 0 else 1)
+            total_los = max(1, delta.days if delta.days > 0 else 1)
 
         from django.db.models import Sum as DSum
         admission_ct = ContentType.objects.get_for_model(self.admission)

@@ -80,6 +80,7 @@ class HospitalSerializer(serializers.ModelSerializer):
             'full_address', 'logo', 'working_hours',
             'has_emergency', 'has_pharmacy', 'has_laboratory',
             'registration_number', 'established_date',
+            'daycare_prefix',
             'nav_style', 'nav_style_label',
             'letterhead_config',
             'theme_config',

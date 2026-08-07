@@ -109,7 +109,7 @@ class AdmissionSerializer(TenantMixin, serializers.ModelSerializer):
             'patient_id_display', 'patient_mobile', 'patient_age',
             'patient_gender', 'patient_photo', 'doctor_id', 'doctor_name',
             'ward', 'ward_name', 'bed', 'bed_number',
-            'admission_date', 'reason', 'provisional_diagnosis', 'final_diagnosis',
+            'admission_type', 'admission_date', 'reason', 'provisional_diagnosis', 'final_diagnosis',
             'has_mediclaim', 'tpa_name', 'claim_status',
             'claim_reference_number', 'claim_notes',
             'discharge_date', 'discharge_summary', 'discharge_type', 'status',
@@ -170,7 +170,7 @@ class AdmissionListSerializer(TenantMixin, serializers.ModelSerializer):
         fields = [
             'id', 'admission_id', 'patient', 'patient_name', 'patient_id_display',
             'patient_mobile', 'patient_age', 'patient_gender', 'patient_photo',
-            'doctor_id', 'ward_name', 'bed_number', 'admission_date', 'discharge_date',
+            'doctor_id', 'ward_name', 'bed_number', 'admission_type', 'admission_date', 'discharge_date',
             'status', 'has_mediclaim', 'tpa_name', 'claim_status',
             'claim_reference_number', 'los_days', 'length_of_stay',
             'bill_total', 'bill_paid', 'created_by_user_id',
