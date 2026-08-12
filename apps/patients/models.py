@@ -280,10 +280,9 @@ class PatientProfile(models.Model):
 
     @property
     def full_name(self):
-        """Returns full name"""
-        if self.middle_name:
-            return f"{self.first_name} {self.middle_name} {self.last_name}"
-        return f"{self.first_name} {self.last_name}"
+        """Returns full name, omitting any name part that isn't set."""
+        parts = [self.first_name, self.middle_name, self.last_name]
+        return " ".join(part for part in parts if part)
 
     @property
     def full_address(self):

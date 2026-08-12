@@ -365,14 +365,17 @@ class IPDBillingSerializer(TenantMixin, serializers.ModelSerializer):
         model = IPDBilling
         fields = [
             'id', 'tenant_id', 'admission', 'admission_id', 'patient_name',
-            'bill_number', 'bill_date', 'doctor_id', 'diagnosis', 'remarks',
+            'bill_number', 'bill_date', 'doctor_id', 'diagnosis', 'remarks', 'bill_type',
             'total_amount', 'discount_percent', 'discount_amount', 'payable_amount',
             'payment_mode', 'payment_details', 'received_amount', 'balance_amount', 'payment_status',
             'items', 'bed_day_info', 'billed_by_id', 'created_at', 'updated_at'
         ]
         read_only_fields = [
-            'id', 'tenant_id', 'bill_number', 'total_amount', 'payable_amount', 'balance_amount',
-            'payment_status', 'billed_by_id', 'created_at', 'updated_at'
+            # bill_type is intentionally read-only here — a Mediclaim bill can
+            # only be created via IPDBillingViewSet.create_mediclaim(), never
+            # by setting it through the regular create/update payload.
+            'id', 'tenant_id', 'bill_number', 'bill_type', 'total_amount', 'payable_amount',
+            'balance_amount', 'payment_status', 'billed_by_id', 'created_at', 'updated_at'
         ]
 
     def get_bed_day_info(self, obj):

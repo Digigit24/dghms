@@ -191,6 +191,16 @@ class Hospital(models.Model):
         help_text="Tenant-wide inventory defaults.",
     )
 
+    # --- Clinical AI (discharge summary) ---------------------------------
+    # Tenant-editable system prompt used when generating the IPD discharge
+    # clinical summary via OpenAI (see apps/ipd/services/discharge.py). Blank
+    # means "use the built-in default prompt".
+    clinical_summary_system_prompt = models.TextField(
+        blank=True,
+        default="",
+        help_text="Tenant-configurable system prompt for the AI-generated IPD discharge clinical summary. Empty uses the built-in default.",
+    )
+
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

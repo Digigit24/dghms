@@ -31,6 +31,7 @@ from apps.clinical.models import (
     ClinicalRecord,
 )
 from apps.clinical.serializers import ClinicalFormStructureSerializer
+from apps.doctors.models import DoctorProfile
 from apps.hospital.models import Hospital
 from apps.hospital.serializers import with_letterhead_defaults
 from apps.ipd.models import Admission, DischargePacket, IPDBilling
@@ -407,6 +408,11 @@ def _discharge_summary_context(tenant_id: uuid.UUID, record_id: int, include_sec
     admission = _resolve_admission(tenant_id, record_id)
     patient = admission.patient
 
+    # Admission has no `doctor` FK — doctor_id is a raw SuperAdmin User ID
+    # (per CLAUDE.md's "no local User model" rule). Resolve the display name
+    # through DoctorProfile.user_id, tenant-scoped.
+    doctor = DoctorProfile.objects.filter(tenant_id=tenant_id, user_id=admission.doctor_id).first()
+
     packet = DischargePacket.objects.filter(tenant_id=tenant_id, admission=admission).first()
     narrative = packet.narrative if packet else ""
 
@@ -441,7 +447,7 @@ def _discharge_summary_context(tenant_id: uuid.UUID, record_id: int, include_sec
         "reason": admission.reason,
         "provisional_diagnosis": admission.provisional_diagnosis,
         "final_diagnosis": admission.final_diagnosis,
-        "doctor_name": getattr(admission.doctor, "full_name", None),
+        "doctor_name": doctor.full_name if doctor else None,
         "narrative": narrative,
         "sections": sections,
         "include_sections": include_sections,
@@ -488,6 +494,14 @@ def _ipd_bill_context(tenant_id: uuid.UUID, record_id: int) -> dict[str, Any]:
         "balance_amount": bill.balance_amount,
         "payment_status": bill.get_payment_status_display(),
         "payment_mode": bill.get_payment_mode_display(),
+        # A Mediclaim bill is a claim copy for the TPA/insurer: the template
+        # shows the insurer name + a signature block for the patient/relative
+        # and hides paid/balance amounts (see templates/print/ipd_bill.html).
+        "bill_type": bill.bill_type,
+        "is_mediclaim_bill": bill.bill_type == "mediclaim",
+        "tpa_name": admission.tpa_name,
+        "claim_status": admission.get_claim_status_display(),
+        "claim_reference_number": admission.claim_reference_number,
     }
 
 

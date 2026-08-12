@@ -85,6 +85,7 @@ class HospitalSerializer(serializers.ModelSerializer):
             'letterhead_config',
             'theme_config',
             'inventory_config',
+            'clinical_summary_system_prompt',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']

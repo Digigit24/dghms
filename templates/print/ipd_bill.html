@@ -50,7 +50,7 @@
     {% include "print/_print_footer.html" %}
     {% include "print/_letterhead.html" %}
 
-    <div class="form-title">IPD Bill</div>
+    <div class="form-title">{% if is_mediclaim_bill %}Mediclaim Bill{% else %}IPD Bill{% endif %}</div>
 
     <div class="patient-info-bar">
         <div><span class="field-label">Bill No:</span> {{ bill_number }}</div>
@@ -73,6 +73,17 @@
         <div class="field-row"><span class="field-label">Diagnosis:</span> <span class="field-value">{{ diagnosis }}</span></div>
         {% endif %}
     </div>
+
+    {% if is_mediclaim_bill %}
+    <div class="section-title">Insurance / TPA</div>
+    <div class="field-grid-2col">
+        <div class="field-row"><span class="field-label">TPA / Insurer:</span> <span class="field-value">{{ tpa_name }}</span></div>
+        <div class="field-row"><span class="field-label">Claim Status:</span> <span class="field-value">{{ claim_status }}</span></div>
+        {% if claim_reference_number %}
+        <div class="field-row"><span class="field-label">Claim / Pre-auth Ref:</span> <span class="field-value">{{ claim_reference_number }}</span></div>
+        {% endif %}
+    </div>
+    {% endif %}
 
     <div class="section-title">Bill Items</div>
     <table class="bordered dense">
@@ -102,6 +113,12 @@
 
     <div class="totals-block">
         <table class="totals-table">
+            {% if is_mediclaim_bill %}
+            <tr class="totals-final">
+                <td class="totals-label">Total Amount</td>
+                <td class="totals-value">{{ total_amount }}</td>
+            </tr>
+            {% else %}
             <tr>
                 <td class="totals-label">Subtotal</td>
                 <td class="totals-value">{{ total_amount }}</td>
@@ -130,6 +147,7 @@
                 <td class="totals-label">Payment Mode</td>
                 <td class="totals-value">{{ payment_mode }}</td>
             </tr>
+            {% endif %}
         </table>
     </div>
 
@@ -139,8 +157,13 @@
     {% endif %}
 
     <div class="signature-row">
+        {% if is_mediclaim_bill %}
+        <div class="signature-box">Patient Signature</div>
+        <div class="signature-box">Relative / Attendant Signature</div>
+        {% else %}
         <div class="signature-box">Patient / Guardian Signature</div>
         <div class="signature-box">Billing Officer Signature</div>
+        {% endif %}
     </div>
 </div>
 </body>

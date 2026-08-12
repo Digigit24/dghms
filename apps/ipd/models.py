@@ -666,9 +666,26 @@ class IPDBilling(models.Model):
         ('other', 'Other'),
     ]
 
+    BILL_TYPE_CHOICES = [
+        ('regular', 'Regular'),
+        ('mediclaim', 'Mediclaim'),
+    ]
+
     # Primary Fields
     id = models.AutoField(primary_key=True)
     tenant_id = models.UUIDField(db_index=True, help_text="Tenant this record belongs to")
+
+    # A 'mediclaim' bill is a lump-sum claim copy for the TPA/insurer: created
+    # with just a total amount (see IPDBillingViewSet.create_mediclaim), and
+    # printed without paid/balance amounts (see apps/printing/rendering.py
+    # _ipd_bill_context and templates/print/ipd_bill.html).
+    bill_type = models.CharField(
+        max_length=20,
+        choices=BILL_TYPE_CHOICES,
+        default='regular',
+        db_index=True,
+        help_text="Regular itemized bill vs a Mediclaim claim bill for the TPA/insurer.",
+    )
 
     # Changed from OneToOneField to ForeignKey to allow multiple bills per admission
     admission = models.ForeignKey(
@@ -787,6 +804,7 @@ class IPDBilling(models.Model):
         indexes = [
             models.Index(fields=['tenant_id']),
             models.Index(fields=['tenant_id', 'payment_status']),
+            models.Index(fields=['tenant_id', 'bill_type']),
             models.Index(fields=['admission', 'bill_date']),
             models.Index(fields=['bill_number'], name='ipd_bill_number_idx'),
             models.Index(fields=['payment_status'], name='ipd_payment_status_idx'),

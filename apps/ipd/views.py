@@ -1,6 +1,8 @@
 # ipd/views.py
 import datetime
 import uuid
+from decimal import Decimal, InvalidOperation
+import openai
 import structlog
 from rest_framework import viewsets, filters, status
 from rest_framework.decorators import action
@@ -592,6 +594,16 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             narrative, model = generate_discharge_narrative(admission, sections)
         except ValueError as exc:
             return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except openai.AuthenticationError:
+            # Distinct from the generic 502 below: an invalid/revoked API key
+            # will fail identically on every retry, so telling the user to
+            # "try again" is actively misleading. Logged separately so this
+            # is instantly greppable instead of requiring traceback archaeology.
+            log.exception('discharge_summary_openai_auth_failed', admission_id=admission.id)
+            return Response(
+                {'error': 'AI service is not configured correctly. Contact your administrator.'},
+                status=502,
+            )
         except Exception:
             log.exception('discharge_summary_generation_failed', admission_id=admission.id)
             return Response({'error': 'AI discharge summary generation failed. Please try again.'}, status=502)
@@ -932,6 +944,79 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         output_serializer = self.get_serializer(billing)
         headers = self.get_success_headers(output_serializer.data)
         return Response(output_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+    @action(detail=False, methods=['post'], url_path='mediclaim')
+    def create_mediclaim(self, request):
+        """Create a lump-sum Mediclaim claim bill for an admission.
+
+        Unlike the regular create() above, this never auto-adds bed charges
+        or expects line items — it's a single-figure claim copy for the TPA,
+        so it takes only a total_amount and records it as one bill item
+        (total_amount is always derived from items, see
+        IPDBilling._calculate_derived_totals). Blocked unless the admission
+        already has a TPA/insurer selected on its Mediclaim tab — per the
+        ask, a Mediclaim bill cannot exist before the TPA does.
+        """
+        admission_id = request.data.get('admission')
+        if not admission_id:
+            return error_response(error_codes.VALIDATION_ERROR, 'Admission ID is required.', status=400, field='admission')
+
+        try:
+            admission = Admission.objects.get(id=admission_id, tenant_id=request.tenant_id)
+        except Admission.DoesNotExist:
+            return error_response(error_codes.NOT_FOUND, 'Admission not found.', status=404, field='admission')
+
+        self.check_object_permissions(request, admission)
+
+        if not admission.has_mediclaim or not admission.tpa_name:
+            return error_response(
+                error_codes.VALIDATION_ERROR,
+                'Select a TPA / insurance provider on the Mediclaim tab before creating a Mediclaim bill.',
+                status=400,
+            )
+
+        try:
+            total_amount = Decimal(str(request.data.get('total_amount', '')))
+        except InvalidOperation:
+            return error_response(
+                error_codes.VALIDATION_ERROR, 'A valid total_amount is required.', status=400, field='total_amount'
+            )
+        if total_amount <= Decimal('0.00'):
+            return error_response(
+                error_codes.VALIDATION_ERROR, 'total_amount must be greater than zero.', status=400, field='total_amount'
+            )
+
+        with transaction.atomic():
+            billing = IPDBilling.objects.create(
+                tenant_id=request.tenant_id,
+                admission=admission,
+                billed_by_id=request.user_id,
+                bill_type='mediclaim',
+                payment_mode='insurance',
+                diagnosis=request.data.get('diagnosis', '') or '',
+                remarks=request.data.get('remarks', '') or '',
+            )
+            IPDBillItem.objects.create(
+                tenant_id=request.tenant_id,
+                bill=billing,
+                item_name=f"Mediclaim Claim — {admission.tpa_name}",
+                source='Other',
+                quantity=1,
+                system_calculated_price=total_amount,
+                unit_price=total_amount,
+                total_price=total_amount,
+            )
+        billing.refresh_from_db()
+
+        log.info(
+            "ipd_mediclaim_bill_created",
+            tenant_id=str(request.tenant_id),
+            bill_id=billing.id,
+            admission_id=admission.id,
+        )
+
+        serializer = self.get_serializer(billing)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'])
     def add_bed_charges(self, request, pk=None):

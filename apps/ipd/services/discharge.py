@@ -8,6 +8,15 @@ from django.core.serializers.json import DjangoJSONEncoder
 from openai import OpenAI
 
 from apps.clinical.models import ClinicalRecord, FormSectionPlacement
+from apps.doctors.models import DoctorProfile
+from apps.hospital.models import Hospital
+
+DEFAULT_DISCHARGE_SYSTEM_PROMPT = (
+    "Draft a clinician-reviewable hospital discharge summary using only supplied facts. "
+    "Never invent diagnoses, medicines, procedures, results, follow-up, or condition. "
+    "Omit unsupported headings. Return concise plain text with clinical headings. Do not "
+    "repeat raw form tables because they are appended verbatim elsewhere."
+)
 
 
 def _json_safe(value):
@@ -104,13 +113,28 @@ def generate_discharge_narrative(admission, sections):
     model = getattr(settings, "OPENAI_DISCHARGE_MODEL", "") or getattr(
         settings, "OPENAI_FORM_MODEL", "gpt-4o-mini"
     )
+    # Admission has no `doctor` FK — doctor_id is a raw SuperAdmin User ID
+    # (per CLAUDE.md's "no local User model" rule). Resolve the display name
+    # through DoctorProfile.user_id, tenant-scoped.
+    doctor = DoctorProfile.objects.filter(
+        tenant_id=admission.tenant_id, user_id=admission.doctor_id
+    ).first()
+    # Tenant-configurable override (Settings → Hospital → Clinical Summary
+    # System Prompt). Blank/unset falls back to the built-in default so
+    # existing tenants keep today's behaviour unchanged.
+    hospital = Hospital.objects.filter(tenant_id=admission.tenant_id).first()
+    system_prompt = (
+        hospital.clinical_summary_system_prompt.strip()
+        if hospital and hospital.clinical_summary_system_prompt
+        else ""
+    ) or DEFAULT_DISCHARGE_SYSTEM_PROMPT
     source = {
         "admission_type": admission.admission_type,
         "admission_date": admission.admission_date,
         "reason_for_admission": admission.reason,
         "provisional_diagnosis": admission.provisional_diagnosis,
         "final_diagnosis": admission.final_diagnosis,
-        "doctor": getattr(admission.doctor, "full_name", None),
+        "doctor": doctor.full_name if doctor else None,
         "clinical_sections": sections,
     }
     # Explicit timeout: the SDK default (600s call / 5s connect) can outlast
@@ -121,15 +145,7 @@ def generate_discharge_narrative(admission, sections):
         model=model,
         temperature=0.2,
         messages=[
-            {
-                "role": "system",
-                "content": (
-                    "Draft a clinician-reviewable hospital discharge summary using only supplied facts. "
-                    "Never invent diagnoses, medicines, procedures, results, follow-up, or condition. "
-                    "Omit unsupported headings. Return concise plain text with clinical headings. Do not "
-                    "repeat raw form tables because they are appended verbatim elsewhere."
-                ),
-            },
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": json.dumps(source, cls=DjangoJSONEncoder)},
         ],
     )
