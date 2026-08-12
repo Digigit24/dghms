@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Discharge Summary - {{ ipd_no }}</title>
+{% include "print/_print_base.css" %}
+</head>
+<body>
+
+<div class="print-page">
+    {% include "print/_print_footer.html" %}
+    {% include "print/_letterhead.html" %}
+
+    <div class="form-title">Discharge Summary</div>
+
+    <div class="patient-info-bar">
+        <div><span class="field-label">UHID:</span> {{ uhid }}</div>
+        <div><span class="field-label">IPD No:</span> {{ ipd_no }}</div>
+        <div><span class="field-label">Patient Name:</span> {{ patient_name }}</div>
+        <div><span class="field-label">Age / Gender:</span> {{ age }} / {{ gender }}</div>
+        <div><span class="field-label">Admission Date:</span> {{ admission_date|date:"d M Y, h:i A" }}</div>
+        <div><span class="field-label">Discharge Date:</span> {{ discharge_date|date:"d M Y, h:i A"|default:"—" }}</div>
+    </div>
+
+    <div class="field-grid-2col">
+        <div class="field-row"><span class="field-label">Admission Type:</span> <span class="field-value">{{ admission_type }}</span></div>
+        <div class="field-row"><span class="field-label">Attending Doctor:</span> <span class="field-value">{{ doctor_name|default:"—" }}</span></div>
+        <div class="field-row"><span class="field-label">Reason for Admission:</span> <span class="field-value">{{ reason|default:"—" }}</span></div>
+        <div class="field-row"><span class="field-label">Provisional Diagnosis:</span> <span class="field-value">{{ provisional_diagnosis|default:"—" }}</span></div>
+        {% if final_diagnosis %}
+        <div class="field-row"><span class="field-label">Final Diagnosis:</span> <span class="field-value">{{ final_diagnosis }}</span></div>
+        {% endif %}
+    </div>
+
+    <div class="section-title">Clinical Summary</div>
+    {% if narrative %}
+    <div class="field-value" style="display: block; white-space: pre-wrap; border-bottom: none; min-height: 24px;">{{ narrative }}</div>
+    {% else %}
+    <div class="text-muted" style="padding: 8px 0;">No summary generated yet.</div>
+    {% endif %}
+</div>
+
+{% if include_sections %}
+{% regroup sections by form_code as form_groups %}
+{% for group in form_groups %}
+<div class="print-page page-break-before">
+    {% include "print/_print_footer.html" %}
+    {% include "print/_letterhead.html" %}
+
+    <div class="form-title">{{ group.list.0.form_name }}</div>
+
+    {% for section in group.list %}
+    <div class="section-title">{{ section.section_title }}{% if section.occurrence_index > 1 %} &middot; Entry {{ section.occurrence_index }}{% endif %}</div>
+    <div class="field-grid-2col">
+        {% for field in section.values %}
+            {% if field.field_type != "textarea" and field.field_type != "grid" and field.field_type != "heading" %}
+            <div class="field-row">
+                <span class="field-label">{{ field.label }}:</span>
+                <span class="field-value">{{ field.value|default:"" }}</span>
+            </div>
+            {% endif %}
+        {% endfor %}
+    </div>
+    {% for field in section.values %}
+        {% if field.field_type == "textarea" %}
+        <div class="field-row" style="display: block;">
+            <div class="field-label" style="display: block; margin-bottom: 2px;">{{ field.label }}:</div>
+            <div class="field-value" style="display: block; min-height: 24px; white-space: pre-wrap;">{{ field.value|default:"" }}</div>
+        </div>
+        {% elif field.field_type == "grid" and field.value.columns %}
+        <div class="field-row" style="display: block;">
+            <div class="field-label" style="display: block; margin-bottom: 2px;">{{ field.label }}:</div>
+            <table class="bordered dense">
+                <thead>
+                    <tr>
+                        {% for col in field.value.columns %}
+                        <th>{{ col.label }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in field.value.rows %}
+                    <tr>
+                        {% for cell in row %}
+                        <td>{{ cell }}</td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    {% endfor %}
+    {% endfor %}
+</div>
+{% endfor %}
+
+{% if not sections %}
+<div class="print-page page-break-before">
+    {% include "print/_print_footer.html" %}
+    {% include "print/_letterhead.html" %}
+    <div class="form-title">Discharge Summary</div>
+    <div class="text-muted" style="text-align: center; padding: 24px 0;">No synced form sections marked for discharge printing.</div>
+</div>
+{% endif %}
+{% endif %}
+
+</body>
+</html>

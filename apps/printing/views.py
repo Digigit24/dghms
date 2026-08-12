@@ -38,6 +38,7 @@ from common.responses import error_response
 from .rendering import (
     DOCUMENT_ENCOUNTER_TYPES,
     FORM_ADMISSION,
+    FORM_DISCHARGE_SUMMARY,
     FORM_OPD_BILL,
     FORM_OPD_VISIT,
     FORM_IPD_BILL,
@@ -67,19 +68,20 @@ MAX_BATCH_SIZE = 100
 class CanViewPrintSource(BasePermission):
     """Checks the permission of the underlying record type for a print request.
 
-    ``admission_form`` and ``ipd_bill`` read an ``Admission``/``IPDBilling``
-    (IPD app) so they require ``hms.ipd.view``. ``opd_visit_form`` and
-    ``opd_bill`` read a ``Visit``/``OPDBill`` (OPD app) so they require
-    ``hms.opd.view``. ``ipd_payment_receipt``/``opd_payment_receipt`` read the
-    same underlying bill (Daycare bills are IPDBilling rows too) so they
-    follow the same split. Every other registered form code reads a
-    ``ClinicalRecord`` so it requires ``hms.clinical.view`` — the exact same
-    permission gate used by ``ClinicalRecordViewSet.get_queryset()``.
+    ``admission_form``, ``ipd_bill``, and ``discharge_summary`` read an
+    ``Admission``/``IPDBilling`` (IPD app) so they require ``hms.ipd.view``.
+    ``opd_visit_form`` and ``opd_bill`` read a ``Visit``/``OPDBill`` (OPD app)
+    so they require ``hms.opd.view``. ``ipd_payment_receipt``/
+    ``opd_payment_receipt`` read the same underlying bill (Daycare bills are
+    IPDBilling rows too) so they follow the same split. Every other
+    registered form code reads a ``ClinicalRecord`` so it requires
+    ``hms.clinical.view`` — the exact same permission gate used by
+    ``ClinicalRecordViewSet.get_queryset()``.
     """
 
     def has_permission(self, request, view) -> bool:
         form_code = request.query_params.get("form") or (request.data or {}).get("form")
-        if form_code in (FORM_ADMISSION, FORM_IPD_BILL, FORM_IPD_PAYMENT_RECEIPT):
+        if form_code in (FORM_ADMISSION, FORM_IPD_BILL, FORM_IPD_PAYMENT_RECEIPT, FORM_DISCHARGE_SUMMARY):
             return check_permission(request, "hms.ipd.view")
         if form_code in (FORM_OPD_VISIT, FORM_OPD_BILL, FORM_OPD_PAYMENT_RECEIPT):
             return check_permission(request, HMSPermissions.OPD_VIEW)
@@ -150,6 +152,18 @@ def _parse_common_params(request) -> tuple[str | None, int | uuid.UUID | None, b
     return form_code, record_id, letterhead, language, None
 
 
+def _parse_include_sections(request) -> bool:
+    """Parse the ``include_sections`` query param (default true).
+
+    Only consumed by FORM_DISCHARGE_SUMMARY today — a generic optional flag
+    kept out of ``_parse_common_params`` so that function's stable tuple
+    return contract (relied on positionally by every other view) doesn't
+    have to change for a param every other form code ignores.
+    """
+    raw = request.query_params.get("include_sections", "true")
+    return str(raw).strip().lower() not in ("false", "0", "no")
+
+
 class PrintPreviewView(APIView):
     """Render a single record's print template as raw HTML for iframe preview."""
 
@@ -173,6 +187,9 @@ class PrintPreviewView(APIView):
                               description="Whether to render the tenant letterhead header. Default true."),
             OpenApiParameter("language", str, OpenApiParameter.QUERY, required=False,
                               description="'en' or 'mr'. Default 'en'."),
+            OpenApiParameter("include_sections", bool, OpenApiParameter.QUERY, required=False,
+                              description="discharge_summary only: whether to include the synced form "
+                                           "sections after the narrative page. Default true."),
         ],
         responses={200: OpenApiTypes.BINARY, 400: PrintErrorResponseSerializer, 404: PrintErrorResponseSerializer},
         tags=["Print"],
@@ -184,9 +201,10 @@ class PrintPreviewView(APIView):
             return err
 
         tenant_id: uuid.UUID = request.tenant_id
+        include_sections = _parse_include_sections(request)
         start = time.monotonic()
         try:
-            html = render_print_html(form_code, tenant_id, record_id, letterhead, language)
+            html = render_print_html(form_code, tenant_id, record_id, letterhead, language, include_sections)
         except PrintFormCodeError as exc:
             return error_response(
                 code=error_codes.INVALID_PAYLOAD,
@@ -253,6 +271,9 @@ class PrintRenderView(APIView):
                               description="Whether to render the tenant letterhead header. Default true."),
             OpenApiParameter("language", str, OpenApiParameter.QUERY, required=False,
                               description="'en' or 'mr'. Default 'en'."),
+            OpenApiParameter("include_sections", bool, OpenApiParameter.QUERY, required=False,
+                              description="discharge_summary only: whether to include the synced form "
+                                           "sections after the narrative page. Default true."),
         ],
         responses={200: OpenApiTypes.BINARY, 400: PrintErrorResponseSerializer, 404: PrintErrorResponseSerializer},
         tags=["Print"],
@@ -264,9 +285,10 @@ class PrintRenderView(APIView):
             return err
 
         tenant_id: uuid.UUID = request.tenant_id
+        include_sections = _parse_include_sections(request)
         start = time.monotonic()
         try:
-            html = render_print_html(form_code, tenant_id, record_id, letterhead, language)
+            html = render_print_html(form_code, tenant_id, record_id, letterhead, language, include_sections)
             pdf_bytes = render_pdf_from_html(html)
         except PrintFormCodeError as exc:
             return error_response(

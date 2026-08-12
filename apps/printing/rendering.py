@@ -33,7 +33,8 @@ from apps.clinical.models import (
 from apps.clinical.serializers import ClinicalFormStructureSerializer
 from apps.hospital.models import Hospital
 from apps.hospital.serializers import with_letterhead_defaults
-from apps.ipd.models import Admission, IPDBilling
+from apps.ipd.models import Admission, DischargePacket, IPDBilling
+from apps.ipd.services.discharge import collect_discharge_sections
 from apps.opd.models import OPDBill, Visit
 from apps.payments.models import BillPayment
 
@@ -55,6 +56,7 @@ FORM_IPD_BILL = "ipd_bill"
 FORM_OPD_BILL = "opd_bill"
 FORM_OPD_PAYMENT_RECEIPT = "opd_payment_receipt"
 FORM_IPD_PAYMENT_RECEIPT = "ipd_payment_receipt"
+FORM_DISCHARGE_SUMMARY = "discharge_summary"
 
 REGISTERED_FORM_CODES = {
     FORM_ADMISSION,
@@ -68,6 +70,7 @@ REGISTERED_FORM_CODES = {
     FORM_OPD_BILL,
     FORM_OPD_PAYMENT_RECEIPT,
     FORM_IPD_PAYMENT_RECEIPT,
+    FORM_DISCHARGE_SUMMARY,
 }
 
 # Form codes whose record_id is a BillPayment.payment_group_id (a UUID)
@@ -98,6 +101,7 @@ _TEMPLATE_BY_FORM_CODE = {
     FORM_OPD_BILL: "print/opd_bill.html",
     FORM_OPD_PAYMENT_RECEIPT: "print/opd_payment_receipt.html",
     FORM_IPD_PAYMENT_RECEIPT: "print/ipd_payment_receipt.html",
+    FORM_DISCHARGE_SUMMARY: "print/discharge_summary.html",
 }
 
 # Monitoring chart time slots: 2-hour intervals across a 24h cycle. No fixed
@@ -370,6 +374,77 @@ def _admission_context(tenant_id: uuid.UUID, record_id: int) -> dict[str, Any]:
         "claim_status": admission.get_claim_status_display(),
         "bed_transfers": list(admission.bed_transfers.select_related("from_bed", "to_bed").order_by("transfer_date")),
         "is_mlc_case": "mlc" in (admission.reason or "").lower(),
+    }
+
+
+def _print_safe_field_value(value: Any) -> Any:
+    """Format a discharge-section field value for direct template display.
+
+    ``collect_discharge_sections()`` returns raw JSON-safe values (used by
+    both the AI narrative prompt and the in-app review API) — a multiselect
+    is a Python list, not a display string. Rendering a list directly with
+    ``{{ field.value }}`` would print its repr, and applying Django's
+    ``|join`` filter unconditionally would incorrectly iterate a plain
+    string's characters. Grid-shaped dicts (``{"columns": ..., "rows": ...}``)
+    are left untouched — the template branches on those explicitly.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple)):
+        return ", ".join(str(v) for v in value)
+    return value
+
+
+def _discharge_summary_context(tenant_id: uuid.UUID, record_id: int, include_sections: bool) -> dict[str, Any]:
+    """Build the template context for the combined Discharge Summary print.
+
+    ``record_id`` is an Admission id here (this form has no single backing
+    ClinicalRecord). Reuses the exact "approved snapshot else collect fresh"
+    rule apps.ipd.views.AdmissionViewSet._discharge_packet_data already uses
+    for the in-app review API, so the printed document always matches what
+    was reviewed/approved — no drift between the two.
+    """
+    admission = _resolve_admission(tenant_id, record_id)
+    patient = admission.patient
+
+    packet = DischargePacket.objects.filter(tenant_id=tenant_id, admission=admission).first()
+    narrative = packet.narrative if packet else ""
+
+    if packet and packet.status == "approved" and packet.sections_snapshot:
+        raw_sections = packet.sections_snapshot
+    else:
+        raw_sections, _ = collect_discharge_sections(admission)
+
+    sections = [
+        {
+            **section,
+            "values": [
+                {**field, "value": _print_safe_field_value(field.get("value"))}
+                for field in section.get("values", [])
+            ],
+        }
+        for section in raw_sections
+    ] if include_sections else []
+
+    return {
+        "admission": admission,
+        "patient": patient,
+        "uhid": patient.patient_id,
+        "ipd_no": admission.admission_id,
+        "patient_name": patient.full_name,
+        "age": patient.age,
+        "gender": patient.get_gender_display() if patient.gender else "",
+        "contact": patient.mobile_primary,
+        "admission_date": admission.admission_date,
+        "discharge_date": admission.discharge_date,
+        "admission_type": admission.get_admission_type_display(),
+        "reason": admission.reason,
+        "provisional_diagnosis": admission.provisional_diagnosis,
+        "final_diagnosis": admission.final_diagnosis,
+        "doctor_name": getattr(admission.doctor, "full_name", None),
+        "narrative": narrative,
+        "sections": sections,
+        "include_sections": include_sections,
     }
 
 
@@ -952,12 +1027,14 @@ def build_print_context(
     record_id: int,
     letterhead: bool,
     language: str,
+    include_sections: bool = True,
 ) -> tuple[str, dict[str, Any]]:
     """Resolve ``(template_name, context)`` for a single record of ``form_code``.
 
     Raises ``PrintFormCodeError`` for an unregistered form code and
     ``PrintNotFoundError`` if the record/admission does not exist for the
-    tenant.
+    tenant. ``include_sections`` only affects FORM_DISCHARGE_SUMMARY; every
+    other form code ignores it.
     """
     form_code = resolve_print_form_code(form_code, tenant_id)
 
@@ -970,6 +1047,8 @@ def build_print_context(
 
     if form_code == FORM_ADMISSION:
         context.update(_admission_context(tenant_id, record_id))
+    elif form_code == FORM_DISCHARGE_SUMMARY:
+        context.update(_discharge_summary_context(tenant_id, record_id, include_sections))
     elif form_code == FORM_OPD_VISIT:
         context.update(_opd_visit_context(tenant_id, record_id))
     elif form_code == FORM_IPD_BILL:
@@ -992,9 +1071,18 @@ def build_print_context(
     return template_name, context
 
 
-def render_print_html(form_code: str, tenant_id: uuid.UUID, record_id: int, letterhead: bool, language: str) -> str:
+def render_print_html(
+    form_code: str,
+    tenant_id: uuid.UUID,
+    record_id: int,
+    letterhead: bool,
+    language: str,
+    include_sections: bool = True,
+) -> str:
     """Render a single record's print template to an HTML string."""
-    template_name, context = build_print_context(form_code, tenant_id, record_id, letterhead, language)
+    template_name, context = build_print_context(
+        form_code, tenant_id, record_id, letterhead, language, include_sections
+    )
     return render_to_string(template_name, context)
 
 
