@@ -1,5 +1,6 @@
 # ipd/views.py
 import datetime
+import uuid
 import structlog
 from rest_framework import viewsets, filters, status
 from rest_framework.decorators import action
@@ -943,55 +944,77 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def add_payment(self, request, pk=None):
-        """Add a payment to the bill and log to the unified BillPayment ledger."""
+        """Add a payment to the bill and log it to the unified BillPayment ledger.
+
+        For a single-mode payment, send {amount, payment_mode}. For a split
+        cash+online payment, send {payment_mode: 'cash_online', cash_amount,
+        online_amount} — at least one of the two must be greater than 0.
+        Also used for Daycare bills (an IPDBilling row with
+        admission.admission_type == 'daycare'); the ledger rows are tagged
+        bill_type='daycare' in that case so they're separately reportable
+        from regular IPD payments while still linking via ipd_bill.
+
+        Runs inside a single transaction so the bill's received_amount and the
+        BillPayment ledger row(s) either both commit or both roll back —
+        unlike the previous best-effort ledger write, a failure here now
+        fails the whole request instead of silently dropping the ledger row.
+        """
+        from apps.payments.models import BillPayment
+        from apps.payments.payment_splits import PaymentEntryError, parse_payment_entries, total_amount, SPLIT_PAYMENT_MODE
+
         billing = self.get_object()
-        amount = request.data.get('amount')
         payment_mode = request.data.get('payment_mode', 'cash')
         notes = request.data.get('notes', '')
 
-        if not amount:
-            return error_response("AMOUNT_REQUIRED", "Amount is required.", status=400)
-
         try:
-            from decimal import Decimal
-            amount = Decimal(str(amount))
-            if amount <= 0:
-                raise ValueError()
-        except (ValueError, TypeError):
-            return error_response("INVALID_AMOUNT", "Invalid amount.", status=400)
+            entries = parse_payment_entries(request.data, payment_mode)
+        except PaymentEntryError as exc:
+            return error_response("INVALID_AMOUNT", str(exc), status=400)
 
-        billing.received_amount += amount
-        billing.payment_mode = payment_mode
-        billing.save()
+        amount = total_amount(entries)
+        bill_mode = 'multiple' if payment_mode == SPLIT_PAYMENT_MODE else payment_mode
 
-        # Log to unified BillPayment ledger (non-blocking — failure won't rollback the payment)
+        patient_name = ''
+        encounter_number = ''
         try:
-            from apps.payments.models import BillPayment
-            patient_name = ''
-            encounter_number = ''
-            try:
-                patient_name = billing.admission.patient.full_name if billing.admission and billing.admission.patient else ''
-                encounter_number = billing.admission.admission_id if billing.admission else ''
-            except Exception:
-                pass
-
-            BillPayment.objects.create(
-                tenant_id=request.tenant_id,
-                bill_type='ipd',
-                ipd_bill=billing,
-                bill_number=billing.bill_number or str(billing.id),
-                patient_name=patient_name,
-                encounter_number=encounter_number,
-                amount=amount,
-                payment_mode=payment_mode,
-                notes=notes,
-                recorded_by_user_id=request.user_id,
-            )
+            patient_name = billing.admission.patient.full_name if billing.admission and billing.admission.patient else ''
+            encounter_number = billing.admission.admission_id if billing.admission else ''
         except Exception:
-            pass  # Never let ledger failure break the payment
+            pass
+
+        bill_type = 'daycare' if billing.admission and billing.admission.admission_type == 'daycare' else 'ipd'
+
+        payment_group_id = uuid.uuid4()
+        created_payments = []
+        with transaction.atomic():
+            billing.received_amount += amount
+            billing.payment_mode = bill_mode
+            billing.save()
+
+            for entry_mode, entry_amount in entries:
+                created_payments.append(BillPayment.objects.create(
+                    tenant_id=request.tenant_id,
+                    bill_type=bill_type,
+                    ipd_bill=billing,
+                    bill_number=billing.bill_number or str(billing.id),
+                    patient_name=patient_name,
+                    encounter_number=encounter_number,
+                    amount=entry_amount,
+                    payment_mode=entry_mode,
+                    payment_group_id=payment_group_id,
+                    notes=notes,
+                    recorded_by_user_id=request.user_id,
+                ))
 
         serializer = self.get_serializer(billing)
-        return action_response("Payment recorded successfully.", data=serializer.data)
+        return action_response(
+            "Payment recorded successfully.",
+            data={
+                **serializer.data,
+                'payment_group_id': str(payment_group_id),
+                'receipt_numbers': [p.receipt_number for p in created_payments],
+            },
+        )
 
     @extend_schema(
         summary="IPD Billing Statistics",

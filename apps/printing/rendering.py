@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,7 @@ from apps.hospital.models import Hospital
 from apps.hospital.serializers import with_letterhead_defaults
 from apps.ipd.models import Admission, IPDBilling
 from apps.opd.models import OPDBill, Visit
+from apps.payments.models import BillPayment
 
 log = structlog.get_logger(__name__)
 
@@ -51,6 +53,8 @@ FORM_JEEVISHA_PAIN_OPD = "jeevisha_pain_opd"
 FORM_OPD_VISIT = "opd_visit_form"
 FORM_IPD_BILL = "ipd_bill"
 FORM_OPD_BILL = "opd_bill"
+FORM_OPD_PAYMENT_RECEIPT = "opd_payment_receipt"
+FORM_IPD_PAYMENT_RECEIPT = "ipd_payment_receipt"
 
 REGISTERED_FORM_CODES = {
     FORM_ADMISSION,
@@ -62,6 +66,15 @@ REGISTERED_FORM_CODES = {
     FORM_OPD_VISIT,
     FORM_IPD_BILL,
     FORM_OPD_BILL,
+    FORM_OPD_PAYMENT_RECEIPT,
+    FORM_IPD_PAYMENT_RECEIPT,
+}
+
+# Form codes whose record_id is a BillPayment.payment_group_id (a UUID)
+# rather than an integer bill/admission/record pk.
+UUID_RECORD_ID_FORM_CODES = {
+    FORM_OPD_PAYMENT_RECEIPT,
+    FORM_IPD_PAYMENT_RECEIPT,
 }
 
 CLINICAL_RECORD_FORM_CODES = {
@@ -83,6 +96,8 @@ _TEMPLATE_BY_FORM_CODE = {
     FORM_OPD_VISIT: "print/opd_visit_form.html",
     FORM_IPD_BILL: "print/ipd_bill.html",
     FORM_OPD_BILL: "print/opd_bill.html",
+    FORM_OPD_PAYMENT_RECEIPT: "print/opd_payment_receipt.html",
+    FORM_IPD_PAYMENT_RECEIPT: "print/ipd_payment_receipt.html",
 }
 
 # Monitoring chart time slots: 2-hour intervals across a 24h cycle. No fixed
@@ -284,6 +299,36 @@ def _resolve_opd_bill(tenant_id: uuid.UUID, record_id: int) -> OPDBill:
     return bill
 
 
+def _resolve_payment_group(
+    tenant_id: uuid.UUID, bill_types: tuple[str, ...], group_id: Any
+) -> list[BillPayment]:
+    """Fetch every BillPayment row recorded together as one payment event.
+
+    ``group_id`` is normally a ``payment_group_id`` shared by every leg of one
+    payment (e.g. the cash + online rows of a split payment). Rows created
+    before ``payment_group_id`` existed have it null, so as a fallback this
+    also accepts a single BillPayment's own ``id`` and returns just that row.
+    """
+    payments = list(
+        BillPayment.objects.filter(
+            tenant_id=tenant_id, bill_type__in=bill_types, payment_group_id=group_id
+        )
+        .select_related("opd_bill", "ipd_bill")
+        .order_by("payment_mode")
+    )
+    if not payments:
+        single = (
+            BillPayment.objects.filter(tenant_id=tenant_id, bill_type__in=bill_types, pk=group_id)
+            .select_related("opd_bill", "ipd_bill")
+            .first()
+        )
+        if single is not None:
+            payments = [single]
+    if not payments:
+        raise PrintNotFoundError(f"Payment {group_id} not found for this tenant.")
+    return payments
+
+
 # ---------------------------------------------------------------------------
 # Per-form context builders
 # ---------------------------------------------------------------------------
@@ -416,6 +461,59 @@ def _opd_bill_context(tenant_id: uuid.UUID, record_id: int) -> dict[str, Any]:
         "payment_status": bill.get_payment_status_display(),
         "payment_mode": bill.get_payment_mode_display(),
     }
+
+
+def _opd_payment_receipt_context(tenant_id: uuid.UUID, record_id: Any) -> dict[str, Any]:
+    """Build the template context for one OPD payment-event receipt.
+
+    ``record_id`` is a payment_group_id (or a bare BillPayment id for legacy
+    rows recorded before grouping existed) — see _resolve_payment_group.
+    Reuses _opd_bill_context for the patient/visit/item breakdown so the
+    receipt lists the same charges as the full bill print, then overlays the
+    specific payment(s) this receipt covers.
+    """
+    payments = _resolve_payment_group(tenant_id, ("opd",), record_id)
+    bill = payments[0].opd_bill
+    if bill is None:
+        raise PrintNotFoundError(f"Bill for payment {record_id} not found for this tenant.")
+
+    context = _opd_bill_context(tenant_id, bill.pk)
+    receipt_total = sum((p.amount for p in payments), Decimal("0.00"))
+    context.update({
+        "payments": payments,
+        "receipt_number": next((p.receipt_number for p in payments if p.receipt_number), str(record_id)),
+        "receipt_date": payments[0].payment_date,
+        "receipt_total": receipt_total,
+        "received_before_this_payment": context["received_amount"] - receipt_total,
+    })
+    return context
+
+
+def _ipd_payment_receipt_context(tenant_id: uuid.UUID, record_id: Any) -> dict[str, Any]:
+    """Build the template context for one IPD/Daycare payment-event receipt.
+
+    ``record_id`` is a payment_group_id (or a bare BillPayment id for legacy
+    rows recorded before grouping existed) — see _resolve_payment_group.
+    Reuses _ipd_bill_context for the patient/admission/item breakdown so the
+    receipt lists the same charges as the full bill print, then overlays the
+    specific payment(s) this receipt covers.
+    """
+    payments = _resolve_payment_group(tenant_id, ("ipd", "daycare"), record_id)
+    bill = payments[0].ipd_bill
+    if bill is None:
+        raise PrintNotFoundError(f"Bill for payment {record_id} not found for this tenant.")
+
+    context = _ipd_bill_context(tenant_id, bill.pk)
+    receipt_total = sum((p.amount for p in payments), Decimal("0.00"))
+    context.update({
+        "payments": payments,
+        "receipt_number": next((p.receipt_number for p in payments if p.receipt_number), str(record_id)),
+        "receipt_date": payments[0].payment_date,
+        "receipt_total": receipt_total,
+        "received_before_this_payment": context["received_amount"] - receipt_total,
+        "is_daycare": bill.admission.admission_type == "daycare" if bill.admission else False,
+    })
+    return context
 
 
 def _opd_visit_context(tenant_id: uuid.UUID, record_id: int) -> dict[str, Any]:
@@ -878,6 +976,10 @@ def build_print_context(
         context.update(_ipd_bill_context(tenant_id, record_id))
     elif form_code == FORM_OPD_BILL:
         context.update(_opd_bill_context(tenant_id, record_id))
+    elif form_code == FORM_OPD_PAYMENT_RECEIPT:
+        context.update(_opd_payment_receipt_context(tenant_id, record_id))
+    elif form_code == FORM_IPD_PAYMENT_RECEIPT:
+        context.update(_ipd_payment_receipt_context(tenant_id, record_id))
     elif form_code == FORM_MONITORING_CHART:
         context.update(_clinical_record_context(tenant_id, record_id, language))
         context["time_slots"] = MONITORING_CHART_TIME_SLOTS

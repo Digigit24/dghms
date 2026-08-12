@@ -664,7 +664,10 @@ class DoctorProfileViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
                 # Add specialties
                 if specialty_ids:
-                    specialties = Specialty.objects.filter(id__in=specialty_ids)
+                    specialties = Specialty.objects.filter(
+                        tenant_id=request.tenant_id,
+                        id__in=specialty_ids,
+                    )
                     doctor.specialties.set(specialties)
 
                 logger.info(f"Doctor profile created successfully: {doctor.id} for user: {user_id}")

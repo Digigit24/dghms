@@ -41,7 +41,10 @@ from .rendering import (
     FORM_OPD_BILL,
     FORM_OPD_VISIT,
     FORM_IPD_BILL,
+    FORM_OPD_PAYMENT_RECEIPT,
+    FORM_IPD_PAYMENT_RECEIPT,
     MAX_DOCUMENT_BATCH_SIZE,
+    UUID_RECORD_ID_FORM_CODES,
     PdfMergeError,
     PrintFormCodeError,
     PrintNotFoundError,
@@ -67,21 +70,23 @@ class CanViewPrintSource(BasePermission):
     ``admission_form`` and ``ipd_bill`` read an ``Admission``/``IPDBilling``
     (IPD app) so they require ``hms.ipd.view``. ``opd_visit_form`` and
     ``opd_bill`` read a ``Visit``/``OPDBill`` (OPD app) so they require
-    ``hms.opd.view``. Every other registered form code reads a
+    ``hms.opd.view``. ``ipd_payment_receipt``/``opd_payment_receipt`` read the
+    same underlying bill (Daycare bills are IPDBilling rows too) so they
+    follow the same split. Every other registered form code reads a
     ``ClinicalRecord`` so it requires ``hms.clinical.view`` — the exact same
     permission gate used by ``ClinicalRecordViewSet.get_queryset()``.
     """
 
     def has_permission(self, request, view) -> bool:
         form_code = request.query_params.get("form") or (request.data or {}).get("form")
-        if form_code in (FORM_ADMISSION, FORM_IPD_BILL):
+        if form_code in (FORM_ADMISSION, FORM_IPD_BILL, FORM_IPD_PAYMENT_RECEIPT):
             return check_permission(request, "hms.ipd.view")
-        if form_code in (FORM_OPD_VISIT, FORM_OPD_BILL):
+        if form_code in (FORM_OPD_VISIT, FORM_OPD_BILL, FORM_OPD_PAYMENT_RECEIPT):
             return check_permission(request, HMSPermissions.OPD_VIEW)
         return check_permission(request, HMSPermissions.CLINICAL_VIEW)
 
 
-def _parse_common_params(request) -> tuple[str | None, int | None, bool, str, Response | None]:
+def _parse_common_params(request) -> tuple[str | None, int | uuid.UUID | None, bool, str, Response | None]:
     """Parse and validate the shared ``form``/``record_id``/``letterhead``/``language`` params.
 
     Returns ``(form_code, record_id, letterhead, language, error_response)``.
@@ -109,15 +114,28 @@ def _parse_common_params(request) -> tuple[str | None, int | None, bool, str, Re
             field="record_id",
         )
 
-    try:
-        record_id = int(record_id_raw)
-    except (TypeError, ValueError):
-        return None, None, False, language, error_response(
-            code=error_codes.INVALID_PAYLOAD,
-            message="'record_id' must be an integer.",
-            status=status.HTTP_400_BAD_REQUEST,
-            field="record_id",
-        )
+    if form_code in UUID_RECORD_ID_FORM_CODES:
+        # Payment-receipt forms key off BillPayment.payment_group_id (a UUID),
+        # not an integer bill/record pk.
+        try:
+            record_id = uuid.UUID(str(record_id_raw))
+        except (TypeError, ValueError):
+            return None, None, False, language, error_response(
+                code=error_codes.INVALID_PAYLOAD,
+                message="'record_id' must be a UUID for this form.",
+                status=status.HTTP_400_BAD_REQUEST,
+                field="record_id",
+            )
+    else:
+        try:
+            record_id = int(record_id_raw)
+        except (TypeError, ValueError):
+            return None, None, False, language, error_response(
+                code=error_codes.INVALID_PAYLOAD,
+                message="'record_id' must be an integer.",
+                status=status.HTTP_400_BAD_REQUEST,
+                field="record_id",
+            )
 
     if language not in ("en", "mr"):
         return None, None, False, language, error_response(

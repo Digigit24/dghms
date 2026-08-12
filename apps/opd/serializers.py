@@ -1,5 +1,6 @@
 # opd/serializers.py
 from rest_framework import serializers
+from django.contrib.contenttypes.models import ContentType
 from django.db import transaction, models
 from decimal import Decimal
 
@@ -173,8 +174,45 @@ class VisitSetFollowUpSerializer(serializers.Serializer):
 # OPD BILL SERIALIZERS
 # ============================================================================
 
+# catalog_type -> (app_label, model_name, name_field, price_field, source)
+# 'investigation' maps its own source dynamically based on the Investigation's
+# category (Lab vs Radiology), mirroring apps/ipd/serializers.py's CATALOG_TYPE_MAP.
+CATALOG_TYPE_MAP = {
+    'procedure': ('opd', 'proceduremaster', 'name', 'default_charge', 'Procedure'),
+    'package': ('opd', 'procedurepackage', 'name', 'discounted_charge', 'Package'),
+    'service': ('opd', 'service', 'name', 'default_charge', 'Service'),
+    'investigation': ('diagnostics', 'investigation', 'name', 'base_charge', None),
+}
+
+
 class OPDBillItemSerializer(serializers.ModelSerializer):
-    """Serializer for OPD Bill Items."""
+    """Serializer for OPD Bill Items with catalog snapshot support.
+
+    Create payloads may optionally include ``catalog_type`` (one of
+    'procedure', 'package', 'service', 'investigation') and ``catalog_id``.
+    When both are present, the corresponding master-data row is resolved
+    tenant-scoped, and item_name/system_calculated_price/source are snapshot
+    from it. The client may still send its own unit_price in the same
+    request to override the snapshot immediately (is_price_overridden is set
+    automatically when unit_price != system_calculated_price). When
+    catalog_type/catalog_id are absent, the item behaves exactly as a fully
+    custom/manual line (client supplies item_name/source/unit_price
+    directly, origin left null).
+    """
+
+    catalog_type = serializers.ChoiceField(
+        choices=list(CATALOG_TYPE_MAP.keys()),
+        required=False,
+        write_only=True,
+        allow_null=True,
+        help_text="Optional catalog to snapshot this item from: procedure, package, service, investigation",
+    )
+    catalog_id = serializers.IntegerField(
+        required=False,
+        write_only=True,
+        allow_null=True,
+        help_text="Primary key of the catalog row referenced by catalog_type",
+    )
 
     class Meta:
         model = OPDBillItem
@@ -182,11 +220,95 @@ class OPDBillItemSerializer(serializers.ModelSerializer):
             'id', 'bill', 'item_name', 'source',
             'quantity', 'system_calculated_price', 'unit_price',
             'total_price', 'is_price_overridden', 'notes',
-            'origin_content_type', 'origin_object_id'
+            'origin_content_type', 'origin_object_id',
+            'catalog_type', 'catalog_id',
         ]
         read_only_fields = [
-            'total_price', 'system_calculated_price', 'is_price_overridden'
+            'total_price', 'system_calculated_price', 'is_price_overridden',
+            'origin_content_type', 'origin_object_id',
         ]
+        extra_kwargs = {
+            'item_name': {'required': False},
+            'source': {'required': False},
+            # unit_price is required at the model level, but must be optional
+            # at the DRF field level so a catalog_type/catalog_id payload (no
+            # unit_price) can pass per-field validation and reach validate(),
+            # where it is defaulted to the catalog snapshot price.
+            'unit_price': {'required': False},
+        }
+
+    def _resolve_catalog(self, catalog_type, catalog_id, tenant_id):
+        """Resolve a tenant-scoped catalog row for catalog_type/catalog_id.
+
+        Never trusts a cross-tenant id — every lookup is filtered by
+        tenant_id. Raises ValidationError (400) if not found.
+        """
+        app_label, model_name, name_field, price_field, source = CATALOG_TYPE_MAP[catalog_type]
+        try:
+            model = ContentType.objects.get(app_label=app_label, model=model_name).model_class()
+        except ContentType.DoesNotExist:
+            raise serializers.ValidationError({'catalog_type': 'Unsupported catalog_type.'})
+
+        instance = model.objects.filter(tenant_id=tenant_id, pk=catalog_id).first()
+        if instance is None:
+            raise serializers.ValidationError({'catalog_id': 'Catalog item not found for this tenant.'})
+
+        name = getattr(instance, name_field)
+        price = getattr(instance, price_field)
+
+        if catalog_type == 'investigation':
+            category = getattr(instance, 'category', '') or ''
+            source = 'Lab' if category != 'radiology' else 'Radiology'
+
+        return instance, name, Decimal(price), source
+
+    def validate(self, attrs):
+        """Validate bill item data, resolving catalog_type/catalog_id if present."""
+        catalog_type = attrs.pop('catalog_type', None)
+        catalog_id = attrs.pop('catalog_id', None)
+
+        request = self.context.get('request')
+        tenant_id = getattr(request, 'tenant_id', None) if request else None
+
+        if catalog_type and catalog_id:
+            if tenant_id is None:
+                raise serializers.ValidationError('Tenant context is required to resolve catalog items.')
+            instance, name, system_price, source = self._resolve_catalog(catalog_type, catalog_id, tenant_id)
+
+            attrs['item_name'] = attrs.get('item_name') or name
+            attrs['source'] = source
+            attrs['system_calculated_price'] = system_price
+            if 'unit_price' not in attrs or attrs.get('unit_price') is None:
+                attrs['unit_price'] = system_price
+
+            content_type = ContentType.objects.get_for_model(instance)
+            attrs['origin_content_type'] = content_type
+            attrs['origin_object_id'] = instance.pk
+        elif catalog_type or catalog_id:
+            raise serializers.ValidationError(
+                'Both catalog_type and catalog_id must be supplied together.'
+            )
+        else:
+            if not attrs.get('item_name') and not (self.instance and self.instance.item_name):
+                raise serializers.ValidationError({'item_name': 'This field is required.'})
+            # unit_price is optional at the field level only so catalog-linked
+            # creates can omit it — a fully custom item (no catalog_type/
+            # catalog_id) must still supply it on create.
+            no_existing_unit_price = not (self.instance and self.instance.unit_price is not None)
+            if attrs.get('unit_price') is None and no_existing_unit_price:
+                raise serializers.ValidationError({'unit_price': 'This field is required.'})
+
+        unit_price = attrs.get('unit_price', getattr(self.instance, 'unit_price', None))
+        system_price = attrs.get(
+            'system_calculated_price', getattr(self.instance, 'system_calculated_price', None)
+        )
+
+        # If system_calculated_price is still not provided, default it to unit_price
+        if system_price is None:
+            system_price = unit_price
+            attrs['system_calculated_price'] = system_price
+
+        return attrs
 
 
 class OPDBillListSerializer(serializers.ModelSerializer):
@@ -295,7 +417,8 @@ class ProcedureMasterListSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProcedureMaster
         fields = [
-            'id', 'name', 'code', 'category', 'default_charge', 'is_active'
+            'id', 'name', 'code', 'category', 'description',
+            'default_charge', 'is_active', 'created_at', 'updated_at'
         ]
 
 
@@ -321,9 +444,13 @@ class ProcedureMasterCreateUpdateSerializer(serializers.ModelSerializer):
 
     def validate_code(self, value):
         """Validate unique code"""
-        if self.instance is None:  # Only for creation
-            if ProcedureMaster.objects.filter(code=value).exists():
-                raise serializers.ValidationError("Procedure code already exists")
+        request = self.context.get('request')
+        tenant_id = getattr(request, 'tenant_id', None)
+        queryset = ProcedureMaster.objects.filter(tenant_id=tenant_id, code=value)
+        if self.instance:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise serializers.ValidationError("Procedure code already exists")
         return value
 
     def create(self, validated_data):
@@ -347,7 +474,8 @@ class ServiceListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Service
         fields = [
-            'id', 'name', 'code', 'category', 'default_charge', 'is_active'
+            'id', 'name', 'code', 'category', 'default_charge',
+            'is_mediclaim_available', 'is_active'
         ]
 
 
@@ -367,7 +495,7 @@ class ServiceCreateUpdateSerializer(serializers.ModelSerializer):
         model = Service
         fields = [
             'name', 'code', 'category', 'description',
-            'default_charge', 'is_active'
+            'default_charge', 'is_mediclaim_available', 'is_active'
         ]
 
     def validate_code(self, value):
@@ -405,12 +533,14 @@ class ProcedurePackageListSerializer(serializers.ModelSerializer):
         decimal_places=2,
         read_only=True
     )
+    procedures = ProcedureMasterListSerializer(many=True, read_only=True)
 
     class Meta:
         model = ProcedurePackage
         fields = [
-            'id', 'name', 'code', 'procedure_count', 'total_charge',
-            'discounted_charge', 'savings', 'is_active'
+            'id', 'name', 'code', 'procedures', 'procedure_count',
+            'total_charge', 'discounted_charge', 'savings', 'is_active',
+            'created_at', 'updated_at'
         ]
 
 
@@ -438,6 +568,12 @@ class ProcedurePackageDetailSerializer(serializers.ModelSerializer):
 class ProcedurePackageCreateUpdateSerializer(serializers.ModelSerializer):
     """Serializer for creating/updating procedure packages"""
 
+    procedures = serializers.PrimaryKeyRelatedField(
+        many=True,
+        allow_empty=False,
+        queryset=ProcedureMaster.objects.none(),
+    )
+
     class Meta:
         model = ProcedurePackage
         fields = [
@@ -445,10 +581,29 @@ class ProcedurePackageCreateUpdateSerializer(serializers.ModelSerializer):
             'discounted_charge', 'is_active'
         ]
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get('request')
+        tenant_id = getattr(request, 'tenant_id', None)
+        if tenant_id:
+            self.fields['procedures'].child_relation.queryset = ProcedureMaster.objects.filter(
+                tenant_id=tenant_id,
+            )
+
+    def validate_code(self, value):
+        request = self.context.get('request')
+        tenant_id = getattr(request, 'tenant_id', None)
+        queryset = ProcedurePackage.objects.filter(tenant_id=tenant_id, code=value)
+        if self.instance:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise serializers.ValidationError('Package code already exists')
+        return value
+
     def validate(self, data):
         """Validate package data"""
-        total = data.get('total_charge', Decimal('0'))
-        discounted = data.get('discounted_charge', Decimal('0'))
+        total = data.get('total_charge', getattr(self.instance, 'total_charge', Decimal('0')))
+        discounted = data.get('discounted_charge', getattr(self.instance, 'discounted_charge', Decimal('0')))
 
         if discounted > total:
             raise serializers.ValidationError({

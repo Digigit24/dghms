@@ -66,11 +66,12 @@ class DoctorProfileListSerializer(serializers.ModelSerializer):
         model = DoctorProfile
         fields = [
             'id', 'user_id', 'first_name', 'last_name', 'full_name',
-            'medical_license_number', 'qualifications', 'specialties',
-            'years_of_experience', 'consultation_fee', 'consultation_duration',
+            'medical_license_number', 'license_issuing_authority',
+            'license_issue_date', 'license_expiry_date', 'qualifications', 'specialties',
+            'years_of_experience', 'consultation_fee', 'follow_up_fee', 'consultation_duration',
             'is_available_online', 'is_available_offline',
             'average_rating', 'total_reviews', 'total_consultations',
-            'status', 'is_license_valid', 'created_at'
+            'status', 'is_license_valid', 'languages_spoken', 'created_at', 'updated_at'
         ]
 
 
@@ -123,6 +124,13 @@ class DoctorProfileCreateUpdateSerializer(serializers.ModelSerializer):
             return value
         except (ValueError, TypeError):
             raise serializers.ValidationError('Invalid user ID format')
+
+    def validate_specialty_ids(self, values):
+        request = self.context.get('request')
+        tenant_id = getattr(request, 'tenant_id', None)
+        if Specialty.objects.filter(tenant_id=tenant_id, id__in=values).count() != len(set(values)):
+            raise serializers.ValidationError('One or more specialty IDs are invalid')
+        return values
 
     def validate_license_expiry_date(self, value):
         """Ensure license expiry date is in the future or today"""
@@ -198,7 +206,7 @@ class DoctorProfileCreateUpdateSerializer(serializers.ModelSerializer):
 
         # Add specialties
         if specialty_ids:
-            specialties = Specialty.objects.filter(id__in=specialty_ids)
+            specialties = Specialty.objects.filter(tenant_id=doctor.tenant_id, id__in=specialty_ids)
             doctor.specialties.set(specialties)
 
         return doctor
@@ -228,7 +236,7 @@ class DoctorProfileCreateUpdateSerializer(serializers.ModelSerializer):
 
         # Update specialties if provided
         if specialty_ids is not None:
-            specialties = Specialty.objects.filter(id__in=specialty_ids)
+            specialties = Specialty.objects.filter(tenant_id=instance.tenant_id, id__in=specialty_ids)
             instance.specialties.set(specialties)
 
         return instance
@@ -445,6 +453,7 @@ class DoctorWithUserCreationSerializer(serializers.Serializer):
         # Auto-populate tenant_id from request context if available
         # Note: tenant_id will be added by the view later, so we don't validate it here
         request = self.context.get('request')
+        tenant_id = request.tenant_id if request and hasattr(request, 'tenant_id') else None
 
         create_user = attrs.get('create_user', False)
 

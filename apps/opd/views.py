@@ -4,6 +4,7 @@ from django.utils import timezone
 from django.db import transaction
 from datetime import date, timedelta
 from decimal import Decimal
+import uuid
 
 import structlog
 
@@ -1116,14 +1117,22 @@ class OPDBillViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
     @extend_schema(
         summary="Record Payment",
-        description="Record a payment for an OPD bill",
+        description=(
+            "Record a payment for an OPD bill. For a single-mode payment, "
+            "send {amount, payment_mode}. For a split cash+online payment, "
+            "send {payment_mode: 'cash_online', cash_amount, online_amount} — "
+            "at least one of the two must be greater than 0."
+        ),
         request={
             'application/json': {
                 'type': 'object',
                 'properties': {
                     'amount': {'type': 'number'},
                     'payment_mode': {'type': 'string'},
-                    'payment_details': {'type': 'object'}
+                    'cash_amount': {'type': 'number'},
+                    'online_amount': {'type': 'number'},
+                    'payment_details': {'type': 'object'},
+                    'notes': {'type': 'string'},
                 }
             }
         },
@@ -1131,55 +1140,65 @@ class OPDBillViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     )
     @action(detail=True, methods=['post'])
     def record_payment(self, request, pk=None):
-        """Record payment for a bill and log to the unified BillPayment ledger."""
+        """Record a payment for a bill and log it to the unified BillPayment ledger.
+
+        Runs inside a single transaction so the bill's received_amount and the
+        BillPayment ledger row(s) either both commit or both roll back —
+        unlike the previous best-effort ledger write, a failure here now
+        fails the whole request instead of silently dropping the ledger row.
+        """
+        from apps.payments.models import BillPayment
+        from apps.payments.payment_splits import PaymentEntryError, parse_payment_entries, total_amount, SPLIT_PAYMENT_MODE
+
         bill = self.get_object()
 
-        amount = request.data.get('amount')
         payment_mode = request.data.get('payment_mode', 'cash')
         payment_details = request.data.get('payment_details', {})
         notes = request.data.get('notes', '')
 
-        if not amount:
-            return Response(
-                {'success': False, 'error': 'Amount is required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Record payment on the bill model
-        bill.record_payment(amount, payment_mode, payment_details)
-
-        # Log to unified BillPayment ledger (non-blocking — failure won't rollback the payment)
         try:
-            from apps.payments.models import BillPayment
-            from decimal import Decimal
-            patient_name = ''
-            encounter_number = ''
-            try:
-                patient_name = bill.visit.patient.full_name if bill.visit and bill.visit.patient else ''
-                encounter_number = bill.visit.visit_number if bill.visit else ''
-            except Exception:
-                pass
+            entries = parse_payment_entries(request.data, payment_mode)
+        except PaymentEntryError as exc:
+            return Response({'success': False, 'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-            BillPayment.objects.create(
-                tenant_id=request.tenant_id,
-                bill_type='opd',
-                opd_bill=bill,
-                bill_number=bill.bill_number or str(bill.id),
-                patient_name=patient_name,
-                encounter_number=encounter_number,
-                amount=Decimal(str(amount)),
-                payment_mode=payment_mode,
-                notes=notes,
-                recorded_by_user_id=request.user_id,
-            )
+        amount = total_amount(entries)
+        bill_mode = 'multiple' if payment_mode == SPLIT_PAYMENT_MODE else payment_mode
+
+        patient_name = ''
+        encounter_number = ''
+        try:
+            patient_name = bill.visit.patient.full_name if bill.visit and bill.visit.patient else ''
+            encounter_number = bill.visit.visit_number if bill.visit else ''
         except Exception:
-            pass  # Never let ledger failure break the payment
+            pass
+
+        payment_group_id = uuid.uuid4()
+        created_payments = []
+        with transaction.atomic():
+            bill.record_payment(amount, bill_mode, payment_details)
+
+            for entry_mode, entry_amount in entries:
+                created_payments.append(BillPayment.objects.create(
+                    tenant_id=request.tenant_id,
+                    bill_type='opd',
+                    opd_bill=bill,
+                    bill_number=bill.bill_number or str(bill.id),
+                    patient_name=patient_name,
+                    encounter_number=encounter_number,
+                    amount=entry_amount,
+                    payment_mode=entry_mode,
+                    payment_group_id=payment_group_id,
+                    notes=notes,
+                    recorded_by_user_id=request.user_id,
+                ))
 
         serializer = OPDBillDetailSerializer(bill)
         return Response({
             'success': True,
             'message': 'Payment recorded',
-            'data': serializer.data
+            'data': serializer.data,
+            'payment_group_id': str(payment_group_id),
+            'receipt_numbers': [p.receipt_number for p in created_payments],
         })
 
     @extend_schema(
@@ -1437,7 +1456,7 @@ class ServiceViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     }
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['category', 'is_active']
+    filterset_fields = ['category', 'is_active', 'is_mediclaim_available']
     search_fields = ['name', 'code']
     ordering_fields = ['name', 'category', 'default_charge']
     ordering = ['name']

@@ -88,6 +88,13 @@ def custom_exception_handler(exc, context):
         )
 
     if isinstance(exc, IntegrityError):
+        view = context.get("view")
+        log.error(
+            "integrity_error",
+            view=type(view).__name__ if view else None,
+            exc_message=str(exc),
+            exc_info=True,
+        )
         return error_response(
             code=error_codes.INTEGRITY_ERROR,
             message="A database integrity error occurred. Possible duplicate.",

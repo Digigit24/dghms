@@ -113,7 +113,11 @@ def generate_discharge_narrative(admission, sections):
         "doctor": getattr(admission.doctor, "full_name", None),
         "clinical_sections": sections,
     }
-    response = OpenAI(api_key=api_key).chat.completions.create(
+    # Explicit timeout: the SDK default (600s call / 5s connect) can outlast
+    # nginx/Cloudflare's own upstream timeout, which turns a slow-but-legitimate
+    # generation into an opaque edge 502 instead of the JSON error the caller's
+    # try/except is meant to produce. Fail inside our own error handling first.
+    response = OpenAI(api_key=api_key, timeout=55.0).chat.completions.create(
         model=model,
         temperature=0.2,
         messages=[

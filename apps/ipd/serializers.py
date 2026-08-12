@@ -71,18 +71,30 @@ class BedSerializer(TenantMixin, serializers.ModelSerializer):
         ]
         read_only_fields = ['tenant_id', 'is_occupied', 'created_at', 'updated_at']
 
+    def validate_ward(self, ward):
+        request = self.context.get('request')
+        tenant_id = getattr(request, 'tenant_id', None)
+        if tenant_id and ward.tenant_id != tenant_id:
+            raise serializers.ValidationError('Ward does not belong to the current tenant')
+        return ward
 
-class BedListSerializer(TenantMixin, serializers.ModelSerializer):
-    """Minimal serializer for listing beds."""
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        status = attrs.get('status', getattr(self.instance, 'status', 'available'))
+        is_occupied = bool(self.instance and self.instance.is_occupied)
+        if status == 'occupied' and not is_occupied:
+            raise serializers.ValidationError({
+                'status': 'A bed becomes occupied only through an admission or bed transfer.'
+            })
+        if is_occupied and status != 'occupied':
+            raise serializers.ValidationError({
+                'status': 'An occupied bed must be released through discharge or bed transfer.'
+            })
+        return attrs
 
-    ward_name = serializers.ReadOnlyField(source='ward.name')
 
-    class Meta:
-        model = Bed
-        fields = [
-            'id', 'ward', 'ward_name', 'bed_number', 'bed_type',
-            'daily_charge', 'is_occupied', 'status'
-        ]
+class BedListSerializer(BedSerializer):
+    """Full editable bed shape for list consumers such as Floor Management."""
 
 
 class AdmissionSerializer(TenantMixin, serializers.ModelSerializer):

@@ -1,5 +1,5 @@
 from datetime import datetime, date
-from django.db import models
+from django.db import models, transaction
 from django.core.validators import MinValueValidator
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
@@ -261,24 +261,80 @@ class AccountingPeriod(models.Model):
         }
 
 
+class BillPaymentSequence(models.Model):
+    """Per-tenant-per-day counter used to mint sequential receipt numbers.
+
+    Mirrors ``apps.opd.models.OPDBillSequence``: a single locked counter row
+    per (tenant, date, prefix) avoids the phantom-read collision that scanning
+    existing rows for "max + 1" is prone to under concurrent payment posting.
+    """
+
+    tenant_id = models.UUIDField(db_index=True)
+    receipt_date = models.DateField(db_index=True)
+    prefix = models.CharField(max_length=30)
+    last_sequence = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        db_table = 'bill_payment_sequences'
+        unique_together = [['tenant_id', 'receipt_date', 'prefix']]
+
+    def __str__(self):
+        return f"{self.prefix}/{self.receipt_date}: {self.last_sequence}"
+
+    @classmethod
+    def next_receipt_number(cls, tenant_id, receipt_date, prefix):
+        """Atomically claim the next sequence number and format it.
+
+        Must be called inside a transaction.atomic() block — BillPayment.save()
+        already provides one.
+        """
+        cls.objects.get_or_create(tenant_id=tenant_id, receipt_date=receipt_date, prefix=prefix)
+
+        counter = (
+            cls.objects
+            .select_for_update()
+            .get(tenant_id=tenant_id, receipt_date=receipt_date, prefix=prefix)
+        )
+        counter.last_sequence += 1
+        counter.save(update_fields=['last_sequence'])
+
+        date_str = receipt_date.strftime('%Y%m%d')
+        return f"{prefix}/{date_str}/{counter.last_sequence:03d}"
+
+
 class BillPayment(models.Model):
-    """Unified payment ledger entry for OPD and IPD bills."""
+    """Unified payment ledger entry for OPD and IPD (including Daycare) bills.
+
+    Each row is one payment-mode leg of a payment event. A single payment
+    event — e.g. one "cash + online" split — produces two rows sharing the
+    same ``payment_group_id`` so they print together as one receipt; a plain
+    single-mode payment produces one row whose ``payment_group_id`` still
+    identifies it (a group of one) so receipt printing/lookup is uniform.
+    """
 
     BILL_TYPE_CHOICES = [
         ('opd', 'OPD'),
         ('ipd', 'IPD'),
+        ('daycare', 'Daycare'),
     ]
     PAYMENT_MODE_CHOICES = [
         ('cash', 'Cash'),
         ('card', 'Card'),
         ('upi', 'UPI'),
         ('bank', 'Bank Transfer'),
+        ('online', 'Online'),
         ('insurance', 'Insurance'),
         ('cheque', 'Cheque'),
         ('razorpay', 'Razorpay'),
         ('multiple', 'Multiple'),
         ('other', 'Other'),
     ]
+
+    _RECEIPT_PREFIX_BY_BILL_TYPE = {
+        'opd': 'OPD-RCPT',
+        'ipd': 'IPD-RCPT',
+        'daycare': 'DC-RCPT',
+    }
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tenant_id = models.UUIDField(db_index=True)
@@ -297,6 +353,14 @@ class BillPayment(models.Model):
         validators=[MinValueValidator(Decimal('0.01'))],
     )
     payment_mode = models.CharField(max_length=20, choices=PAYMENT_MODE_CHOICES, default='cash')
+    payment_group_id = models.UUIDField(
+        null=True, blank=True, db_index=True,
+        help_text="Groups the rows recorded together as one payment event (e.g. a cash+online split) so they print as a single receipt."
+    )
+    receipt_number = models.CharField(
+        max_length=40, blank=True, db_index=True,
+        help_text="Printable receipt number, auto-generated per tenant on first save."
+    )
     payment_date = models.DateField(default=date.today)
     notes = models.TextField(blank=True)
     recorded_by_user_id = models.UUIDField(null=True, blank=True)
@@ -315,7 +379,27 @@ class BillPayment(models.Model):
             models.Index(fields=["tenant_id", "payment_mode"], name="billpay_tenant_mode_idx"),
             models.Index(fields=["opd_bill"], name="billpay_opd_bill_idx"),
             models.Index(fields=["ipd_bill"], name="billpay_ipd_bill_idx"),
+            models.Index(fields=["payment_group_id"], name="billpay_group_idx"),
         ]
 
     def __str__(self):
         return f"BillPayment {self.id} [{self.bill_type}] {self.amount}"
+
+    def save(self, *args, **kwargs):
+        """Auto-generate receipt_number on first save (never on later edits).
+
+        Existing rows created before this field was introduced keep a blank
+        receipt_number rather than being backfilled, so no uniqueness
+        constraint is declared on this column — the per-tenant-per-day
+        sequence counter already guarantees every newly generated number is
+        collision-free without one.
+        """
+        if not self.receipt_number:
+            with transaction.atomic():
+                prefix = self._RECEIPT_PREFIX_BY_BILL_TYPE.get(self.bill_type, 'RCPT')
+                self.receipt_number = BillPaymentSequence.next_receipt_number(
+                    self.tenant_id, self.payment_date, prefix
+                )
+                super().save(*args, **kwargs)
+        else:
+            super().save(*args, **kwargs)

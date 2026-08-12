@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.utils.text import slugify
 from django.contrib.contenttypes.models import ContentType
 from .models import (
     Investigation, Requisition, DiagnosticOrder, LabReport, InvestigationRange,
@@ -7,10 +8,38 @@ from .models import (
 from common.mixins import TenantMixin
 
 class InvestigationSerializer(TenantMixin, serializers.ModelSerializer):
+    code = serializers.CharField(required=False, allow_blank=True, max_length=50)
+
     class Meta:
         model = Investigation
         fields = '__all__'
         read_only_fields = ['tenant_id']
+
+    def validate_code(self, value):
+        if not value:
+            return value
+        request = self.context.get('request')
+        tenant_id = getattr(request, 'tenant_id', None)
+        queryset = Investigation.objects.filter(tenant_id=tenant_id, code=value)
+        if self.instance:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise serializers.ValidationError('Investigation code already exists')
+        return value
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        tenant_id = getattr(request, 'tenant_id', None)
+        if not validated_data.get('code'):
+            base = slugify(validated_data['name']).replace('-', '_')[:50] or 'investigation'
+            code = base
+            suffix = 2
+            while Investigation.objects.filter(tenant_id=tenant_id, code=code).exists():
+                tail = f'_{suffix}'
+                code = f'{base[:50-len(tail)]}{tail}'
+                suffix += 1
+            validated_data['code'] = code
+        return super().create(validated_data)
 
 class InvestigationRangeSerializer(TenantMixin, serializers.ModelSerializer):
     class Meta:

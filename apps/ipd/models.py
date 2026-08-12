@@ -659,8 +659,10 @@ class IPDBilling(models.Model):
         ('card', 'Card'),
         ('upi', 'UPI'),
         ('netbanking', 'Net Banking'),
+        ('online', 'Online'),
         ('insurance', 'Insurance'),
         ('cheque', 'Cheque'),
+        ('multiple', 'Multiple Modes'),
         ('other', 'Other'),
     ]
 

@@ -1,4 +1,3 @@
-
 from decimal import Decimal
 import datetime
 import uuid
@@ -16,7 +15,13 @@ from apps.opd.management.commands.recompute_opd_bill_totals import Command
 from apps.opd.filters import VisitFilter
 from apps.opd.models import OPDBillItem, Visit
 from apps.patients.models import PatientProfile
-from apps.opd.serializers import VisitListSerializer, VisitSetFollowUpSerializer
+from apps.opd.serializers import (
+    ProcedureMasterListSerializer,
+    ProcedurePackageCreateUpdateSerializer,
+    ProcedurePackageListSerializer,
+    VisitListSerializer,
+    VisitSetFollowUpSerializer,
+)
 from apps.opd.signals import update_opd_bill_totals
 from apps.opd.views import VisitViewSet, _invalidate_today_cache
 
@@ -40,6 +45,19 @@ def _jwt_for(*, tenant_id, user_id, email, permissions):
         settings.JWT_SECRET_KEY,
         algorithm=settings.JWT_ALGORITHM,
     )
+
+
+class ProcedureMasterContractTests(SimpleTestCase):
+    def test_procedure_list_contains_editable_description(self):
+        self.assertIn("description", ProcedureMasterListSerializer().fields)
+
+    def test_package_list_contains_nested_procedures(self):
+        self.assertIn("procedures", ProcedurePackageListSerializer().fields)
+
+    def test_package_requires_at_least_one_procedure(self):
+        field = ProcedurePackageCreateUpdateSerializer().fields["procedures"]
+        self.assertTrue(field.required)
+        self.assertFalse(field.allow_empty)
 
 
 class OPDBillSynchronizationTests(SimpleTestCase):

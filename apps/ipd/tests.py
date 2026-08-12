@@ -7,10 +7,12 @@ from django.db.models.signals import post_save
 from django.test import SimpleTestCase
 from django.test import TestCase
 from rest_framework.test import APIClient
+from rest_framework.exceptions import ValidationError
 
 from apps.doctors.models import DoctorProfile
 from apps.ipd.models import Admission, Bed, IPDBillItem, Ward
 from apps.ipd.signals import update_ipd_bill_totals
+from apps.ipd.serializers import BedListSerializer, BedSerializer
 from apps.patients.models import PatientProfile
 
 
@@ -33,6 +35,20 @@ def _jwt_for(*, tenant_id, user_id, email, permissions):
         settings.JWT_SECRET_KEY,
         algorithm=settings.JWT_ALGORITHM,
     )
+
+
+class BedMasterContractTests(SimpleTestCase):
+    def test_list_response_contains_editable_feature_fields(self):
+        fields = set(BedListSerializer().fields)
+        self.assertTrue({
+            "has_oxygen", "has_ventilator", "description", "is_active"
+        }.issubset(fields))
+
+    def test_unoccupied_bed_cannot_be_manually_marked_occupied(self):
+        serializer = BedSerializer()
+        serializer.instance = None
+        with self.assertRaisesMessage(ValidationError, "admission or bed transfer"):
+            serializer.validate({"status": "occupied"})
 
 
 class AdmissionOwnScopeTests(TestCase):

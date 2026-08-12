@@ -193,11 +193,12 @@ class BillPaymentSerializer(serializers.ModelSerializer):
             "bill_number", "patient_name", "encounter_number",
             "amount",
             "payment_mode", "payment_mode_label",
+            "payment_group_id", "receipt_number",
             "payment_date", "notes",
             "recorded_by_user_id",
             "created_at", "updated_at",
         ]
-        read_only_fields = ["id", "tenant_id", "created_at", "updated_at"]
+        read_only_fields = ["id", "tenant_id", "payment_group_id", "receipt_number", "created_at", "updated_at"]
 
     def get_bill_type_label(self, obj) -> str:
         return obj.get_bill_type_display()

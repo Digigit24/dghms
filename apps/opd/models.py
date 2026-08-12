@@ -320,6 +320,55 @@ class Visit(models.Model):
         self.save()
 
 
+class OPDBillSequence(models.Model):
+    """Per-tenant-per-day counter backing OPDBill.generate_bill_number().
+
+    One row per (tenant_id, bill_date, prefix). Locking and incrementing a
+    single existing row is safe under concurrency in a way that
+    scanning-and-locking a growing set of OPDBill rows is not: PostgreSQL's
+    row-level lock wait always hands a blocked transaction the *latest
+    committed* version of the specific row it was waiting on, so every
+    concurrent caller sees the previous caller's increment. Do not read this
+    table directly for bill numbers — only OPDBillSequence.next_bill_number()
+    should touch it.
+    """
+
+    tenant_id = models.UUIDField(db_index=True)
+    bill_date = models.DateField(db_index=True)
+    prefix = models.CharField(max_length=30, default='OPD-BILL')
+    last_sequence = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        db_table = 'opd_bill_sequences'
+        unique_together = [['tenant_id', 'bill_date', 'prefix']]
+
+    def __str__(self):
+        return f"{self.prefix}/{self.bill_date}: {self.last_sequence}"
+
+    @classmethod
+    def next_bill_number(cls, tenant_id, bill_date, prefix):
+        """Atomically claim the next sequence number and format it.
+
+        Must be called inside a transaction.atomic() block — OPDBill.save()
+        already provides one.
+        """
+        # get_or_create() is itself concurrency-safe: Django wraps the
+        # insert attempt in its own atomic block and falls back to get() if
+        # a concurrent caller's insert wins the race for the first row.
+        cls.objects.get_or_create(tenant_id=tenant_id, bill_date=bill_date, prefix=prefix)
+
+        counter = (
+            cls.objects
+            .select_for_update()
+            .get(tenant_id=tenant_id, bill_date=bill_date, prefix=prefix)
+        )
+        counter.last_sequence += 1
+        counter.save(update_fields=['last_sequence'])
+
+        date_str = bill_date.strftime('%Y%m%d')
+        return f"{prefix}/{date_str}/{counter.last_sequence:03d}"
+
+
 class OPDBill(models.Model):
     """
     OPD Bill Model - Consultation billing.
@@ -346,6 +395,7 @@ class OPDBill(models.Model):
         ('card', 'Card'),
         ('upi', 'UPI'),
         ('bank', 'Bank Transfer'),
+        ('online', 'Online'),
         ('razorpay', 'Razorpay'),
         ('multiple', 'Multiple Modes'),
     ]
@@ -554,44 +604,27 @@ class OPDBill(models.Model):
     def generate_bill_number(tenant_id):
         """Generate unique bill number per tenant: OPD-BILL/YYYYMMDD/###
 
-        Uses select_for_update() to serialise concurrent bill creation for
-        the same tenant+date, eliminating the race condition that caused
-        duplicate key violations.  Must be called inside a transaction.atomic()
-        block (which save() already provides).
+        Delegates to OPDBillSequence, which locks a single per-tenant-per-day
+        counter row rather than scanning+locking every existing OPDBill row
+        for today. Must be called inside a transaction.atomic() block (which
+        save() already provides).
 
-        Uses Django ORM (not a raw cursor) so Django's connection management
-        calls ensure_connection() automatically — preventing InterfaceError
-        when the underlying psycopg2 connection has been dropped.
+        The previous "select_for_update() over existing rows, then take
+        max+1" approach had a phantom-read gap: a transaction that blocks on
+        FOR UPDATE waiting for a concurrent writer only re-evaluates the ROWS
+        IT ORIGINALLY MATCHED once unblocked — it does not see new rows the
+        other transaction just inserted and committed. Under concurrent bill
+        creation this meant every blocked transaction woke up computing the
+        SAME "next" number the transaction ahead of it just took, so
+        collisions cascaded until OPDBill.save()'s retry budget (10 attempts)
+        was exhausted and the request failed with a 409. Locking one stable
+        counter row instead means every waiter reads the latest committed
+        value on wake-up, so collisions cannot happen.
         """
         from datetime import date
 
         today = date.today()
-        date_str = today.strftime('%Y%m%d')
-        bill_prefix = f"OPD-BILL/{date_str}/"
-
-        # select_for_update() acquires row-level locks on every matching row —
-        # same semantics as the old "SELECT ... FOR UPDATE" raw query.
-        existing_numbers = (
-            OPDBill.objects
-            .filter(
-                tenant_id=tenant_id,
-                bill_date__date=today,
-                bill_number__startswith=bill_prefix,
-            )
-            .order_by('bill_number')
-            .select_for_update()
-            .values_list('bill_number', flat=True)
-        )
-
-        today_count = 1
-        for bill_number in existing_numbers:
-            try:
-                sequence = int(bill_number.split('/')[-1])
-                today_count = max(today_count, sequence + 1)
-            except (ValueError, IndexError):
-                continue
-
-        return f"{bill_prefix}{today_count:03d}"
+        return OPDBillSequence.next_bill_number(tenant_id, today, 'OPD-BILL')
 
     def _calculate_derived_totals(self):
         """
@@ -743,6 +776,10 @@ class Service(models.Model):
         validators=[MinValueValidator(Decimal('0.00'))]
     )
     description = models.TextField(blank=True)
+    is_mediclaim_available = models.BooleanField(
+        default=False,
+        help_text="Whether this service is claimable under Mediclaim/TPA insurance"
+    )
 
     # Status
     is_active = models.BooleanField(default=True)
@@ -1144,6 +1181,7 @@ class OPDBillItem(models.Model):
         ('Radiology', 'Radiology'),
         ('Procedure', 'Procedure'),
         ('Package', 'Package'),
+        ('Service', 'Service'),
         ('Therapy', 'Therapy'),
         ('Other', 'Other'),
     ]
