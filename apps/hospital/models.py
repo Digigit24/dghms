@@ -108,6 +108,23 @@ class Hospital(models.Model):
         help_text='Prefix used for Daycare admission, billing, and discharge documents.'
     )
 
+    # --- IPD billing mode -------------------------------------------------
+    # "multiple": unlimited IPDBilling rows per admission (existing/default
+    # behaviour). "single_accumulated": IPDBillingViewSet.create() rejects a
+    # new non-mediclaim bill once one already exists for the admission — all
+    # further charges must be added as line items on that one bill instead.
+    # Mediclaim bills are always exempt from the cap, in both modes.
+    IPD_BILLING_MODE_CHOICES = [
+        ('multiple', 'Multiple Bills'),
+        ('single_accumulated', 'Single Accumulated Bill'),
+    ]
+    ipd_billing_mode = models.CharField(
+        max_length=20,
+        choices=IPD_BILLING_MODE_CHOICES,
+        default='multiple',
+        help_text="Whether IPD admissions may have multiple bills, or a single accumulated bill.",
+    )
+
     # --- UI preference ------------------------------------------------------
     # Tenant-wide (shared across all users of this tenant) — which navigation
     # layout the frontend should render: horizontal top nav or vertical sidebar.

@@ -42,6 +42,7 @@ from .rendering import (
     FORM_OPD_BILL,
     FORM_OPD_VISIT,
     FORM_IPD_BILL,
+    FORM_IPD_ADMISSION_STATEMENT,
     FORM_OPD_PAYMENT_RECEIPT,
     FORM_IPD_PAYMENT_RECEIPT,
     MAX_DOCUMENT_BATCH_SIZE,
@@ -81,7 +82,10 @@ class CanViewPrintSource(BasePermission):
 
     def has_permission(self, request, view) -> bool:
         form_code = request.query_params.get("form") or (request.data or {}).get("form")
-        if form_code in (FORM_ADMISSION, FORM_IPD_BILL, FORM_IPD_PAYMENT_RECEIPT, FORM_DISCHARGE_SUMMARY):
+        if form_code in (
+            FORM_ADMISSION, FORM_IPD_BILL, FORM_IPD_PAYMENT_RECEIPT,
+            FORM_DISCHARGE_SUMMARY, FORM_IPD_ADMISSION_STATEMENT,
+        ):
             return check_permission(request, "hms.ipd.view")
         if form_code in (FORM_OPD_VISIT, FORM_OPD_BILL, FORM_OPD_PAYMENT_RECEIPT):
             return check_permission(request, HMSPermissions.OPD_VIEW)

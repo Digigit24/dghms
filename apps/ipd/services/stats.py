@@ -205,12 +205,16 @@ def compute_billing_statistics(
 
     Returns the ``data`` dict of ``GET /api/ipd/billings/statistics/``.
 
-    NOTE: IPDBilling.PAYMENT_STATUS_CHOICES is only unpaid/partial/paid —
-    'cancelled_amount' has no matching status and always resolves to 0; it is
-    kept in the response shape for frontend (IPDBillStats) compatibility.
-    The Sum() output alias must never be the same string as the field it
-    sums (Django resolves aggregate kwargs by adding each alias into
-    query.annotations before resolving its source expression).
+    NOTE: IPDBilling.PAYMENT_STATUS_CHOICES is only unpaid/partial/paid — no
+    'cancelled' status exists, so 'cancelled_amount' is always 0; it is kept
+    in the response shape for frontend (IPDBillStats) compatibility.
+    paid_amount sums received_amount unconditionally (matching
+    apps.opd.services.stats.compute_bill_statistics) rather than filtering
+    on payment_status=='paid' — the previous filtered version undercounted
+    money already received on partially-paid bills. The Sum() output alias
+    must never be the same string as the field it sums (Django resolves
+    aggregate kwargs by adding each alias into query.annotations before
+    resolving its source expression).
     """
     from apps.ipd.models import IPDBilling
 
@@ -223,12 +227,12 @@ def compute_billing_statistics(
     agg = qs.aggregate(
         total_bills=Count('id'),
         total_amount_sum=Sum('total_amount'),
-        paid_amount=Sum('received_amount', filter=Q(payment_status='paid')),
+        paid_amount=Sum('received_amount'),
         pending_amount=Sum('balance_amount', filter=Q(payment_status__in=['unpaid', 'partial'])),
-        cancelled_amount=Sum('total_amount', filter=Q(payment_status='cancelled')),
     )
     agg['total_amount'] = agg.pop('total_amount_sum')
-    for key in ('total_amount', 'paid_amount', 'pending_amount', 'cancelled_amount'):
+    agg['cancelled_amount'] = 0
+    for key in ('total_amount', 'paid_amount', 'pending_amount'):
         if agg[key] is None:
             agg[key] = 0
 

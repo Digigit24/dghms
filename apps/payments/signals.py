@@ -126,6 +126,33 @@ def sync_bill_payment_delete_to_source_bill(sender, instance, **kwargs):
     _sync_bill_from_bill_payments(instance, allow_decrease=True)
 
 
+def _sync_admission_rollup_for_advance(instance):
+    """Recompute the admission's billing rollup for an advance ledger write.
+
+    'advance' rows aren't linked to a bill (admission FK, ipd_bill null), so
+    they fall outside _sync_bill_from_bill_payments — this covers
+    total_advance_paid/advance_applied/advance_balance whenever an advance
+    row (or its applied_amount) is created, updated, or deleted.
+    """
+    if instance.bill_type != 'advance' or not instance.admission_id:
+        return
+    from apps.ipd.models import Admission
+
+    admission = Admission.objects.filter(pk=instance.admission_id).first()
+    if admission:
+        admission.recompute_billing_rollup()
+
+
+@receiver(post_save, sender='payments.BillPayment')
+def sync_advance_payment_to_admission(sender, instance, created, **kwargs):
+    _sync_admission_rollup_for_advance(instance)
+
+
+@receiver(post_delete, sender='payments.BillPayment')
+def sync_advance_payment_delete_to_admission(sender, instance, **kwargs):
+    _sync_admission_rollup_for_advance(instance)
+
+
 # Optional: Handle partial payments
 @receiver(post_save, sender='opd.OPDBill')
 def create_transaction_for_partial_opd_payment(sender, instance, **kwargs):

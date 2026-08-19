@@ -94,6 +94,47 @@ class HospitalConfigAuthTest(APITestCase):
         self.assertEqual(letterhead['right_image']['height_px'], 72)
 
 
+class IpdBillingModeConfigTest(APITestCase):
+    """A) Hospital.ipd_billing_mode is readable/writable via GET/PATCH /api/hospital/config/."""
+
+    def setUp(self):
+        self.tenant_id = uuid.uuid4()
+        self.user_id = uuid.uuid4()
+        self.hospital = Hospital.objects.create(
+            tenant_id=self.tenant_id, name='Test Hospital', type='hospital',
+            email='admin@hospital.com', phone='0000000000', address='', city='',
+            state='', country='India', pincode='000000', working_hours='24/7',
+            has_emergency=True, has_pharmacy=True, has_laboratory=True,
+        )
+        token = _make_token(self.tenant_id, self.user_id)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+    def test_defaults_to_multiple(self):
+        response = self.client.get('/api/hospital/config/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['data']['ipd_billing_mode'], 'multiple')
+
+    def test_patch_updates_mode(self):
+        token = jwt.encode(
+            {
+                "user_id": str(self.user_id), "email": "x@test.com",
+                "tenant_id": str(self.tenant_id), "tenant_slug": "test",
+                "is_super_admin": True, "permissions": {}, "enabled_modules": ["hms"],
+                "user_type": "staff", "is_patient": False,
+                "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+            },
+            settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM,
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        response = self.client.patch(
+            '/api/hospital/config/', {'ipd_billing_mode': 'single_accumulated'}, format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.hospital.refresh_from_db()
+        self.assertEqual(self.hospital.ipd_billing_mode, 'single_accumulated')
+
+
 class LetterheadImageSlotContractTest(SimpleTestCase):
     def setUp(self):
         self.legacy_config = {

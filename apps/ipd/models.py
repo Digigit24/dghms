@@ -354,6 +354,37 @@ class Admission(models.Model):
         help_text="User who discharged the patient"
     )
 
+    # --- Billing rollup (denormalized, kept in sync by recompute_billing_rollup) ---
+    # Written by apps.ipd.signals (on IPDBilling/IPDBillItem save/delete) and
+    # apps.payments.signals (on advance BillPayment save/delete) — never set
+    # directly by API callers. Matches IPDBilling.total_amount's precision
+    # (max_digits=12, decimal_places=2) since these are admission-level sums
+    # of bill-level amounts.
+    total_charges = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        help_text="Sum of payable_amount across this admission's non-mediclaim IPDBilling rows.",
+    )
+    total_advance_paid = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        help_text="Sum of BillPayment.amount for bill_type='advance' rows on this admission.",
+    )
+    advance_applied = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        help_text="Sum of advance BillPayment.applied_amount for this admission (already moved onto a bill).",
+    )
+    advance_balance = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        help_text="total_advance_paid - advance_applied.",
+    )
+    total_received = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        help_text="Sum of received_amount across non-mediclaim bills, plus advance_applied.",
+    )
+    balance_due = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        help_text="total_charges - total_received.",
+    )
+
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -523,6 +554,57 @@ class Admission(models.Model):
         if self.bed:
             self.bed.mark_available()
 
+    def recompute_billing_rollup(self):
+        """Recompute and persist the six billing-rollup fields.
+
+        Called by apps.ipd.signals (IPDBilling save/delete) and
+        apps.payments.signals (advance BillPayment save/delete) — never
+        needs to be called directly by API code, except when a caller
+        (e.g. apply_advance) needs the freshly-recomputed values in the same
+        request before relying on them.
+
+        Uses a queryset .update() rather than self.save() so this never
+        re-enters Admission.save()'s admission_id-generation / bed-occupancy
+        logic and never re-triggers a post_save signal on Admission (there
+        isn't one for this model, but .update() keeps that invariant cheap
+        to reason about either way).
+        """
+        from apps.payments.models import BillPayment
+
+        bill_aggregates = self.ipd_bills.exclude(bill_type='mediclaim').aggregate(
+            total_charges=models.Sum('payable_amount'),
+            bills_received=models.Sum('received_amount'),
+        )
+        total_charges = bill_aggregates['total_charges'] or Decimal('0.00')
+        bills_received = bill_aggregates['bills_received'] or Decimal('0.00')
+
+        advance_aggregates = BillPayment.objects.filter(
+            tenant_id=self.tenant_id, bill_type='advance', admission=self,
+        ).aggregate(
+            total_advance_paid=models.Sum('amount'),
+            advance_applied=models.Sum('applied_amount'),
+        )
+        total_advance_paid = advance_aggregates['total_advance_paid'] or Decimal('0.00')
+        advance_applied = advance_aggregates['advance_applied'] or Decimal('0.00')
+        advance_balance = total_advance_paid - advance_applied
+        total_received = bills_received + advance_applied
+        balance_due = total_charges - total_received
+
+        Admission.objects.filter(pk=self.pk).update(
+            total_charges=total_charges,
+            total_advance_paid=total_advance_paid,
+            advance_applied=advance_applied,
+            advance_balance=advance_balance,
+            total_received=total_received,
+            balance_due=balance_due,
+        )
+        self.total_charges = total_charges
+        self.total_advance_paid = total_advance_paid
+        self.advance_applied = advance_applied
+        self.advance_balance = advance_balance
+        self.total_received = total_received
+        self.balance_due = balance_due
+
 
 class DischargePacket(models.Model):
     """Versioned, clinician-reviewable discharge summary and source snapshot."""
@@ -640,6 +722,51 @@ class BedTransfer(models.Model):
             self.admission.save(update_fields=['bed', 'updated_at'])
 
 
+class IPDBillingSequence(models.Model):
+    """Per-tenant-per-day counter backing IPDBilling._generate_bill_number().
+
+    Mirrors ``apps.opd.models.OPDBillSequence`` exactly: locking and
+    incrementing a single existing row is race-safe in a way that scanning
+    existing IPDBilling rows for "count + 1" is not (a blocked FOR UPDATE
+    waiter only re-evaluates the rows it originally matched on wake-up, never
+    rows a concurrent transaction just inserted — the classic phantom-read
+    collision). Do not read this table directly for bill numbers — only
+    ``next_bill_number()`` should touch it.
+    """
+
+    tenant_id = models.UUIDField(db_index=True)
+    bill_date = models.DateField(db_index=True)
+    prefix = models.CharField(max_length=30, default='IPD-BILL')
+    last_sequence = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        db_table = 'ipd_bill_sequences'
+        unique_together = [['tenant_id', 'bill_date', 'prefix']]
+
+    def __str__(self):
+        return f"{self.prefix}/{self.bill_date}: {self.last_sequence}"
+
+    @classmethod
+    def next_bill_number(cls, tenant_id, bill_date, prefix):
+        """Atomically claim the next sequence number and format it.
+
+        Must be called inside a transaction.atomic() block — IPDBilling.save()
+        already provides one.
+        """
+        cls.objects.get_or_create(tenant_id=tenant_id, bill_date=bill_date, prefix=prefix)
+
+        counter = (
+            cls.objects
+            .select_for_update()
+            .get(tenant_id=tenant_id, bill_date=bill_date, prefix=prefix)
+        )
+        counter.last_sequence += 1
+        counter.save(update_fields=['last_sequence'])
+
+        date_str = bill_date.strftime('%Y%m%d')
+        return f"{prefix}/{date_str}/{counter.last_sequence:03d}"
+
+
 class IPDBilling(models.Model):
     """
     IPD Billing Model - Billing for IPD admissions.
@@ -697,9 +824,8 @@ class IPDBilling(models.Model):
 
     bill_number = models.CharField(
         max_length=50,
-        unique=True,
         blank=True,
-        help_text="Unique bill identifier (e.g., IPD-BILL/20231223/001)"
+        help_text="Unique (per tenant) bill identifier (e.g., IPD-BILL/20231223/001)"
     )
     bill_date = models.DateTimeField(
         default=timezone.now,
@@ -783,6 +909,16 @@ class IPDBilling(models.Model):
         choices=PAYMENT_STATUS_CHOICES,
         default='unpaid'
     )
+    # Stamped only on an unpaid/partial -> paid transition (never on a save
+    # that keeps payment_status=='paid'), so it marks the moment of the
+    # *last* such transition. IPDBillItemViewSet uses it to lock only items
+    # that existed before that moment — items added afterwards (e.g. new
+    # charges on a single_accumulated bill that already reached 'paid')
+    # stay editable. See _calculate_derived_totals() below.
+    paid_transition_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Timestamp of this bill's most recent unpaid/partial -> paid transition.",
+    )
 
     # Audit Fields
     billed_by_id = models.UUIDField(
@@ -801,6 +937,7 @@ class IPDBilling(models.Model):
         ordering = ['-bill_date']
         verbose_name = 'IPD Bill'
         verbose_name_plural = 'IPD Bills'
+        unique_together = [['tenant_id', 'bill_number']]
         indexes = [
             models.Index(fields=['tenant_id']),
             models.Index(fields=['tenant_id', 'payment_status']),
@@ -842,7 +979,7 @@ class IPDBilling(models.Model):
 
                         # Then calculate and save derived fields
                         self._calculate_derived_totals()
-                        save_kwargs['update_fields'] = ['total_amount', 'discount_amount', 'payable_amount', 'balance_amount', 'payment_status']
+                        save_kwargs['update_fields'] = ['total_amount', 'discount_amount', 'payable_amount', 'balance_amount', 'payment_status', 'paid_transition_at']
                         super().save(*args, **save_kwargs)
 
                     elif is_signal_save:
@@ -856,13 +993,13 @@ class IPDBilling(models.Model):
 
                         # Then recalculate derived fields and save them
                         self._calculate_derived_totals()
-                        save_kwargs['update_fields'] = ['total_amount', 'discount_amount', 'payable_amount', 'balance_amount', 'payment_status']
+                        save_kwargs['update_fields'] = ['total_amount', 'discount_amount', 'payable_amount', 'balance_amount', 'payment_status', 'paid_transition_at']
                         super().save(*args, **save_kwargs)
 
                 return
             except IntegrityError as exc:
                 last_exception = exc
-                if 'ipd_bill_number_idx' in str(exc) or 'ipd_billings_bill_number_key' in str(exc):
+                if 'bill_number' in str(exc):
                     self.bill_number = None
                     continue
                 raise
@@ -873,15 +1010,15 @@ class IPDBilling(models.Model):
     def _generate_bill_number(self):
         """Generate unique bill number: IPD-BILL/YYYYMMDD/###
 
-        Scoped per tenant_id (CLAUDE.md tenant isolation rules) — previously
-        this counted ALL bills for the day across every tenant, which both
-        leaked cross-tenant sequence information and made numbering
-        non-deterministic per tenant. Must be an instance method (not
-        @staticmethod) since it needs self.tenant_id.
+        Scoped per tenant_id (CLAUDE.md tenant isolation rules) via
+        IPDBillingSequence — a single locked per-tenant-per-day counter row,
+        not a scan-existing-rows-and-count query (see IPDBillingSequence's
+        docstring for why that pattern collides under concurrency). Must be
+        an instance method (not @staticmethod) since it needs
+        self.tenant_id/self.admission.
         """
         from datetime import date
         today = date.today()
-        date_str = today.strftime('%Y%m%d')
 
         base_prefix = 'IPD-BILL'
         if self.admission.admission_type == 'daycare':
@@ -894,14 +1031,7 @@ class IPDBilling(models.Model):
             )
             base_prefix = f"{daycare_prefix}-BILL"
 
-        # Get count of same-prefix bills for today, scoped to this tenant only.
-        today_count = IPDBilling.objects.filter(
-            tenant_id=self.tenant_id,
-            bill_date__date=today,
-            bill_number__startswith=f"{base_prefix}/",
-        ).count() + 1
-
-        return f"{base_prefix}/{date_str}/{today_count:03d}"
+        return IPDBillingSequence.next_bill_number(self.tenant_id, today, base_prefix)
 
     def _calculate_derived_totals(self):
         """
@@ -946,6 +1076,7 @@ class IPDBilling(models.Model):
         # item was ever added). That falsely triggered the BILL_LOCKED guard
         # on bill-item create/update/delete, making it look like there was no
         # way to add items to a fresh bill at all.
+        previous_status = self.payment_status
         if self.payable_amount > Decimal('0.00') and self.received_amount >= self.payable_amount:
             self.payment_status = 'paid'
             self.balance_amount = Decimal('0.00')
@@ -953,6 +1084,13 @@ class IPDBilling(models.Model):
             self.payment_status = 'partial'
         else:
             self.payment_status = 'unpaid'
+
+        # Stamp the transition moment only when newly entering 'paid' — not
+        # on every save that keeps it 'paid' — so IPDBillItemViewSet can lock
+        # only items that existed before THIS transition (see
+        # paid_transition_at's field docstring above).
+        if self.payment_status == 'paid' and previous_status != 'paid':
+            self.paid_transition_at = timezone.now()
 
     def record_payment(self, amount, mode='cash', details=None):
         """Record a payment for this bill."""

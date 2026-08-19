@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>IPD Admission Statement</title>
+{% include "print/_print_base.css" %}
+<style>
+    .totals-block {
+        margin-top: 10px;
+        display: flex;
+        justify-content: flex-end;
+    }
+
+    .totals-table {
+        width: 280px;
+        font-size: 8.5pt;
+    }
+
+    .totals-table td {
+        padding: 2px 4px;
+    }
+
+    .totals-table .totals-label {
+        text-align: left;
+        color: #374151;
+    }
+
+    .totals-table .totals-value {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .totals-table .totals-final td {
+        border-top: 1.5px solid #1f2937;
+        font-weight: 700;
+        padding-top: 4px;
+    }
+
+    .bill-group-title {
+        font-weight: 700;
+        font-size: 8.5pt;
+        margin-top: 8px;
+    }
+</style>
+</head>
+<body>
+<div class="print-page{% if page_break_before %} page-break-before{% endif %}">
+    {% include "print/_print_footer.html" %}
+    {% include "print/_letterhead.html" %}
+
+    <div class="form-title">IPD Admission Statement</div>
+
+    <div class="patient-info-bar">
+        <div><span class="field-label">UHID:</span> {{ uhid }}</div>
+        <div><span class="field-label">IPD No:</span> {{ ipd_no }}</div>
+        <div><span class="field-label">Patient Name:</span> {{ patient_name }}</div>
+        <div><span class="field-label">Age / Gender:</span> {{ age }} / {{ gender }}</div>
+    </div>
+
+    <div class="section-title">Admission Details</div>
+    <div class="field-grid-2col">
+        <div class="field-row"><span class="field-label">Contact:</span> <span class="field-value">{{ contact }}</span></div>
+        <div class="field-row"><span class="field-label">Ward / Bed:</span> <span class="field-value">{{ ward.name }}{% if bed %} / {{ bed.bed_number }}{% endif %}</span></div>
+        <div class="field-row"><span class="field-label">Admission Date:</span> <span class="field-value">{{ admission_date|date:"d M Y, h:i A" }}</span></div>
+        {% if discharge_date %}
+        <div class="field-row"><span class="field-label">Discharge Date:</span> <span class="field-value">{{ discharge_date|date:"d M Y, h:i A" }}</span></div>
+        {% endif %}
+    </div>
+
+    <div class="section-title">Bills</div>
+    {% for bill in bills %}
+    <div class="bill-group-title">{{ bill.bill_number }} — {{ bill.bill_date|date:"d M Y" }}</div>
+    <table class="bordered dense">
+        <thead>
+            <tr>
+                <th>Item</th>
+                <th>Source</th>
+                <th>Qty</th>
+                <th>Unit Price</th>
+                <th>Total</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in bill.items.all %}
+            <tr>
+                <td>{{ item.item_name }}</td>
+                <td>{{ item.get_source_display }}</td>
+                <td>{{ item.quantity }}</td>
+                <td>{{ item.unit_price }}</td>
+                <td>{{ item.total_price }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="5" class="text-muted">No items on this bill.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div class="totals-block">
+        <table class="totals-table">
+            <tr>
+                <td class="totals-label">Payable Amount</td>
+                <td class="totals-value">{{ bill.payable_amount }}</td>
+            </tr>
+            <tr>
+                <td class="totals-label">Received</td>
+                <td class="totals-value">{{ bill.received_amount }}</td>
+            </tr>
+            <tr>
+                <td class="totals-label">Balance</td>
+                <td class="totals-value">{{ bill.balance_amount }}</td>
+            </tr>
+            <tr>
+                <td class="totals-label">Status</td>
+                <td class="totals-value">{{ bill.get_payment_status_display }}</td>
+            </tr>
+        </table>
+    </div>
+    {% empty %}
+    <div class="text-muted">No bills recorded for this admission.</div>
+    {% endfor %}
+
+    <div class="section-title">Consolidated Summary</div>
+    <div class="totals-block">
+        <table class="totals-table">
+            <tr>
+                <td class="totals-label">Grand Total (all bills)</td>
+                <td class="totals-value">{{ grand_total }}</td>
+            </tr>
+            <tr>
+                <td class="totals-label">Received (direct payments)</td>
+                <td class="totals-value">{{ total_received_from_bills }}</td>
+            </tr>
+            <tr>
+                <td class="totals-label">Advance Applied</td>
+                <td class="totals-value">{{ advance_applied }}</td>
+            </tr>
+            <tr>
+                <td class="totals-label">Total Received</td>
+                <td class="totals-value">{{ total_received }}</td>
+            </tr>
+            <tr>
+                <td class="totals-label">Total Advance Paid</td>
+                <td class="totals-value">{{ total_advance_paid }}</td>
+            </tr>
+            <tr>
+                <td class="totals-label">Advance Balance (unapplied)</td>
+                <td class="totals-value">{{ advance_balance }}</td>
+            </tr>
+            <tr class="totals-final">
+                <td class="totals-label">Net Balance Due</td>
+                <td class="totals-value">{{ net_balance }}</td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="signature-row">
+        <div class="signature-box">Patient / Guardian Signature</div>
+        <div class="signature-box">Billing Officer Signature</div>
+    </div>
+</div>
+</body>
+</html>

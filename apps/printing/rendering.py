@@ -58,6 +58,7 @@ FORM_OPD_BILL = "opd_bill"
 FORM_OPD_PAYMENT_RECEIPT = "opd_payment_receipt"
 FORM_IPD_PAYMENT_RECEIPT = "ipd_payment_receipt"
 FORM_DISCHARGE_SUMMARY = "discharge_summary"
+FORM_IPD_ADMISSION_STATEMENT = "ipd_admission_statement"
 
 REGISTERED_FORM_CODES = {
     FORM_ADMISSION,
@@ -72,6 +73,7 @@ REGISTERED_FORM_CODES = {
     FORM_OPD_PAYMENT_RECEIPT,
     FORM_IPD_PAYMENT_RECEIPT,
     FORM_DISCHARGE_SUMMARY,
+    FORM_IPD_ADMISSION_STATEMENT,
 }
 
 # Form codes whose record_id is a BillPayment.payment_group_id (a UUID)
@@ -103,6 +105,7 @@ _TEMPLATE_BY_FORM_CODE = {
     FORM_OPD_PAYMENT_RECEIPT: "print/opd_payment_receipt.html",
     FORM_IPD_PAYMENT_RECEIPT: "print/ipd_payment_receipt.html",
     FORM_DISCHARGE_SUMMARY: "print/discharge_summary.html",
+    FORM_IPD_ADMISSION_STATEMENT: "print/ipd_admission_statement.html",
 }
 
 # Monitoring chart time slots: 2-hour intervals across a 24h cycle. No fixed
@@ -502,6 +505,57 @@ def _ipd_bill_context(tenant_id: uuid.UUID, record_id: int) -> dict[str, Any]:
         "tpa_name": admission.tpa_name,
         "claim_status": admission.get_claim_status_display(),
         "claim_reference_number": admission.claim_reference_number,
+    }
+
+
+def _admission_statement_context(tenant_id: uuid.UUID, record_id: int) -> dict[str, Any]:
+    """Build the template context for the consolidated IPD Admission Statement.
+
+    Aggregates every non-mediclaim IPDBilling row for the admission into one
+    printable document — grand total, total received, advance applied, net
+    balance, and a per-bill breakdown. Mirrors _ipd_bill_context's
+    patient/admission field set so the statement template can share the same
+    layout/CSS classes as ipd_bill.html. In single_accumulated mode there is
+    at most one such bill, so this naturally degenerates to showing that one
+    bill — no special-casing needed.
+    """
+    admission = _resolve_admission(tenant_id, record_id)
+    patient = admission.patient
+    bills = list(
+        IPDBilling.objects.filter(tenant_id=tenant_id, admission=admission)
+        .exclude(bill_type='mediclaim')
+        .prefetch_related('items')
+        .order_by('bill_date', 'id')
+    )
+
+    grand_total = sum((bill.payable_amount for bill in bills), Decimal("0.00"))
+    total_received_from_bills = sum((bill.received_amount for bill in bills), Decimal("0.00"))
+    advance_applied = admission.advance_applied or Decimal("0.00")
+    total_received = total_received_from_bills + advance_applied
+    net_balance = grand_total - total_received
+
+    return {
+        "admission": admission,
+        "bills": bills,
+        "patient": patient,
+        "uhid": patient.patient_id,
+        "ipd_no": admission.admission_id,
+        "patient_name": patient.full_name,
+        "age": patient.age,
+        "gender": patient.get_gender_display() if patient.gender else "",
+        "contact": patient.mobile_primary,
+        "address": patient.full_address,
+        "admission_date": admission.admission_date,
+        "discharge_date": admission.discharge_date,
+        "ward": admission.ward,
+        "bed": admission.bed,
+        "grand_total": grand_total,
+        "total_received_from_bills": total_received_from_bills,
+        "advance_applied": advance_applied,
+        "total_received": total_received,
+        "net_balance": net_balance,
+        "total_advance_paid": admission.total_advance_paid or Decimal("0.00"),
+        "advance_balance": admission.advance_balance or Decimal("0.00"),
     }
 
 
@@ -1067,6 +1121,8 @@ def build_print_context(
         context.update(_opd_visit_context(tenant_id, record_id))
     elif form_code == FORM_IPD_BILL:
         context.update(_ipd_bill_context(tenant_id, record_id))
+    elif form_code == FORM_IPD_ADMISSION_STATEMENT:
+        context.update(_admission_statement_context(tenant_id, record_id))
     elif form_code == FORM_OPD_BILL:
         context.update(_opd_bill_context(tenant_id, record_id))
     elif form_code == FORM_OPD_PAYMENT_RECEIPT:

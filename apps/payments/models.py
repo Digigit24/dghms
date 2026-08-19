@@ -1,5 +1,6 @@
 from datetime import datetime, date
 from django.db import models, transaction
+from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
@@ -316,6 +317,7 @@ class BillPayment(models.Model):
         ('opd', 'OPD'),
         ('ipd', 'IPD'),
         ('daycare', 'Daycare'),
+        ('advance', 'Advance'),
     ]
     PAYMENT_MODE_CHOICES = [
         ('cash', 'Cash'),
@@ -334,6 +336,7 @@ class BillPayment(models.Model):
         'opd': 'OPD-RCPT',
         'ipd': 'IPD-RCPT',
         'daycare': 'DC-RCPT',
+        'advance': 'ADV-RCPT',
     }
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -344,6 +347,15 @@ class BillPayment(models.Model):
     )
     ipd_bill = models.ForeignKey(
         'ipd.IPDBilling', null=True, blank=True, on_delete=models.SET_NULL, related_name='bill_payments'
+    )
+    admission = models.ForeignKey(
+        'ipd.Admission', null=True, blank=True, on_delete=models.SET_NULL, related_name='advance_payments',
+        help_text="Set only for bill_type='advance' rows: an unapplied (or partially applied) advance deposit for this admission.",
+    )
+    applied_amount = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal('0.00'),
+        validators=[MinValueValidator(Decimal('0.00'))],
+        help_text="bill_type='advance' only: portion of this deposit already applied to a bill via apply_advance.",
     )
     bill_number = models.CharField(max_length=60, blank=True)
     patient_name = models.CharField(max_length=255, blank=True)
@@ -379,11 +391,28 @@ class BillPayment(models.Model):
             models.Index(fields=["tenant_id", "payment_mode"], name="billpay_tenant_mode_idx"),
             models.Index(fields=["opd_bill"], name="billpay_opd_bill_idx"),
             models.Index(fields=["ipd_bill"], name="billpay_ipd_bill_idx"),
+            models.Index(fields=["admission"], name="billpay_admission_idx"),
             models.Index(fields=["payment_group_id"], name="billpay_group_idx"),
         ]
 
     def __str__(self):
         return f"BillPayment {self.id} [{self.bill_type}] {self.amount}"
+
+    def clean(self):
+        """Enforce bill_type/reference-field pairing.
+
+        'advance' rows are unapplied (or partially applied) deposits against
+        an admission, not a specific bill — they must carry admission and
+        must NOT carry ipd_bill (apply_advance moves money onto a bill's
+        received_amount directly; it never repoints this row). opd/ipd/
+        daycare rows keep their existing (unenforced-here) shape.
+        """
+        super().clean()
+        if self.bill_type == 'advance':
+            if not self.admission_id:
+                raise ValidationError({'admission': "Advance payments require an admission."})
+            if self.ipd_bill_id:
+                raise ValidationError({'ipd_bill': "Advance payments cannot be linked to a bill directly."})
 
     def save(self, *args, **kwargs):
         """Auto-generate receipt_number on first save (never on later edits).
@@ -394,6 +423,7 @@ class BillPayment(models.Model):
         sequence counter already guarantees every newly generated number is
         collision-free without one.
         """
+        self.clean()
         if not self.receipt_number:
             with transaction.atomic():
                 prefix = self._RECEIPT_PREFIX_BY_BILL_TYPE.get(self.bill_type, 'RCPT')

@@ -9,6 +9,7 @@ from .models import (
     Ward, Bed, Admission, BedTransfer, IPDBilling, IPDBillItem,
     IPDBillTemplate, IPDBillTemplateItem,
 )
+from .services.billing import build_billing_capabilities
 
 # catalog_type -> (app_label, model_name, name_field, price_field, source)
 # 'investigation' maps its own source dynamically based on the Investigation's
@@ -113,6 +114,7 @@ class AdmissionSerializer(TenantMixin, serializers.ModelSerializer):
     ward_name = serializers.ReadOnlyField(source='ward.name')
     bed_number = serializers.ReadOnlyField(source='bed.bed_number')
     length_of_stay = serializers.SerializerMethodField()
+    billing_capabilities = serializers.SerializerMethodField()
 
     class Meta:
         model = Admission
@@ -125,7 +127,8 @@ class AdmissionSerializer(TenantMixin, serializers.ModelSerializer):
             'has_mediclaim', 'tpa_name', 'claim_status',
             'claim_reference_number', 'claim_notes',
             'discharge_date', 'discharge_summary', 'discharge_type', 'status',
-            'length_of_stay', 'created_by_user_id', 'discharged_by_user_id',
+            'length_of_stay', 'billing_capabilities',
+            'created_by_user_id', 'discharged_by_user_id',
             'created_at', 'updated_at'
         ]
         read_only_fields = [
@@ -152,6 +155,10 @@ class AdmissionSerializer(TenantMixin, serializers.ModelSerializer):
     def get_length_of_stay(self, obj):
         return obj.calculate_length_of_stay()
 
+    def get_billing_capabilities(self, obj):
+        mode = self.context.get('hospital_ipd_billing_mode')
+        return build_billing_capabilities(obj, mode)
+
 
 class AdmissionListSerializer(TenantMixin, serializers.ModelSerializer):
     """Serializer for listing admissions — enough for a rich row card without
@@ -176,6 +183,7 @@ class AdmissionListSerializer(TenantMixin, serializers.ModelSerializer):
     # frontend treats differently from "billed but nothing due".
     bill_total = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True, default=None)
     bill_paid = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True, default=None)
+    billing_capabilities = serializers.SerializerMethodField()
 
     class Meta:
         model = Admission
@@ -185,7 +193,7 @@ class AdmissionListSerializer(TenantMixin, serializers.ModelSerializer):
             'doctor_id', 'ward_name', 'bed_number', 'admission_type', 'admission_date', 'discharge_date',
             'status', 'has_mediclaim', 'tpa_name', 'claim_status',
             'claim_reference_number', 'los_days', 'length_of_stay',
-            'bill_total', 'bill_paid', 'created_by_user_id',
+            'bill_total', 'bill_paid', 'billing_capabilities', 'created_by_user_id',
         ]
 
     def get_length_of_stay(self, obj):
@@ -193,6 +201,10 @@ class AdmissionListSerializer(TenantMixin, serializers.ModelSerializer):
         if hasattr(obj, 'los_days') and obj.los_days is not None:
             return obj.los_days
         return obj.calculate_length_of_stay()
+
+    def get_billing_capabilities(self, obj):
+        mode = self.context.get('hospital_ipd_billing_mode')
+        return build_billing_capabilities(obj, mode)
 
 
 class BedTransferSerializer(TenantMixin, serializers.ModelSerializer):
@@ -380,6 +392,33 @@ class IPDBillingSerializer(TenantMixin, serializers.ModelSerializer):
 
     def get_bed_day_info(self, obj):
         return obj.get_bed_day_info()
+
+    def validate(self, data):
+        """Validate bill data — mirrors OPDBillCreateUpdateSerializer.validate()."""
+        if self.instance:
+            # For updates, calculate payable amount from instance + updates
+            total = self.instance.total_amount
+
+            if 'discount_percent' in data and data['discount_percent'] > Decimal('0'):
+                discount_amount = (total * data['discount_percent'] / Decimal('100.00')).quantize(Decimal('0.01'))
+            elif 'discount_amount' in data:
+                discount_amount = data['discount_amount']
+            else:
+                discount_amount = self.instance.discount_amount
+
+            payable_amount = total - discount_amount
+            received = data.get('received_amount', self.instance.received_amount)
+
+            if received > payable_amount:
+                raise serializers.ValidationError({
+                    'received_amount': f'Received amount cannot exceed payable amount ({payable_amount})'
+                })
+        else:
+            # For creates, skip this validation since total will be calculated from items.
+            # The model's save() method will handle this.
+            pass
+
+        return data
 
 
 class IPDBillingListSerializer(IPDBillingSerializer):

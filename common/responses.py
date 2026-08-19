@@ -41,6 +41,29 @@ def error_response(code, message, status=400, field=None, detail=None):
     return Response({"success": False, "error": error_body}, status=status)
 
 
+def billing_error_response(error_code, message, status=400, field_errors=None):
+    """Return the flat error envelope required by the IPD billing-modes /
+    advance-payments contract (frozen across dghms, celiyohms, celiyoapp):
+    ``{success, error_code, message, field_errors?}``.
+
+    Deliberately distinct from :func:`error_response`, which nests under an
+    ``error`` key (``{success, error: {code, message, field, detail}}`` —
+    CLAUDE.md's original architecture standard). Use this helper only for
+    the new/changed IPD billing-modes and advance-payment endpoints that
+    contract governs; everything else keeps using :func:`error_response`.
+
+    Args:
+        error_code: STABLE_UPPER_SNAKE_CASE error code.
+        message: Human-readable error message.
+        status: HTTP status code. Defaults to 400.
+        field_errors: Optional ``{field: [msg, ...]}`` dict.
+    """
+    payload: dict = {"success": False, "error_code": error_code, "message": message}
+    if field_errors:
+        payload["field_errors"] = field_errors
+    return Response(payload, status=status)
+
+
 def action_response(message, status=200, data=None):
     """Return a lightweight action confirmation response.
 

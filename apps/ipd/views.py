@@ -4,6 +4,7 @@ import uuid
 from decimal import Decimal, InvalidOperation
 import openai
 import structlog
+from django.http import HttpResponse
 from rest_framework import viewsets, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -12,14 +13,14 @@ from django_filters.rest_framework import DjangoFilterBackend
 from django.contrib.contenttypes.models import ContentType
 from django.utils import timezone
 from django.db import transaction
-from django.db.models import IntegerField, Count, Q, Avg, Sum
+from django.db.models import IntegerField, Count, Q, Avg, Sum, OuterRef, Subquery
 from django.db.models.expressions import RawSQL
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse, OpenApiExample
 from common.mixins import TenantViewSetMixin
 from common.cache import CeliyoCache
 from common.drf_auth import HMSPermission, HMSPermissionAllowOwnView
 from common import permission_evaluator
-from common.responses import error_response, action_response, success_response
+from common.responses import error_response, action_response, success_response, billing_error_response
 from common import error_codes
 from .models import (
     Ward, Bed, Admission, DischargePacket, BedTransfer, IPDBilling, IPDBillItem,
@@ -38,6 +39,13 @@ from .services.stats import (
     compute_ipd_doctor_stats,
 )
 from .services.discharge import collect_discharge_sections, generate_discharge_narrative
+from .services.billing import (
+    AdvanceApplyError,
+    apply_advance_to_bill,
+    build_billing_capabilities,
+    get_ipd_billing_mode,
+    has_active_non_mediclaim_bill,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -263,6 +271,17 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         the only action whose serializer (AdmissionListSerializer) exposes it.
         """
         today = timezone.now().date()
+        # Scalar correlated subquery (not a Sum()/Count() over the reverse
+        # 'ipd_bills' relation) — unlike bill_total/bill_paid below, this is
+        # safe to add unconditionally here: it never LEFT JOINs in extra
+        # rows, so it can't fan-out 'active'/'doctor_stats' aggregates the
+        # way a Sum() annotation would (see this method's other docstring
+        # note). Backs AdmissionSerializer/AdmissionListSerializer's
+        # billing_capabilities.active_bill_id without an extra query per row.
+        active_bill_subquery = IPDBilling.objects.filter(
+            admission=OuterRef('pk')
+        ).exclude(bill_type='mediclaim').order_by('-bill_date', '-id').values('id')[:1]
+
         queryset = Admission.objects.filter(
             tenant_id=self.request.tenant_id
         ).select_related('patient', 'ward', 'bed').annotate(
@@ -273,7 +292,8 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                 "COALESCE(discharge_date::date, %s) - admission_date::date",
                 (today,),
                 output_field=IntegerField(),
-            )
+            ),
+            _active_bill_id=Subquery(active_bill_subquery, output_field=IntegerField()),
         )
         if (
             self.action in {'list', 'active', 'statistics'}
@@ -315,6 +335,16 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         if self.action == 'list':
             return AdmissionListSerializer
         return AdmissionSerializer
+
+    def get_serializer_context(self):
+        """Resolve the tenant's ipd_billing_mode once per request (not per
+        row) and hand it to AdmissionSerializer/AdmissionListSerializer's
+        billing_capabilities field via context — avoids an N+1 Hospital
+        lookup on the list endpoint.
+        """
+        context = super().get_serializer_context()
+        context['hospital_ipd_billing_mode'] = get_ipd_billing_mode(self.request.tenant_id)
+        return context
 
     def perform_create(self, serializer):
         """Set tenant_id and created_by_user_id automatically."""
@@ -841,6 +871,192 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             'data': rows,
         })
 
+    @extend_schema(
+        summary="Record an advance payment for an admission",
+        description=(
+            "Records money received from the patient/attendant ahead of billing, "
+            "as one or two BillPayment ledger rows (bill_type='advance', linked "
+            "to the admission, not to any specific bill). Use apply_advance to "
+            "later move some or all of it onto a bill's received_amount."
+        ),
+        responses={200: OpenApiResponse(description="Advance recorded"), 400: OpenApiResponse(description="Invalid amount / discharged admission")},
+        tags=['IPD - Billing'],
+    )
+    @action(detail=True, methods=['post'])
+    def record_advance(self, request, pk=None):
+        """POST /ipd/admissions/{id}/record_advance/
+
+        body: { amount, payment_mode, cash_amount?, online_amount?, notes? }
+        """
+        from apps.payments.models import BillPayment
+        from apps.payments.payment_splits import (
+            PaymentEntryError, parse_payment_entries, total_amount, SPLIT_PAYMENT_MODE,
+        )
+
+        admission = self.get_object()
+        if admission.status == 'discharged':
+            return billing_error_response(
+                'ADMISSION_DISCHARGED',
+                'Cannot record an advance payment for a discharged admission.',
+                status=400,
+            )
+
+        payment_mode = request.data.get('payment_mode', 'cash')
+        notes = request.data.get('notes', '')
+        try:
+            entries = parse_payment_entries(request.data, payment_mode)
+        except PaymentEntryError as exc:
+            return billing_error_response('INVALID_AMOUNT', str(exc), status=400)
+
+        patient_name = ''
+        try:
+            patient_name = admission.patient.full_name if admission.patient else ''
+        except Exception:
+            pass
+
+        payment_group_id = uuid.uuid4()
+        created_payments = []
+        with transaction.atomic():
+            for entry_mode, entry_amount in entries:
+                created_payments.append(BillPayment.objects.create(
+                    tenant_id=request.tenant_id,
+                    bill_type='advance',
+                    admission=admission,
+                    patient_name=patient_name,
+                    encounter_number=admission.admission_id,
+                    amount=entry_amount,
+                    payment_mode=entry_mode,
+                    payment_group_id=payment_group_id,
+                    notes=notes,
+                    recorded_by_user_id=request.user_id,
+                ))
+
+        admission.refresh_from_db()
+        log.info(
+            "ipd_advance_recorded",
+            tenant_id=str(request.tenant_id),
+            admission_id=admission.id,
+            amount=str(total_amount(entries)),
+        )
+        return Response({
+            'success': True,
+            'message': 'Advance payment recorded successfully.',
+            'data': {
+                'billing_capabilities': build_billing_capabilities(
+                    admission, get_ipd_billing_mode(request.tenant_id)
+                ),
+            },
+            'payment_group_id': str(payment_group_id),
+            'receipt_numbers': [p.receipt_number for p in created_payments],
+        }, status=200)
+
+    @extend_schema(
+        summary="Apply recorded advance to a bill",
+        description=(
+            "Moves some (or, if 'amount' is omitted, all remaining) of the "
+            "admission's advance balance onto a specific bill's received_amount, "
+            "capped at that bill's own remaining balance."
+        ),
+        responses={
+            200: OpenApiResponse(description="Advance applied"),
+            400: OpenApiResponse(description="Invalid amount / exceeds balance"),
+            404: OpenApiResponse(description="Bill not found for this admission"),
+        },
+        tags=['IPD - Billing'],
+    )
+    @action(detail=True, methods=['post'])
+    def apply_advance(self, request, pk=None):
+        """POST /ipd/admissions/{id}/apply_advance/
+
+        body: { bill_id, amount? }  — omit amount to apply the full remaining
+        advance balance, capped at the bill's balance.
+        """
+        admission = self.get_object()
+        bill_id = request.data.get('bill_id')
+        if not bill_id:
+            return billing_error_response(
+                'VALIDATION_ERROR', 'bill_id is required.', status=400,
+                field_errors={'bill_id': ['This field is required.']},
+            )
+
+        bill = IPDBilling.objects.filter(tenant_id=request.tenant_id, pk=bill_id).first()
+        if bill is None:
+            return billing_error_response('BILL_NOT_FOUND', 'Bill not found for this tenant.', status=404)
+
+        try:
+            bill = apply_advance_to_bill(admission, bill, request.data.get('amount'))
+        except AdvanceApplyError as exc:
+            return billing_error_response(exc.code, exc.message, status=exc.status)
+
+        admission.refresh_from_db()
+        log.info(
+            "ipd_advance_applied",
+            tenant_id=str(request.tenant_id),
+            admission_id=admission.id,
+            bill_id=bill.id,
+        )
+        bill_serializer = IPDBillingSerializer(bill, context=self.get_serializer_context())
+        return Response({
+            'success': True,
+            'message': 'Advance applied to bill successfully.',
+            'data': {
+                'bill': bill_serializer.data,
+                'billing_capabilities': build_billing_capabilities(
+                    admission, get_ipd_billing_mode(request.tenant_id)
+                ),
+            },
+        }, status=200)
+
+    @extend_schema(
+        summary="Consolidated IPD admission billing statement",
+        description=(
+            "Aggregates every non-mediclaim IPDBilling row for this admission "
+            "into one consolidated printable statement (grand total, total "
+            "received, advance applied, net balance, per-bill breakdown). "
+            "Returns application/pdf by default; pass ?format=html for a raw "
+            "HTML preview."
+        ),
+        parameters=[
+            OpenApiParameter("letterhead", bool, OpenApiParameter.QUERY, required=False),
+            OpenApiParameter("language", str, OpenApiParameter.QUERY, required=False),
+            OpenApiParameter("format", str, OpenApiParameter.QUERY, required=False, description="'pdf' (default) or 'html'"),
+        ],
+        responses={200: OpenApiResponse(description="PDF or HTML statement")},
+        tags=['IPD - Billing'],
+    )
+    @action(detail=True, methods=['get'])
+    def statement(self, request, pk=None):
+        """GET /ipd/admissions/{id}/statement/"""
+        from apps.printing.rendering import (
+            FORM_IPD_ADMISSION_STATEMENT,
+            PrintFormCodeError,
+            PrintNotFoundError,
+            render_pdf_from_html,
+            render_print_html,
+        )
+
+        admission = self.get_object()
+        letterhead_raw = request.query_params.get('letterhead', 'true')
+        letterhead = str(letterhead_raw).strip().lower() not in ('false', '0', 'no')
+        language = (request.query_params.get('language') or 'en').strip().lower()
+        response_format = (request.query_params.get('format') or 'pdf').strip().lower()
+
+        try:
+            html = render_print_html(
+                FORM_IPD_ADMISSION_STATEMENT, request.tenant_id, admission.id, letterhead, language
+            )
+            if response_format == 'html':
+                return HttpResponse(html, content_type='text/html')
+            pdf_bytes = render_pdf_from_html(html)
+        except PrintFormCodeError as exc:
+            return billing_error_response('VALIDATION_ERROR', str(exc), status=400)
+        except PrintNotFoundError as exc:
+            return billing_error_response('NOT_FOUND', str(exc), status=404)
+
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'inline; filename="ipd_admission_statement_{admission.id}.pdf"'
+        return response
+
 
 class BedTransferViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """ViewSet for Bed Transfer management."""
@@ -916,6 +1132,15 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
         # Check permission for the specific admission object
         self.check_object_permissions(request, admission)
+
+        mode = get_ipd_billing_mode(request.tenant_id)
+        if mode == 'single_accumulated' and has_active_non_mediclaim_bill(request.tenant_id, admission.id):
+            return billing_error_response(
+                'IPD_BILL_ALREADY_EXISTS',
+                'This admission already has a bill under single-accumulated billing mode. '
+                'Add items to the existing bill instead of creating a new one.',
+                status=409,
+            )
 
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -1072,9 +1297,14 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         payment_group_id = uuid.uuid4()
         created_payments = []
         with transaction.atomic():
-            billing.received_amount += amount
-            billing.payment_mode = bill_mode
-            billing.save()
+            billing.record_payment(
+                amount,
+                mode=bill_mode,
+                details={
+                    'entries': [{'mode': m, 'amount': str(a)} for m, a in entries],
+                    'notes': notes,
+                },
+            )
 
             for entry_mode, entry_amount in entries:
                 created_payments.append(BillPayment.objects.create(
@@ -1350,10 +1580,12 @@ class IPDBillItemViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     """ViewSet for IPD Bill Item management (line items within an IPD bill).
 
     Supports create, retrieve, list, update/partial_update (editable price,
-    quantity, item_name, notes), and delete. Editing or deleting an item on
-    a bill whose payment_status == 'paid' is blocked with a 422 business-rule
-    error (BILL_LOCKED) — mirrors the pre-existing frontend behavior that
-    already disables delete on paid bills, now enforced server-side too.
+    quantity, item_name, notes), and delete. Editing or deleting an item that
+    existed before its bill's *last* transition into payment_status=='paid'
+    is blocked with a 422 business-rule error (BILL_LOCKED) — items added
+    AFTER that transition stay editable (see _item_is_locked()). Creating a
+    new item is never blocked by this rule: a brand-new item, by definition,
+    did not exist before any past transition.
     """
 
     queryset = IPDBillItem.objects.select_related('bill')
@@ -1366,8 +1598,21 @@ class IPDBillItemViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     ordering_fields = ['created_at', 'total_price']
     ordering = ['-created_at']
 
-    def _bill_is_locked(self, bill):
-        return bill.payment_status == 'paid'
+    def _item_is_locked(self, bill, item):
+        """An item is locked once its bill is fully paid AND the item
+        existed before the bill's most recent unpaid/partial -> paid
+        transition (IPDBilling.paid_transition_at). This is what lets a
+        single_accumulated bill reach 'paid' mid-stay and still accept new
+        charges afterwards — a plain "bill.payment_status == 'paid' blocks
+        everything" rule would make that impossible, since a bill routinely
+        re-enters 'paid' every time it's topped up to match new charges. Only
+        items stamped as existing at (or before) that specific transition
+        moment are locked; items created after it — even on a bill that is
+        currently 'paid' — are never locked by this check.
+        """
+        if bill.payment_status != 'paid' or not bill.paid_transition_at:
+            return False
+        return item.created_at <= bill.paid_transition_at
 
     def perform_create(self, serializer):
         """Set tenant_id and compute total_price before the first save.
@@ -1400,22 +1645,17 @@ class IPDBillItemViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             "('procedure', 'package', 'service', 'investigation') and "
             "catalog_id to snapshot item_name/source/system_calculated_price "
             "from the tenant-scoped catalog row; unit_price may still be "
-            "supplied to override the snapshot immediately. Blocked with "
-            "422 BILL_LOCKED if the target bill is already fully paid."
+            "supplied to override the snapshot immediately. Never blocked by "
+            "the paid-lock — new items always stay editable even once the "
+            "bill is fully paid (see IPDBillItemViewSet's docstring)."
         ),
         responses={201: IPDBillItemSerializer},
         tags=['IPD - Billing'],
     )
     def create(self, request, *args, **kwargs):
-        bill_id = request.data.get('bill')
-        if bill_id:
-            bill = IPDBilling.objects.filter(tenant_id=request.tenant_id, pk=bill_id).first()
-            if bill is not None and self._bill_is_locked(bill):
-                return error_response(
-                    code=error_codes.BILL_LOCKED,
-                    message="This bill is fully paid and cannot be edited.",
-                    status=422,
-                )
+        # No lock check here: a brand-new item is, by definition, created
+        # after any past paid transition, so it is never locked — see
+        # _item_is_locked()'s docstring.
         return super().create(request, *args, **kwargs)
 
     @extend_schema(
@@ -1425,18 +1665,18 @@ class IPDBillItemViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             "total_price and is_price_overridden are recomputed automatically, "
             "and the parent IPDBilling's derived totals (total_amount, "
             "payable_amount, balance_amount, payment_status) are recalculated "
-            "and saved. Blocked with 422 BILL_LOCKED if the parent bill is "
-            "already fully paid."
+            "and saved. Blocked with 422 BILL_LOCKED if this item existed "
+            "before the bill's last transition into fully-paid."
         ),
         responses={200: IPDBillItemSerializer},
         tags=['IPD - Billing'],
     )
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
-        if self._bill_is_locked(instance.bill):
+        if self._item_is_locked(instance.bill, instance):
             return error_response(
                 code=error_codes.BILL_LOCKED,
-                message="This bill is fully paid and cannot be edited.",
+                message="This item was billed before the bill's last paid transition and cannot be edited.",
                 status=422,
             )
         return super().update(request, *args, **kwargs)
@@ -1452,26 +1692,29 @@ class IPDBillItemViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
     )
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
-        if self._bill_is_locked(instance.bill):
+        if self._item_is_locked(instance.bill, instance):
             return error_response(
                 code=error_codes.BILL_LOCKED,
-                message="This bill is fully paid and cannot be edited.",
+                message="This item was billed before the bill's last paid transition and cannot be edited.",
                 status=422,
             )
         return super().partial_update(request, *args, **kwargs)
 
     @extend_schema(
         summary="Delete IPD bill item",
-        description="Delete a bill item. Blocked with 422 BILL_LOCKED if the parent bill is already fully paid.",
+        description=(
+            "Delete a bill item. Blocked with 422 BILL_LOCKED if this item "
+            "existed before the bill's last transition into fully-paid."
+        ),
         responses={204: None},
         tags=['IPD - Billing'],
     )
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
-        if self._bill_is_locked(instance.bill):
+        if self._item_is_locked(instance.bill, instance):
             return error_response(
                 code=error_codes.BILL_LOCKED,
-                message="This bill is fully paid and cannot be edited.",
+                message="This item was billed before the bill's last paid transition and cannot be edited.",
                 status=422,
             )
         return super().destroy(request, *args, **kwargs)
@@ -1485,7 +1728,7 @@ class IPDBillItemViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         instance.bill._calculate_derived_totals()
         instance.bill.save(update_fields=[
             'total_amount', 'discount_amount', 'payable_amount',
-            'balance_amount', 'payment_status',
+            'balance_amount', 'payment_status', 'paid_transition_at',
         ])
         log.info(
             "ipd_bill_item_updated",
@@ -1501,7 +1744,7 @@ class IPDBillItemViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         bill._calculate_derived_totals()
         bill.save(update_fields=[
             'total_amount', 'discount_amount', 'payable_amount',
-            'balance_amount', 'payment_status',
+            'balance_amount', 'payment_status', 'paid_transition_at',
         ])
         log.info(
             "ipd_bill_item_deleted",
@@ -1693,7 +1936,7 @@ class IPDBillTemplateViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
             bill._calculate_derived_totals()
             bill.save(update_fields=[
                 'total_amount', 'discount_amount', 'payable_amount',
-                'balance_amount', 'payment_status',
+                'balance_amount', 'payment_status', 'paid_transition_at',
             ])
 
         log.info(
