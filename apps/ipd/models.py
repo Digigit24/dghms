@@ -378,7 +378,11 @@ class Admission(models.Model):
     )
     total_received = models.DecimalField(
         max_digits=12, decimal_places=2, default=Decimal('0.00'),
-        help_text="Sum of received_amount across non-mediclaim bills, plus advance_applied.",
+        help_text=(
+            "Sum of received_amount across non-mediclaim bills. Already includes any "
+            "applied-advance money (apply_advance writes it directly onto a bill's "
+            "received_amount), so this is NOT bills_received + advance_applied."
+        ),
     )
     balance_due = models.DecimalField(
         max_digits=12, decimal_places=2, default=Decimal('0.00'),
@@ -587,7 +591,15 @@ class Admission(models.Model):
         total_advance_paid = advance_aggregates['total_advance_paid'] or Decimal('0.00')
         advance_applied = advance_aggregates['advance_applied'] or Decimal('0.00')
         advance_balance = total_advance_paid - advance_applied
-        total_received = bills_received + advance_applied
+        # total_received is NOT bills_received + advance_applied: apply_advance()
+        # (see apps.ipd.services.billing) moves advance money onto a bill by
+        # directly incrementing that bill's received_amount, so bills_received
+        # already includes every applied-advance dollar. Adding advance_applied
+        # again here would double-count it. advance_applied is tracked
+        # separately only as a memo of how much of the deposited advance has
+        # been consumed (it also drives advance_balance above); it is not a
+        # second pool of "received" money on top of bills_received.
+        total_received = bills_received
         balance_due = total_charges - total_received
 
         Admission.objects.filter(pk=self.pk).update(

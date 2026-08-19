@@ -126,16 +126,12 @@
                 <td class="totals-value">{{ grand_total }}</td>
             </tr>
             <tr>
-                <td class="totals-label">Received (direct payments)</td>
-                <td class="totals-value">{{ total_received_from_bills }}</td>
-            </tr>
-            <tr>
-                <td class="totals-label">Advance Applied</td>
-                <td class="totals-value">{{ advance_applied }}</td>
-            </tr>
-            <tr>
-                <td class="totals-label">Total Received</td>
+                <td class="totals-label">Total Received (incl. advance applied)</td>
                 <td class="totals-value">{{ total_received }}</td>
+            </tr>
+            <tr>
+                <td class="totals-label">— of which Advance Applied</td>
+                <td class="totals-value">{{ advance_applied }}</td>
             </tr>
             <tr>
                 <td class="totals-label">Total Advance Paid</td>

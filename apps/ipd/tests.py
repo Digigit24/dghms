@@ -374,12 +374,13 @@ class AdvancePaymentTests(IPDBillingModesAdvanceTestBase):
 
         self.admission.refresh_from_db()
         self.assertEqual(self.admission.total_charges, Decimal("600.00"))
-        # Per the frozen contract formula: total_received = Σ bill received_amount
-        # + advance_applied (the advance portion is reflected in both places
-        # by design — apply_advance moves it onto the bill's received_amount
-        # AND tracks it separately as advance_applied).
-        expected_total_received = Decimal("600.00") + Decimal("600.00")
-        self.assertEqual(self.admission.total_received, expected_total_received)
+        # total_received = Σ bill.received_amount only — apply_advance already
+        # wrote the applied advance onto the bill's own received_amount, so
+        # adding advance_applied on top here would double-count it. The bill
+        # is fully paid (600.00 payable, 600.00 received via advance), so the
+        # admission is fully settled too.
+        self.assertEqual(self.admission.total_received, Decimal("600.00"))
+        self.assertEqual(self.admission.balance_due, Decimal("0.00"))
         self.assertEqual(
             self.admission.balance_due, self.admission.total_charges - self.admission.total_received
         )
@@ -494,6 +495,12 @@ class RollupSyncTests(IPDBillingModesAdvanceTestBase):
         bill2_obj = IPDBilling.objects.get(pk=bill2)
         self.assertEqual(bill2_obj.received_amount, Decimal("500.00"))
         self.assertEqual(bill2_obj.payment_status, "paid")
+
+        # total_received = Σ bill.received_amount (1000 direct on bill1 +
+        # 500 advance-applied on bill2) — NOT + advance_applied again, since
+        # that 500 is already inside bill2.received_amount above.
+        self.assertEqual(self.admission.total_received, Decimal("1500.00"))
+        self.assertEqual(self.admission.balance_due, Decimal("0.00"))
 
         # Deleting a bill item recomputes total_charges/total_received too.
         item_id = self.add_item(bill1, "200.00")
@@ -655,3 +662,83 @@ class IPDBillingSequenceConcurrencyTests(TransactionTestCase):
 
         self.assertEqual(bill_a.bill_number, bill_b.bill_number)
         self.assertNotEqual(bill_a.tenant_id, bill_b.tenant_id)
+
+
+class ApplyAdvanceLostUpdateTests(TransactionTestCase):
+    """Regression test: apply_advance_to_bill() now select_for_update()s the
+    IPDBilling row before reading/writing received_amount, so two concurrent
+    applications against the SAME bill can no longer lost-update each other
+    (both threads reading the pre-update received_amount and each writing
+    their own delta on top of it, with the loser's contribution silently
+    discarded).
+    """
+
+    def setUp(self):
+        self.tenant_id = uuid.uuid4()
+        self.patient = PatientProfile.objects.create(
+            tenant_id=self.tenant_id, first_name="Race", last_name="Patient",
+            gender="male", mobile_primary="9000000099",
+        )
+        self.ward = Ward.objects.create(
+            tenant_id=self.tenant_id, name="Ward", type="general", floor="1"
+        )
+        self.admission = Admission.objects.create(
+            tenant_id=self.tenant_id, admission_id="IPD/RACE/001", patient=self.patient,
+            doctor_id=uuid.uuid4(), ward=self.ward, status="admitted", reason="test",
+        )
+        self.bill = IPDBilling.objects.create(tenant_id=self.tenant_id, admission=self.admission)
+        IPDBillItem.objects.create(
+            tenant_id=self.tenant_id, bill=self.bill, item_name="Big charge", source="Other",
+            quantity=1, system_calculated_price=Decimal("2000.00"), unit_price=Decimal("2000.00"),
+            total_price=Decimal("2000.00"),
+        )
+        # Two separate deposits so each concurrent apply_advance call has its
+        # own funds to draw from — isolates the bill-row race this test
+        # targets from the (already-correct) advance-row FIFO consumption.
+        BillPayment.objects.create(
+            tenant_id=self.tenant_id, bill_type="advance", admission=self.admission,
+            amount=Decimal("500.00"),
+        )
+        BillPayment.objects.create(
+            tenant_id=self.tenant_id, bill_type="advance", admission=self.admission,
+            amount=Decimal("500.00"),
+        )
+
+    def test_concurrent_apply_advance_calls_do_not_lose_updates(self):
+        from apps.ipd.services.billing import apply_advance_to_bill
+
+        errors = []
+        lock = threading.Lock()
+
+        def worker():
+            try:
+                # apply_advance_to_bill() opens its own transaction.atomic()
+                # block internally (that's what select_for_update()s the
+                # bill row) — no outer atomic needed here.
+                admission = Admission.objects.get(pk=self.admission.pk)
+                bill = IPDBilling.objects.get(pk=self.bill.pk)
+                apply_advance_to_bill(admission, bill, Decimal("500.00"))
+            except Exception as exc:  # pragma: no cover - failure path
+                with lock:
+                    errors.append(exc)
+            finally:
+                connections.close_all()
+
+        threads = [threading.Thread(target=worker) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        self.assertEqual(errors, [])
+        bill = IPDBilling.objects.get(pk=self.bill.pk)
+        # Without the select_for_update() fix, one thread's +500 delta could
+        # be silently overwritten by the other's stale read, leaving 500.00
+        # instead of the correct sum of both applications.
+        self.assertEqual(bill.received_amount, Decimal("1000.00"))
+        self.assertEqual(bill.payment_status, "partial")
+
+        admission = Admission.objects.get(pk=self.admission.pk)
+        self.assertEqual(admission.advance_applied, Decimal("1000.00"))
+        self.assertEqual(admission.advance_balance, Decimal("0.00"))
+        self.assertEqual(admission.total_received, Decimal("1000.00"))

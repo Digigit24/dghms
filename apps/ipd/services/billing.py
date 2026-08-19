@@ -127,6 +127,7 @@ def apply_advance_to_bill(admission, bill, requested_amount=None):
     construction. Returns the updated, refreshed bill.
     """
     from apps.payments.models import BillPayment
+    from apps.ipd.models import IPDBilling
 
     if bill.admission_id != admission.id:
         raise AdvanceApplyError('BILL_NOT_FOUND', 'Bill does not belong to this admission.', status=404)
@@ -135,40 +136,53 @@ def apply_advance_to_bill(admission, bill, requested_amount=None):
             'INVALID_APPLY_AMOUNT', 'Advance cannot be applied to a Mediclaim bill.', status=400
         )
 
-    admission.recompute_billing_rollup()
-    advance_balance = admission.advance_balance
-    bill_remaining = bill.payable_amount - bill.received_amount
+    with transaction.atomic():
+        # Lock the bill row FIRST, before reading/validating against its
+        # received_amount. Without this, two concurrent apply_advance calls
+        # (or apply_advance racing IPDBillingViewSet.add_payment) on the
+        # SAME bill can lost-update each other: both read the pre-update
+        # received_amount, both compute their own delta from that stale
+        # value, and whichever transaction commits last silently overwrites
+        # the other's contribution instead of the two amounts summing.
+        # select_for_update() here serializes against ANY concurrent writer
+        # of this row (Postgres row locks apply to plain UPDATEs too, not
+        # just other SELECT ... FOR UPDATE readers), matching the pattern
+        # already used below for the advance BillPayment rows.
+        bill = IPDBilling.objects.select_for_update().get(pk=bill.pk)
 
-    if requested_amount in (None, ''):
-        amount = min(advance_balance, bill_remaining)
-    else:
-        try:
-            amount = Decimal(str(requested_amount))
-        except Exception:
-            raise AdvanceApplyError('INVALID_APPLY_AMOUNT', "'amount' must be a number.", status=400)
+        admission.recompute_billing_rollup()
+        advance_balance = admission.advance_balance
+        bill_remaining = bill.payable_amount - bill.received_amount
+
+        if requested_amount in (None, ''):
+            amount = min(advance_balance, bill_remaining)
+        else:
+            try:
+                amount = Decimal(str(requested_amount))
+            except Exception:
+                raise AdvanceApplyError('INVALID_APPLY_AMOUNT', "'amount' must be a number.", status=400)
+            if amount <= Decimal('0.00'):
+                raise AdvanceApplyError(
+                    'INVALID_APPLY_AMOUNT', "'amount' must be greater than zero.", status=400
+                )
+            if amount > advance_balance:
+                raise AdvanceApplyError(
+                    'ADVANCE_EXCEEDS_BALANCE',
+                    f'Requested amount exceeds the available advance balance ({advance_balance}).',
+                    status=400,
+                )
+            if amount > bill_remaining:
+                raise AdvanceApplyError(
+                    'INVALID_APPLY_AMOUNT',
+                    f"Requested amount exceeds the bill's remaining balance ({bill_remaining}).",
+                    status=400,
+                )
+
         if amount <= Decimal('0.00'):
             raise AdvanceApplyError(
-                'INVALID_APPLY_AMOUNT', "'amount' must be greater than zero.", status=400
-            )
-        if amount > advance_balance:
-            raise AdvanceApplyError(
-                'ADVANCE_EXCEEDS_BALANCE',
-                f'Requested amount exceeds the available advance balance ({advance_balance}).',
-                status=400,
-            )
-        if amount > bill_remaining:
-            raise AdvanceApplyError(
-                'INVALID_APPLY_AMOUNT',
-                f"Requested amount exceeds the bill's remaining balance ({bill_remaining}).",
-                status=400,
+                'INVALID_APPLY_AMOUNT', 'No advance balance available to apply.', status=400
             )
 
-    if amount <= Decimal('0.00'):
-        raise AdvanceApplyError(
-            'INVALID_APPLY_AMOUNT', 'No advance balance available to apply.', status=400
-        )
-
-    with transaction.atomic():
         remaining_to_apply = amount
         advance_rows = (
             BillPayment.objects.select_for_update()

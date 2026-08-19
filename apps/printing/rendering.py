@@ -529,9 +529,13 @@ def _admission_statement_context(tenant_id: uuid.UUID, record_id: int) -> dict[s
     )
 
     grand_total = sum((bill.payable_amount for bill in bills), Decimal("0.00"))
-    total_received_from_bills = sum((bill.received_amount for bill in bills), Decimal("0.00"))
+    # bill.received_amount already includes any advance applied to that bill
+    # (apply_advance writes it there directly) — total_received must NOT add
+    # advance_applied again on top, or applied-advance money gets counted
+    # twice. advance_applied is surfaced separately below purely as a memo
+    # line item (mirrors Admission.recompute_billing_rollup()'s formula).
+    total_received = sum((bill.received_amount for bill in bills), Decimal("0.00"))
     advance_applied = admission.advance_applied or Decimal("0.00")
-    total_received = total_received_from_bills + advance_applied
     net_balance = grand_total - total_received
 
     return {
@@ -550,7 +554,6 @@ def _admission_statement_context(tenant_id: uuid.UUID, record_id: int) -> dict[s
         "ward": admission.ward,
         "bed": admission.bed,
         "grand_total": grand_total,
-        "total_received_from_bills": total_received_from_bills,
         "advance_applied": advance_applied,
         "total_received": total_received,
         "net_balance": net_balance,
