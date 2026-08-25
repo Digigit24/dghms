@@ -61,7 +61,7 @@
     <div class="field-grid-2col">
         <div class="field-row"><span class="field-label">Contact:</span> <span class="field-value">{{ contact }}</span></div>
         {% if address %}
-        <div class="field-row"><span class="field-label">Address:</span> <span class="field-value">{{ address }}</span></div>
+        <div class="field-row field-row-full"><span class="field-label">Address:</span> <span class="field-value">{{ address }}</span></div>
         {% endif %}
         <div class="field-row"><span class="field-label">Ward / Bed:</span> <span class="field-value">{{ ward.name }}{% if bed %} / {{ bed.bed_number }}{% endif %}</span></div>
         {% if doctor_name %}

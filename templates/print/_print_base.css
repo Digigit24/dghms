@@ -126,9 +126,24 @@
 
     .field-value {
         flex: 1;
+        /* Flex items default to min-width:auto, which keeps them from
+           shrinking below their content's intrinsic (unwrapped) width — a
+           long value (e.g. a full address) then overflows past the row/
+           column boundary and visually overlaps whatever sits next to it
+           instead of wrapping. min-width:0 lets it shrink and wrap properly. */
+        min-width: 0;
+        overflow-wrap: break-word;
+        word-break: break-word;
         border-bottom: 1px dotted #9ca3af;
         padding-bottom: 1px;
         min-height: 1em;
+    }
+
+    /* Opt-in modifier for a field-row that should take the full row width
+       instead of the 2-column grid's 50% — use for long-text values like an
+       address, so it wraps within a full line rather than a cramped half. */
+    .field-grid-2col > .field-row.field-row-full {
+        width: 100%;
     }
 
     .field-grid-2col {
