@@ -140,11 +140,17 @@ class AdmissionSerializer(TenantMixin, serializers.ModelSerializer):
         ]
 
     def get_doctor_name(self, obj):
-        """Return doctor full name from the doctor FK if it exists."""
-        try:
-            return obj.doctor.full_name if obj.doctor else None
-        except Exception:
+        """Resolve the incharge/attending doctor's name.
+
+        Admission has no `doctor` FK — doctor_id is a raw SuperAdmin User ID
+        (per CLAUDE.md's "no local User model" rule). Resolve tenant-scoped
+        through DoctorProfile.user_id.
+        """
+        if not obj.doctor_id:
             return None
+        from apps.doctors.models import DoctorProfile
+        doctor = DoctorProfile.objects.filter(tenant_id=obj.tenant_id, user_id=obj.doctor_id).first()
+        return doctor.full_name if doctor else None
 
     def validate_discharge_date(self, value):
         if value is not None:

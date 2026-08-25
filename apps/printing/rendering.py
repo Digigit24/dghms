@@ -469,6 +469,16 @@ def _ipd_bill_context(tenant_id: uuid.UUID, record_id: int) -> dict[str, Any]:
     patient = admission.patient
     items = list(bill.items.all().order_by('source', 'id'))
 
+    # Admission has no `doctor` FK — doctor_id is a raw SuperAdmin User ID
+    # (per CLAUDE.md's "no local User model" rule). Resolve the display name
+    # through DoctorProfile.user_id, tenant-scoped.
+    doctor = DoctorProfile.objects.filter(tenant_id=tenant_id, user_id=admission.doctor_id).first()
+
+    # country defaults to 'India' and is never blank, so patient.full_address
+    # is never empty — only show the address block when the patient actually
+    # filled in a street/city/state/pincode, not just the default country.
+    has_address = any([patient.address_line1, patient.address_line2, patient.city, patient.state, patient.pincode])
+
     return {
         "bill": bill,
         "items": items,
@@ -480,7 +490,8 @@ def _ipd_bill_context(tenant_id: uuid.UUID, record_id: int) -> dict[str, Any]:
         "age": patient.age,
         "gender": patient.get_gender_display() if patient.gender else "",
         "contact": patient.mobile_primary,
-        "address": patient.full_address,
+        "address": patient.full_address if has_address else "",
+        "doctor_name": doctor.full_name if doctor else "",
         "admission_date": admission.admission_date,
         "discharge_date": admission.discharge_date,
         "ward": admission.ward,
@@ -521,6 +532,8 @@ def _admission_statement_context(tenant_id: uuid.UUID, record_id: int) -> dict[s
     """
     admission = _resolve_admission(tenant_id, record_id)
     patient = admission.patient
+    doctor = DoctorProfile.objects.filter(tenant_id=tenant_id, user_id=admission.doctor_id).first()
+    has_address = any([patient.address_line1, patient.address_line2, patient.city, patient.state, patient.pincode])
     bills = list(
         IPDBilling.objects.filter(tenant_id=tenant_id, admission=admission)
         .exclude(bill_type='mediclaim')
@@ -548,7 +561,8 @@ def _admission_statement_context(tenant_id: uuid.UUID, record_id: int) -> dict[s
         "age": patient.age,
         "gender": patient.get_gender_display() if patient.gender else "",
         "contact": patient.mobile_primary,
-        "address": patient.full_address,
+        "address": patient.full_address if has_address else "",
+        "doctor_name": doctor.full_name if doctor else "",
         "admission_date": admission.admission_date,
         "discharge_date": admission.discharge_date,
         "ward": admission.ward,
