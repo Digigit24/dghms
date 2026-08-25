@@ -60,9 +60,6 @@
     <div class="section-title">Admission Details</div>
     <div class="field-grid-2col">
         <div class="field-row"><span class="field-label">Contact:</span> <span class="field-value">{{ contact }}</span></div>
-        {% if address %}
-        <div class="field-row field-row-full"><span class="field-label">Address:</span> <span class="field-value">{{ address }}</span></div>
-        {% endif %}
         <div class="field-row"><span class="field-label">Ward / Bed:</span> <span class="field-value">{{ ward.name }}{% if bed %} / {{ bed.bed_number }}{% endif %}</span></div>
         {% if doctor_name %}
         <div class="field-row"><span class="field-label">Incharge Doctor:</span> <span class="field-value">{{ doctor_name }}</span></div>
@@ -70,6 +67,9 @@
         <div class="field-row"><span class="field-label">Admission Date:</span> <span class="field-value">{{ admission_date|date:"d M Y, h:i A" }}</span></div>
         {% if discharge_date %}
         <div class="field-row"><span class="field-label">Discharge Date:</span> <span class="field-value">{{ discharge_date|date:"d M Y, h:i A" }}</span></div>
+        {% endif %}
+        {% if address %}
+        <div class="field-row field-row-full"><span class="field-label">Address:</span> <span class="field-value">{{ address }}</span></div>
         {% endif %}
     </div>
 
