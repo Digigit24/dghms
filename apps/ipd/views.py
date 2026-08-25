@@ -66,6 +66,21 @@ def _bust_ward_cache(tenant_id) -> None:
         )
 
 
+def _recalculate_bed_charges_for_admission(admission) -> None:
+    """Re-run bed-day charge calculation on every open bill for this admission.
+
+    Called whenever admission_date changes, so length-of-stay-based bed
+    charges reflect the corrected date instead of staying frozen at whatever
+    was computed when the bill was first created. Paid and mediclaim bills
+    are skipped (locked/lump-sum, not itemized by day). Uses the default
+    force=False so a bed item staff have manually corrected
+    (is_quantity_overridden=True) is left alone.
+    """
+    open_bills = admission.ipd_bills.exclude(payment_status='paid').exclude(bill_type='mediclaim')
+    for billing in open_bills:
+        billing.add_bed_charges()
+
+
 def _own_doctor_profile(request):
     """Resolve the caller's tenant-scoped DoctorProfile, if one exists."""
     from apps.doctors.models import DoctorProfile
@@ -356,7 +371,10 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         _bust_ward_cache(self.request.tenant_id)  # bed occupancy embedded in wards list
 
     def perform_update(self, serializer):
+        old_admission_date = serializer.instance.admission_date
         super().perform_update(serializer)
+        if serializer.instance.admission_date != old_admission_date:
+            _recalculate_bed_charges_for_admission(serializer.instance)
         CeliyoCache().delete_pattern(f"ipd:active:{self.request.tenant_id}")
         _bust_ward_cache(self.request.tenant_id)
 
@@ -486,6 +504,8 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                         field="ward",
                     )
 
+        old_admission_date = admission.admission_date
+
         with transaction.atomic():
             p_dirty = False
             for f in patient_fields:
@@ -537,6 +557,8 @@ class AdmissionViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
         admission.refresh_from_db()
         patient.refresh_from_db()
+        if admission.admission_date != old_admission_date:
+            _recalculate_bed_charges_for_admission(admission)
         CeliyoCache().delete_pattern(f"ipd:active:{request.tenant_id}")
         _bust_ward_cache(request.tenant_id)  # bed may have been allotted above
         return action_response(
@@ -1245,9 +1267,14 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def add_bed_charges(self, request, pk=None):
-        """Calculate and add bed charges to the bill."""
+        """Calculate and add bed charges to the bill.
+
+        An explicit user action (the "Refresh" button) — always recomputes
+        from the system, even if the bed item was previously manually
+        corrected (force=True clears is_quantity_overridden too).
+        """
         billing = self.get_object()
-        billing.add_bed_charges()
+        billing.add_bed_charges(force=True)
 
         serializer = self.get_serializer(billing)
         return Response(serializer.data)
@@ -1413,7 +1440,7 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
         billing = self.get_object()
         admission = billing.admission
 
-        if admission.tenant_id != request.tenant_id:
+        if str(admission.tenant_id) != str(request.tenant_id):
             raise PermissionDenied("Access denied")
 
         created_count = 0
@@ -1560,8 +1587,10 @@ class IPDBillingViewSet(TenantViewSetMixin, viewsets.ModelViewSet):
                 order.save(update_fields=['bill_item_content_type', 'bill_item_object_id'])
                 created_count += 1
 
-            # Bed charges are synced last, as promised in the docstring.
-            billing.add_bed_charges()
+            # Bed charges are synced last, as promised in the docstring. This is
+            # an explicit user-triggered sync, so force a recompute even if the
+            # bed item was previously manually corrected.
+            billing.add_bed_charges(force=True)
 
         billing.refresh_from_db()
         log.info(

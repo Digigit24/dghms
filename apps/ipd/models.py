@@ -1169,7 +1169,7 @@ class IPDBilling(models.Model):
             'this_bill_days': this_bill_days,
         }
 
-    def add_bed_charges(self):
+    def add_bed_charges(self, force=False):
         """
         Calculate and add bed charges based on length of stay.
 
@@ -1181,11 +1181,27 @@ class IPDBilling(models.Model):
         - Minimum 1 day total charge across all bills
         - Links to Admission via origin_order GFK
         - Sets system_calculated_price for manual override tracking
+
+        If the bill's existing bed-charge item has been manually corrected by
+        staff (is_quantity_overridden=True — e.g. hand-editing the number of
+        days), this recompute is skipped unless force=True, so an unrelated
+        trigger (like fixing the admission date) never silently clobbers a
+        deliberate manual correction. Explicit user actions (the "Refresh"
+        button, sync_clinical_charges) pass force=True to intentionally
+        recompute from the system.
         """
         if not self.admission.bed:
             return
 
         admission_ct = ContentType.objects.get_for_model(self.admission)
+
+        if not force:
+            existing = IPDBillItem.objects.filter(
+                bill=self, source='Bed',
+                origin_content_type=admission_ct, origin_object_id=self.admission.pk,
+            ).first()
+            if existing and existing.is_quantity_overridden:
+                return existing
 
         info = self.get_bed_day_info()
         total_los = info['total_los']
@@ -1221,6 +1237,7 @@ class IPDBilling(models.Model):
                 'system_calculated_price': bed_charge_per_day,
                 'total_price': bed_charge_per_day * days_to_bill,
                 'notes': notes,
+                'is_quantity_overridden': False,
             }
         )
         # No need to call save() — signal auto-recalculates totals
@@ -1297,6 +1314,15 @@ class IPDBillItem(models.Model):
     is_price_overridden = models.BooleanField(
         default=False,
         help_text="Flag indicating if unit_price was manually changed from system_calculated_price"
+    )
+    is_quantity_overridden = models.BooleanField(
+        default=False,
+        help_text=(
+            "Flag indicating quantity was manually corrected by staff (e.g. bed "
+            "days). System recalculation (IPDBilling.add_bed_charges) skips "
+            "items with this set, unless explicitly forced, so a manual "
+            "correction is never silently overwritten by an unrelated edit."
+        )
     )
 
     # Origin GFK — what this line item was generated FROM.

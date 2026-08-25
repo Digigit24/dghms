@@ -75,7 +75,10 @@ class BedSerializer(TenantMixin, serializers.ModelSerializer):
     def validate_ward(self, ward):
         request = self.context.get('request')
         tenant_id = getattr(request, 'tenant_id', None)
-        if tenant_id and ward.tenant_id != tenant_id:
+        # request.tenant_id comes from the JWT payload as a plain string, while
+        # ward.tenant_id is a real uuid.UUID from the DB — compare as strings so
+        # this doesn't always reject (UUID != str is always True in Python).
+        if tenant_id and str(ward.tenant_id) != str(tenant_id):
             raise serializers.ValidationError('Ward does not belong to the current tenant')
         return ward
 
@@ -266,14 +269,15 @@ class IPDBillItemSerializer(TenantMixin, serializers.ModelSerializer):
         fields = [
             'id', 'tenant_id', 'bill', 'item_name', 'source',
             'quantity', 'system_calculated_price', 'unit_price', 'actual_price',
-            'total_price', 'is_price_overridden', 'notes',
+            'total_price', 'is_price_overridden', 'is_quantity_overridden', 'notes',
             'origin_content_type', 'origin_object_id',
             'catalog_type', 'catalog_id',
             'created_at', 'updated_at'
         ]
         read_only_fields = [
             'id', 'tenant_id', 'total_price',
-            'is_price_overridden', 'origin_content_type', 'origin_object_id',
+            'is_price_overridden', 'is_quantity_overridden',
+            'origin_content_type', 'origin_object_id',
             'created_at', 'updated_at'
         ]
         extra_kwargs = {
@@ -361,6 +365,18 @@ class IPDBillItemSerializer(TenantMixin, serializers.ModelSerializer):
 
         # Detect if price was manually overridden
         attrs['is_price_overridden'] = (unit_price != system_price)
+
+        # Detect if quantity was manually corrected (only meaningful on
+        # update — a fresh row's initial quantity, e.g. from
+        # add_bed_charges(), isn't an "override"). Once set, it stays set
+        # until a system recompute (add_bed_charges(force=True)) resets it,
+        # so it doesn't accidentally clear if the item is saved again without
+        # a quantity change.
+        if self.instance is not None:
+            if 'quantity' in attrs and attrs['quantity'] != self.instance.quantity:
+                attrs['is_quantity_overridden'] = True
+            else:
+                attrs['is_quantity_overridden'] = self.instance.is_quantity_overridden
 
         return attrs
 
